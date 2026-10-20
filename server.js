@@ -1,3 +1,9 @@
+const express = require('express');
+const cors = require('cors');
+const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
+
 class Engine {
     constructor() {
         this.history = [];          // 'T' / 'X'
@@ -35,15 +41,17 @@ class Engine {
         this.models['model_antiBreak'] = this.model_antiBreak.bind(this);
         this.weights['model_antiBreak'] = 1.25;
         this.modelHits['model_antiBreak'] = { win: 0, loss: 0, ewma: 0.5 };
-        for (let i = 11; i <= 15; i++) {
+        for (let i = 11; i <= 18; i++) {
             if (this[`model${i}`]) {
                 this.models[`model${i}`] = this[`model${i}`].bind(this);
                 this.weights[`model${i}`] = 1.0;
                 this.modelHits[`model${i}`] = { win: 0, loss: 0, ewma: 0.5 };
             }
         }
-
-
+        // Pattern-8 lookup weight hơi cao vì bảng thực nghiệm
+        if (this.models['model16']) this.weights['model16'] = 1.35;
+        if (this.models['model17']) this.weights['model17'] = 1.15;
+        if (this.models['model18']) this.weights['model18'] = 1.2;
     }
 
     addResult(result, diceSum = null) {
@@ -474,6 +482,113 @@ class Engine {
         return predictions;
     }
 
+    // MODEL 16: Bảng pattern 8-ký tự (thuattoan8) — lookup chuỗi gần nhất
+    model16() {
+        if (this.history.length < 4) return null;
+        const table = Engine.PATTERN8 || {};
+        // thử từ dài → ngắn
+        for (let len = 8; len >= 4; len--) {
+            if (this.history.length < len) continue;
+            const key = this.history.slice(-len).join('');
+            if (table[key]) {
+                const pred = table[key];
+                return {
+                    prediction: pred,
+                    confidence: len >= 8 ? 0.78 : (len >= 6 ? 0.68 : 0.58),
+                    reason: `Pattern-${len} khớp bảng cầu (${key} → ${pred === 'T' ? 'TÀI' : 'XỈU'})`
+                };
+            }
+        }
+        return null;
+    }
+
+    // MODEL 17: RLE nhịp a-b (cầu bệt / 1-1 / 2-2 / 3-1 ...)
+    model17() {
+        if (this.history.length < 6) return null;
+        const rle = [];
+        let cur = this.history[0], cnt = 1;
+        for (let i = 1; i < this.history.length; i++) {
+            if (this.history[i] === cur) cnt++;
+            else { rle.push([cur, cnt]); cur = this.history[i]; cnt = 1; }
+        }
+        rle.push([cur, cnt]);
+        if (rle.length < 2) {
+            // đang bệt dài → xác suất gãy tăng theo độ dài
+            const len = rle[0][1];
+            if (len >= 4) {
+                const pred = rle[0][0] === 'T' ? 'X' : 'T';
+                return { prediction: pred, confidence: Math.min(0.82, 0.55 + len * 0.04), reason: `Cầu bệt ${len} → nghiêng gãy về ${pred === 'T' ? 'TÀI' : 'XỈU'}` };
+            }
+            return null;
+        }
+        const last = rle[rle.length - 1];
+        const prev = rle[rle.length - 2];
+        // 1-1 đang chạy
+        if (last[1] === 1 && prev[1] === 1) {
+            const pred = last[0] === 'T' ? 'X' : 'T';
+            return { prediction: pred, confidence: 0.66, reason: 'Nhịp 1-1 → đảo chiều' };
+        }
+        // 2-2
+        if (last[1] === 2 && prev[1] === 2) {
+            const pred = last[0] === 'T' ? 'X' : 'T';
+            return { prediction: pred, confidence: 0.7, reason: 'Nhịp 2-2 vừa khép → đảo' };
+        }
+        // đang trong nhịp a của a-b: nếu last count == prev count → sắp đảo
+        if (last[1] === prev[1] && last[1] >= 2) {
+            const pred = last[0] === 'T' ? 'X' : 'T';
+            return { prediction: pred, confidence: 0.68, reason: `Nhịp ${prev[1]}-${last[1]} cân → đảo` };
+        }
+        // bệt đang dài hơn nhịp trước → nghiêng gãy
+        if (last[1] >= prev[1] + 2 && last[1] >= 3) {
+            const pred = last[0] === 'T' ? 'X' : 'T';
+            return { prediction: pred, confidence: Math.min(0.8, 0.55 + last[1] * 0.05), reason: `Bệt ${last[1]} vượt nhịp trước → gãy` };
+        }
+        // tiếp tục nhịp hiện tại nếu còn ngắn
+        if (last[1] < prev[1]) {
+            return { prediction: last[0], confidence: 0.62, reason: `Tiếp nhịp ${last[1]}/${prev[1]}` };
+        }
+        return null;
+    }
+
+    // MODEL 18: Dynamic patterns (từ UltraDice — mất cân / chu kỳ / momentum break)
+    model18() {
+        const h = this.history;
+        if (h.length < 6) return null;
+        // 4T/6 cuối T → X
+        const last6 = h.slice(-6);
+        if (last6.filter(x => x === 'T').length >= 4 && last6[5] === 'T') {
+            return { prediction: 'X', confidence: 0.72, reason: '4+T/6 phiên, cuối T → hồi XỈU' };
+        }
+        if (last6.filter(x => x === 'X').length >= 4 && last6[5] === 'X') {
+            return { prediction: 'T', confidence: 0.72, reason: '4+X/6 phiên, cuối X → hồi TÀI' };
+        }
+        if (h.length >= 8) {
+            const last8 = h.slice(-8);
+            const t8 = last8.filter(x => x === 'T').length;
+            if (t8 >= 6 && last8[7] === 'T') return { prediction: 'X', confidence: 0.78, reason: '6+T/8, cuối T → X mạnh' };
+            if ((8 - t8) >= 6 && last8[7] === 'X') return { prediction: 'T', confidence: 0.78, reason: '6+X/8, cuối X → T mạnh' };
+        }
+        // 5 phiên đan xen
+        if (h.length >= 5) {
+            const last5 = h.slice(-5);
+            let alt = true;
+            for (let i = 1; i < 5; i++) if (last5[i] === last5[i - 1]) { alt = false; break; }
+            if (alt) {
+                const pred = last5[4] === 'T' ? 'X' : 'T';
+                return { prediction: pred, confidence: 0.68, reason: '5 phiên đan xen → đảo' };
+            }
+        }
+        // chu kỳ 7
+        if (h.length >= 14) {
+            const a = h.slice(-14, -7).join('');
+            const b = h.slice(-7).join('');
+            if (a === b) {
+                return { prediction: h[h.length - 7], confidence: 0.75, reason: 'Chu kỳ 7 lặp → theo chu kỳ' };
+            }
+        }
+        return null;
+    }
+
     // Ensemble: Log-odds pooling + trong so EWMA accuracy + shrink + cooling
     getEnsemblePrediction() {
         const allPreds = this.getAllPredictions();
@@ -542,12 +657,16 @@ class Engine {
             topReason: topReason
         };
     }
-}// ================= SERVER WRAPPER =================
-const express = require('express');
-const cors = require('cors');
-const crypto = require('crypto');
-const fs = require('fs');
-const path = require('path');
+}
+
+// Load pattern-8 lookup (thuattoan8)
+try {
+    const _p8 = path.join(__dirname, 'pattern8.json');
+    if (fs.existsSync(_p8)) Engine.PATTERN8 = JSON.parse(fs.readFileSync(_p8, 'utf8'));
+    else Engine.PATTERN8 = {};
+} catch { Engine.PATTERN8 = {}; }
+
+// ================= SERVER WRAPPER =================
 // Telegram bot implementation is embedded below; no separate telegram-bot.js needed.
 
 
@@ -585,15 +704,22 @@ function startTelegramBot(options) {
 ────────────────
 👋 Xin chào <b>${esc(name)}</b>
 
-📌 <b>Lệnh nhanh</b>
-/free — 🎯 Key miễn phí
+📌 <b>Key</b>
+/getkey — 🎯 Key free (nhiệm vụ 3 nhóm)
+/free — 🎯 Giống /getkey
 /buy — 💎 Mua key VIP
-/resetkey — 🔄 Reset thiết bị (tự động)
-/tiktok &lt;user|link&gt; — 📱 Info TikTok
-/fb &lt;user|link&gt; — 📘 Info Facebook
-/status — 🔑 Trạng thái yêu cầu
+/resetkey — 🔄 Reset thiết bị (auto)
+/status — ⏳ Yêu cầu đang chờ
 
-🔑 Key · tối đa <b>3 thiết bị</b>
+🔍 <b>Check info</b>
+/tiktok &lt;@user|link&gt; — 📱 TikTok
+/fb &lt;user|link&gt; — 📘 Facebook
+
+💡 <b>Khác</b>
+/tips — Mẹo dùng tool
+/note — Lưu ý quan trọng
+
+🔑 Key dạng <code>KYT-...</code> · 3 thiết bị
 💬 Hỗ trợ: @SunNetWin`);
   }
 
@@ -614,7 +740,10 @@ function startTelegramBot(options) {
 /reject &lt;id&gt;
 
 ⚙️ <b>Cấu hình</b>
-/settask &lt;nội dung&gt;
+/settask &lt;hướng dẫn nhiệm vụ&gt;
+/setpromo &lt;câu copy quảng cáo&gt;
+/settaskphotos &lt;số ảnh&gt;
+/settasktime &lt;giây&gt;
 /setbank &lt;NH&gt; &lt;STK&gt; &lt;chủ&gt;
 /addplan &lt;id&gt; &lt;nhãn&gt; &lt;giá&gt; &lt;giờ&gt;
 /delplan &lt;id&gt;
@@ -694,42 +823,100 @@ ${request.groupLink ? `🔗 ${esc(request.groupLink)}\n` : ''}${request.resetKey
     const sessions = options.getSessions();
     const session = sessions[userId];
     if (!session || session.type !== mode) {
-      await send(message.chat.id, '⚠️ Gõ /free hoặc /buy trước khi gửi ảnh.');
+      await send(message.chat.id, '⚠️ Gõ /getkey hoặc /free hoặc /buy trước khi gửi ảnh.');
       return;
     }
     const photos = message.photo || [];
     if (!photos.length) return;
     const caption = String(message.caption || '').trim();
-    let groupLink = '';
-    if (mode === 'group') {
-      const match = caption.match(/(https?:\/\/\S+|t\.me\/\S+|www\.\S+)/i);
-      if (!match) {
-        await send(message.chat.id, '📷 Gửi lại ảnh + <b>link nhóm</b> trong chú thích.');
-        return;
-      }
-      groupLink = match[0];
+    const fileId = photos[photos.length - 1].file_id;
+    const cfg = options.getConfig();
+    const need = mode === 'group' ? (Number(cfg.groupTaskPhotos) || 3) : 1;
+    const timeoutSec = Number(cfg.groupTaskTimeoutSec) || 300;
+
+    // Timeout check for group task
+    if (mode === 'group' && session.startedAt && (Date.now() - session.startedAt) > timeoutSec * 1000) {
+      delete sessions[userId]; options.saveSessions(sessions);
+      await send(message.chat.id, `⏰ Hết ${timeoutSec} giây. Gõ /getkey để làm lại nhiệm vụ.`);
+      return;
     }
-    let plan = null;
-    if (mode === 'payment') {
-      plan = plans().find(p => p.id === session.planId);
-      if (!plan) {
-        delete sessions[userId]; options.saveSessions(sessions);
-        await send(message.chat.id, '⚠️ Gói hết hạn. Gõ /buy chọn lại.');
+
+    if (mode === 'group') {
+      session.proofs = session.proofs || [];
+      session.proofs.push({ fileId, caption, at: Date.now() });
+      options.saveSessions(sessions);
+      const have = session.proofs.length;
+      if (have < need) {
+        await send(message.chat.id,
+`📷 Đã nhận ảnh <b>${have}/${need}</b>
+⏳ Còn gửi <b>${need - have}</b> ảnh nữa
+⌛️ Thời gian còn ~${Math.max(0, Math.ceil((timeoutSec * 1000 - (Date.now() - session.startedAt)) / 1000))}s`);
         return;
       }
+      // đủ ảnh
+      const request = {
+        id: idShort(), type: 'group', status: 'pending',
+        telegramId: userId, username: from.username || '', userName: displayName(from),
+        groupLink: caption || '', caption,
+        proofFileId: session.proofs[0].fileId,
+        proofFileIds: session.proofs.map(p => p.fileId),
+        planId: null, planLabel: 'Key free',
+        price: 0, durationHours: 5,
+        createdAt: Date.now()
+      };
+      options.addRequest(request);
+      delete sessions[userId]; options.saveSessions(sessions);
+      await send(message.chat.id,
+`✅ Đã gửi đủ <b>${need} ảnh</b>
+🎫 Yêu cầu <b>#${request.id}</b>
+⏳ Chờ admin duyệt → nhận key (3 thiết bị)`);
+      // notify admins with all photos
+      await notifyAdmins(request, request.proofFileId);
+      for (let i = 1; i < (request.proofFileIds || []).length; i++) {
+        try { await notifyAdmins(request, request.proofFileIds[i]); } catch {}
+      }
+      return;
+    }
+
+    // payment mode — 1 ảnh
+    let plan = plans().find(p => p.id === session.planId);
+    if (!plan) {
+      delete sessions[userId]; options.saveSessions(sessions);
+      await send(message.chat.id, '⚠️ Gói hết hạn. Gõ /buy chọn lại.');
+      return;
     }
     const request = {
-      id: idShort(), type: mode === 'payment' ? 'payment' : 'group', status: 'pending',
+      id: idShort(), type: 'payment', status: 'pending',
       telegramId: userId, username: from.username || '', userName: displayName(from),
-      groupLink, caption, proofFileId: photos[photos.length - 1].file_id,
-      planId: plan?.id || null, planLabel: plan?.label || 'Key free',
-      price: Number(plan?.price || 0), durationHours: Number(plan?.durationHours || 5),
+      groupLink: '', caption, proofFileId: fileId,
+      planId: plan.id, planLabel: plan.label || 'Key VIP',
+      price: Number(plan.price || 0), durationHours: Number(plan.durationHours || 5),
       createdAt: Date.now()
     };
     options.addRequest(request);
     delete sessions[userId]; options.saveSessions(sessions);
     await send(message.chat.id, `✅ Đã gửi <b>#${request.id}</b>\n⏳ Chờ admin duyệt.`);
     await notifyAdmins(request, request.proofFileId);
+  }
+
+  function startGroupKeyTask(chatId, fromId, from) {
+    const cfg = options.getConfig();
+    const sessions = options.getSessions();
+    const timeoutSec = Number(cfg.groupTaskTimeoutSec) || 300;
+    const need = Number(cfg.groupTaskPhotos) || 3;
+    const task = String(cfg.groupTaskText || 'Làm nhiệm vụ theo yêu cầu admin.');
+    const promo = String(cfg.groupPromoText || '');
+    sessions[fromId] = { type: 'group', startedAt: Date.now(), proofs: [] };
+    options.saveSessions(sessions);
+    return send(chatId,
+`📸 <b>Nhiệm vụ quảng cáo bot:</b>
+
+${esc(task)}
+
+${promo ? `📌 <b>Câu cần sao chép:</b>\n<code>${esc(promo)}</code>\n` : ''}
+📷 Gửi đủ <b>${need} ảnh</b> chứng minh vào đây
+⌛️ Bạn có <b>${timeoutSec} giây</b> để gửi ảnh.
+📱 Key free = <b>3 thiết bị</b>`);
   }
 
   function resolveKey(query) {
@@ -750,18 +937,65 @@ ${request.groupLink ? `🔗 ${esc(request.groupLink)}\n` : ''}${request.resetKey
     username = username.replace(/^@/, '').split(/[/?#\s]/)[0];
     if (!username || username.length < 2) throw new Error('Username/link không hợp lệ.');
     const profileUrl = `https://www.tiktok.com/@${username}`;
-    const oembedUrl = `https://www.tiktok.com/oembed?url=${encodeURIComponent(profileUrl)}`;
-    const r = await fetch(oembedUrl, { signal: AbortSignal.timeout(10000), headers: { 'user-agent': 'Mozilla/5.0' } });
-    if (!r.ok) throw new Error('Không lấy được info (user ẩn / không tồn tại).');
-    const d = await r.json();
-    return {
-      username,
-      title: d.title || d.author_name || username,
-      author: d.author_name || username,
-      authorUrl: d.author_url || profileUrl,
-      thumb: d.thumbnail_url || '',
-      profileUrl
+    const headers = {
+      'user-agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+      'accept-language': 'vi-VN,vi;q=0.9,en;q=0.8'
     };
+    let info = {
+      username, nickname: username, avatar: '', bio: '', verified: false, private: false,
+      followers: null, following: null, likes: null, videos: null, createTime: null, profileUrl
+    };
+    // 1) oEmbed — nickname + thumb
+    try {
+      const oembedUrl = `https://www.tiktok.com/oembed?url=${encodeURIComponent(profileUrl)}`;
+      const r = await fetch(oembedUrl, { signal: AbortSignal.timeout(8000), headers });
+      if (r.ok) {
+        const d = await r.json();
+        info.nickname = d.author_name || d.title || username;
+        info.avatar = d.thumbnail_url || '';
+        info.bio = (d.title || '').slice(0, 200);
+      }
+    } catch {}
+    // 2) HTML page — SIGI_STATE / universal data for stats
+    try {
+      const page = await fetch(profileUrl, { signal: AbortSignal.timeout(12000), headers });
+      if (page.ok) {
+        const html = await page.text();
+        let jsonStr = null;
+        const m1 = html.match(/<script id="__UNIVERSAL_DATA_FOR_REHYDRATION__"[^>]*>([\s\S]*?)<\/script>/);
+        const m2 = html.match(/<script id="SIGI_STATE"[^>]*>([\s\S]*?)<\/script>/);
+        if (m1) jsonStr = m1[1];
+        else if (m2) jsonStr = m2[1];
+        if (jsonStr) {
+          const data = JSON.parse(jsonStr);
+          // try multiple paths
+          let user = null;
+          const def = data?.__DEFAULT_SCOPE__ || data;
+          const detail = def?.['webapp.user-detail'] || def?.UserModule || def;
+          if (detail?.userInfo?.user) user = detail.userInfo;
+          else if (detail?.users) {
+            const first = Object.values(detail.users)[0];
+            if (first) user = { user: first, stats: detail.stats?.[first.id] || detail.statsList?.[first.id] };
+          }
+          if (user?.user) {
+            const u = user.user;
+            const s = user.stats || {};
+            info.nickname = u.nickname || info.nickname;
+            info.avatar = u.avatarLarger || u.avatarMedium || u.avatarThumb || info.avatar;
+            info.bio = u.signature || info.bio;
+            info.verified = !!u.verified;
+            info.private = !!u.privateAccount;
+            info.followers = s.followerCount ?? null;
+            info.following = s.followingCount ?? null;
+            info.likes = s.heartCount ?? s.heart ?? null;
+            info.videos = s.videoCount ?? null;
+            if (u.createTime) info.createTime = Number(u.createTime) * (String(u.createTime).length <= 10 ? 1000 : 1);
+          }
+        }
+      }
+    } catch {}
+    if (!info.nickname && !info.avatar) throw new Error('Không lấy được info (user ẩn / không tồn tại).');
+    return info;
   }
 
   async function lookupFacebook(input) {
@@ -771,27 +1005,56 @@ ${request.groupLink ? `🔗 ${esc(request.groupLink)}\n` : ''}${request.resetKey
       raw = raw.replace(/^@/, '');
       url = `https://www.facebook.com/${encodeURIComponent(raw)}`;
     }
-    // Facebook oEmbed for posts; for profiles use open graph best-effort
+    const headers = {
+      'user-agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+      'accept-language': 'vi-VN,vi;q=0.9,en;q=0.8'
+    };
+    const info = {
+      url, author: '', avatar: '', bio: '', type: 'profile',
+      followers: null, likes: null, provider: 'Facebook'
+    };
+    // oEmbed (works better for posts/pages)
     try {
       const oembed = `https://www.facebook.com/plugins/post/oembed.json?url=${encodeURIComponent(url)}`;
-      const r = await fetch(oembed, { signal: AbortSignal.timeout(10000), headers: { 'user-agent': 'Mozilla/5.0' } });
+      const r = await fetch(oembed, { signal: AbortSignal.timeout(10000), headers });
       if (r.ok) {
         const d = await r.json();
-        return {
-          url: d.author_url || url,
-          author: d.author_name || 'Facebook',
-          html: (d.html || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 200),
-          provider: d.provider_name || 'Facebook'
-        };
+        info.author = d.author_name || '';
+        info.url = d.author_url || url;
+        info.bio = (d.html || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 220);
+        info.provider = d.provider_name || 'Facebook';
+        if (d.thumbnail_url) info.avatar = d.thumbnail_url;
       }
     } catch {}
-    // fallback: just validate URL shape
-    return {
-      url,
-      author: raw.replace(/^https?:\/\/(www\.)?facebook\.com\//i, '').split(/[/?#]/)[0] || 'Facebook',
-      html: 'Không lấy được chi tiết công khai (profile private hoặc cần đăng nhập).',
-      provider: 'Facebook'
-    };
+    // HTML / Open Graph
+    try {
+      const page = await fetch(url, { signal: AbortSignal.timeout(12000), headers, redirect: 'follow' });
+      if (page.ok) {
+        const html = await page.text();
+        const og = (prop) => {
+          const m = html.match(new RegExp(`<meta[^>]+property=["']${prop}["'][^>]+content=["']([^"']+)["']`, 'i'))
+            || html.match(new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]+property=["']${prop}["']`, 'i'));
+          return m ? m[1] : '';
+        };
+        const nameMeta = html.match(/<meta[^>]+name=["']description["'][^>]+content=["']([^"']+)["']/i);
+        if (!info.author) info.author = og('og:title') || raw.split('/').filter(Boolean).pop() || 'Facebook';
+        if (!info.avatar) info.avatar = og('og:image') || '';
+        if (!info.bio) info.bio = (og('og:description') || (nameMeta && nameMeta[1]) || '').slice(0, 220);
+        info.type = og('og:type') || info.type;
+        // try follower-ish numbers from description
+        const nums = String(info.bio).match(/([\d.,]+)\s*(followers|người theo dõi|likes|lượt thích)/i);
+        if (nums) {
+          const n = parseFloat(nums[1].replace(/\./g, '').replace(',', '.'));
+          if (/follow|theo dõi/i.test(nums[2])) info.followers = n;
+          else info.likes = n;
+        }
+      }
+    } catch {}
+    if (!info.author) {
+      info.author = raw.replace(/^https?:\/\/(www\.)?facebook\.com\//i, '').split(/[/?#]/)[0] || 'Facebook';
+      info.bio = info.bio || 'Không lấy đủ chi tiết (profile private / cần đăng nhập).';
+    }
+    return info;
   }
 
   // ─── Admin commands ─────────────────────────────────────
@@ -909,11 +1172,34 @@ ${request.groupLink ? `🔗 ${esc(request.groupLink)}\n` : ''}${request.resetKey
     }
 
     if (cmd === 'settask') {
-      if (!argText) return send(chatId, '📌 <code>/settask &lt;nội dung&gt;</code>');
+      if (!argText) return send(chatId, '📌 <code>/settask &lt;nội dung hướng dẫn&gt;</code>');
       const cfg = options.getConfig();
       cfg.groupTaskText = argText.slice(0, 2000);
       if (options.saveConfig) options.saveConfig(cfg);
       return send(chatId, `✅ Nhiệm vụ nhóm:\n${esc(cfg.groupTaskText)}`);
+    }
+    if (cmd === 'setpromo') {
+      if (!argText) return send(chatId, '📌 <code>/setpromo câu quảng cáo cần copy</code>');
+      const cfg = options.getConfig();
+      cfg.groupPromoText = argText.slice(0, 500);
+      if (options.saveConfig) options.saveConfig(cfg);
+      return send(chatId, `✅ Câu promo:\n<code>${esc(cfg.groupPromoText)}</code>`);
+    }
+    if (cmd === 'settaskphotos') {
+      const n = parseInt(args[0], 10);
+      if (!(n >= 1 && n <= 10)) return send(chatId, '📌 <code>/settaskphotos 3</code> (1-10)');
+      const cfg = options.getConfig();
+      cfg.groupTaskPhotos = n;
+      if (options.saveConfig) options.saveConfig(cfg);
+      return send(chatId, `✅ Cần ${n} ảnh để nhận key free`);
+    }
+    if (cmd === 'settasktime') {
+      const n = parseInt(args[0], 10);
+      if (!(n >= 60 && n <= 3600)) return send(chatId, '📌 <code>/settasktime 300</code> (60-3600s)');
+      const cfg = options.getConfig();
+      cfg.groupTaskTimeoutSec = n;
+      if (options.saveConfig) options.saveConfig(cfg);
+      return send(chatId, `✅ Thời gian nhiệm vụ: ${n}s`);
     }
 
     if (cmd === 'setbank') {
@@ -989,7 +1275,7 @@ ${request.groupLink ? `🔗 ${esc(request.groupLink)}\n` : ''}${request.resetKey
     // admin commands first
     if (text.startsWith('/') && isAdmin(fromId)) {
       const cmd = text.split(/\s+/)[0].toLowerCase().replace(/^\//, '').split('@')[0];
-      const adminCmds = new Set(['admin', 'panel', 'stats', 'keys', 'key', 'createkey', 'resetdevice', 'resetdevices', 'revoke', 'pending', 'approve', 'reject', 'settask', 'setbank', 'settg', 'addplan', 'delplan', 'plans']);
+      const adminCmds = new Set(['admin', 'panel', 'stats', 'keys', 'key', 'createkey', 'resetdevice', 'resetdevices', 'revoke', 'pending', 'approve', 'reject', 'settask', 'setpromo', 'settaskphotos', 'settasktime', 'setbank', 'settg', 'addplan', 'delplan', 'plans']);
       if (adminCmds.has(cmd)) return handleAdminCommand(message, text);
     }
 
@@ -1006,17 +1292,8 @@ ${request.groupLink ? `🔗 ${esc(request.groupLink)}\n` : ''}${request.resetKey
       return send(chatId, `⏳ <b>${pending.length} yêu cầu</b>\n` + pending.map(r => `• #${r.id} ${r.type === 'payment' ? '💳' : r.type === 'reset' ? '🔄' : '🎯'}`).join('\n'));
     }
 
-    if (cmd === 'free') {
-      sessions[fromId] = { type: 'group', startedAt: Date.now() };
-      options.saveSessions(sessions);
-      const task = String(options.getConfig().groupTaskText || 'Làm nhiệm vụ theo yêu cầu admin.');
-      return send(chatId,
-`🎯 <b>KEY FREE</b>
-────────────────
-📋 ${esc(task)}
-
-📷 Gửi <b>ảnh</b> + <b>link nhóm</b> trong chú thích
-⏳ Admin duyệt → nhận key (3 TB)`);
+    if (cmd === 'free' || cmd === 'getkey') {
+      return startGroupKeyTask(chatId, fromId, from);
     }
 
     if (cmd === 'buy') {
@@ -1103,36 +1380,95 @@ Gửi <b>mã key</b> cần reset.
     }
 
     if (cmd === 'tiktok') {
-      if (!argText) return send(chatId, '📌 <code>/tiktok @user</code>\nhoặc <code>/tiktok https://tiktok.com/@user</code>');
+      if (!argText) return send(chatId, '📌 <code>/tiktok @user</code>\nhoặc link profile');
       await send(chatId, '⏳ Đang lấy info TikTok...');
       try {
         const info = await lookupTikTok(argText);
-        return send(chatId,
-`📱 <b>TIKTOK</b>
+        const fmtN = n => n == null ? '—' : Number(n).toLocaleString('vi-VN');
+        const created = info.createTime ? new Date(info.createTime).toLocaleString('vi-VN') : '—';
+        const text =
+`📱 <b>TIKTOK INFO</b>
 ────────────────
-👤 <b>${esc(info.author)}</b>
+👤 <b>${esc(info.nickname)}</b> ${info.verified ? '✅' : ''}
 🆔 @${esc(info.username)}
-🔗 ${info.profileUrl}
-📝 ${esc((info.title || '').slice(0, 180))}`);
+${info.private ? '🔒 Private' : '🌐 Public'}
+📝 ${esc((info.bio || '—').slice(0, 160))}
+
+👥 Followers: <b>${fmtN(info.followers)}</b>
+➡️ Following: <b>${fmtN(info.following)}</b>
+❤️ Likes: <b>${fmtN(info.likes)}</b>
+🎬 Videos: <b>${fmtN(info.videos)}</b>
+📅 Tạo: ${created}
+🔗 ${info.profileUrl}`;
+        if (info.avatar) {
+          try {
+            await sendPhoto(chatId, info.avatar, { caption: text });
+            return;
+          } catch {}
+        }
+        return send(chatId, text);
       } catch (e) {
         return send(chatId, `❌ ${e.message}`);
       }
     }
 
     if (cmd === 'fb' || cmd === 'facebook') {
-      if (!argText) return send(chatId, '📌 <code>/fb username</code>\nhoặc <code>/fb https://facebook.com/...</code>');
+      if (!argText) return send(chatId, '📌 <code>/fb username</code>\nhoặc link profile');
       await send(chatId, '⏳ Đang lấy info Facebook...');
       try {
         const info = await lookupFacebook(argText);
-        return send(chatId,
-`📘 <b>FACEBOOK</b>
+        const fmtN = n => n == null ? '—' : Number(n).toLocaleString('vi-VN');
+        const text =
+`📘 <b>FACEBOOK INFO</b>
 ────────────────
-👤 ${esc(info.author)}
-🔗 ${esc(info.url)}
-📝 ${esc(info.html || '—')}`);
+👤 <b>${esc(info.author)}</b>
+📝 ${esc((info.bio || '—').slice(0, 180))}
+👥 Followers/Likes: <b>${fmtN(info.followers ?? info.likes)}</b>
+🔗 ${esc(info.url)}`;
+        if (info.avatar) {
+          try {
+            await sendPhoto(chatId, info.avatar, { caption: text });
+            return;
+          } catch {}
+        }
+        return send(chatId, text);
       } catch (e) {
         return send(chatId, `❌ ${e.message}`);
       }
+    }
+
+    if (cmd === 'tips' || cmd === 'meo') {
+      return send(chatId,
+`💡 <b>MẸO SỬ DỤNG</b>
+────────────────
+🔑 <b>Key bị full 3 thiết bị?</b>
+Gõ <code>/resetkey</code> → gửi mã key
+→ Reset auto · hạn key không đổi
+
+🧠 <b>Chơi toàn bị bẻ / thua ngược?</b>
+Nghỉ 1 lúc, xem cầu thêm trước khi chốt.
+
+📊 Theo dõi lịch sử đúng/sai trên web
+để đánh giá độ tin cậy engine.
+
+💬 Hỗ trợ: @SunNetWin`);
+    }
+
+    if (cmd === 'note' || cmd === 'luuy') {
+      return send(chatId,
+`⚠️ <b>LƯU Ý</b>
+────────────────
+Tất cả công cụ mang tính <b>giải trí</b>,
+không dùng để kiếm tiền lâu dài / đầu tư.
+
+❌ Không nên dính vào cờ bạc —
+chơi lâu dài chỉ có thua, ảnh hưởng
+tài chính và cuộc sống.
+
+Kết quả dự đoán chỉ mang tính
+tham khảo.
+
+💬 Telegram hỗ trợ: @SunNetWin`);
     }
 
     if (text.startsWith('/')) {
@@ -1251,7 +1587,7 @@ function secureEqual(a, b) {
 function validHttpUrl(value) {
   try { const u = new URL(String(value)); return ['http:', 'https:'].includes(u.protocol); } catch { return false; }
 }
-function newPlainKey() { return 'VIP-' + crypto.randomBytes(6).toString('hex').toUpperCase(); }
+function newPlainKey() { return 'KYT-' + crypto.randomBytes(5).toString('hex').toUpperCase(); }
 
 // ---------- key registry ----------
 let keys = loadJSON(KEYS_FILE, []);
@@ -1491,7 +1827,10 @@ function saveState() {
 // ---------- bot settings and moderation queue ----------
 let botSettings = loadJSON(SETTINGS_FILE, null) || {
   telegramUsername: '',
-  groupTaskText: 'Đăng nội dung giới thiệu do admin cung cấp vào nhóm theo yêu cầu của admin.',
+  groupTaskText: 'Cần rải quảng cáo vào 3 nhóm bất kì.\n\n📌 Cách làm:\n1) Sao chép câu promo admin cung cấp\n2) Vào 3 nhóm bất kì và gửi tin nhắn\n3) Chụp màn hình 3 tin nhắn vừa gửi\n4) Gửi 3 ảnh vào đây cho Bot duyệt\n\n⚠️ Lưu ý:\n- Ảnh rõ, thể hiện đã gửi thành công\n- Phải đủ 3 ảnh từ 3 nhóm khác nhau',
+  groupPromoText: '@SunNetWin tool dự đoán TX VIP — getkey miễn phí, hỗ trợ 24/7',
+  groupTaskPhotos: 3,
+  groupTaskTimeoutSec: 300,
   bankCode: '', bankAccount: '', bankAccountName: '', plans: []
 };
 function normalizeSettings(value) {
@@ -1508,6 +1847,9 @@ function normalizeSettings(value) {
   return {
     telegramUsername: String(v.telegramUsername || '').trim().replace(/^@/, '').replace(/[^a-zA-Z0-9_]/g, '').slice(0, 64),
     groupTaskText: String(v.groupTaskText || '').slice(0, 2000),
+    groupPromoText: String(v.groupPromoText || '').slice(0, 500),
+    groupTaskPhotos: Math.min(10, Math.max(1, Number(v.groupTaskPhotos) || 3)),
+    groupTaskTimeoutSec: Math.min(3600, Math.max(60, Number(v.groupTaskTimeoutSec) || 300)),
     bankCode: String(v.bankCode || '').trim().slice(0, 40), bankAccount: String(v.bankAccount || '').trim().slice(0, 40),
     bankAccountName: String(v.bankAccountName || '').trim().slice(0, 120), plans
   };
