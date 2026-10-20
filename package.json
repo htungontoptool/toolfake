@@ -1,7 +1,7 @@
 {
   "name": "vip-oracle-backend",
   "version": "2.0.0",
-  "description": "VIP ORACLE API, configurable game feeds, key licensing, and Telegram key-sales bot",
+  "description": "Tool tưng tửng API, configurable game feeds, key licensing, and Telegram key-sales bot",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
