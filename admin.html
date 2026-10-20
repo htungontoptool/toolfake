@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ADMIN CONTROL · VIP ORACLE</title>
+<script>window.VIP_CONFIG = Object.freeze({ API_BASE: '', BRAND: '@SunNetWin' });</script>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700;900&family=JetBrains+Mono:wght@400;600;700;800&display=swap" rel="stylesheet">
+<script>tailwind.config={theme:{extend:{fontFamily:{sans:['Space Grotesk','sans-serif'],mono:['JetBrains Mono','monospace']}}}}</script>
+<style>
+  body{background:#f1f5f9;color:#0f172a;font-family:'Space Grotesk',sans-serif}
+  .sharp-card{background:#fff;border:2px solid #0f172a;box-shadow:5px 5px 0 #0f172a}
+  .sharp-btn{border:2px solid #0f172a;box-shadow:3px 3px 0 #0f172a;font-weight:700;transition:all .1s}
+  .sharp-btn:hover:not(:disabled){transform:translate(-1px,-1px);box-shadow:4px 4px 0 #0f172a}
+  .sharp-btn:active:not(:disabled){transform:translate(2px,2px);box-shadow:1px 1px 0 #0f172a}
+  .tab-active{background:#0f172a;color:#fbbf24}.tab-inactive{background:#fff;color:#64748b}
+  input:focus,select:focus,textarea:focus{outline:none;box-shadow:0 0 0 3px rgba(245,158,11,.35)}
+  .gradient-text{background:linear-gradient(90deg,#f59e0b,#e11d48,#0ea5e9);background-size:200% auto;-webkit-background-clip:text;background-clip:text;color:transparent;animation:gradShift 4s linear infinite}
+  @keyframes gradShift{to{background-position:200% center}} @keyframes popIn{0%{transform:scale(.94);opacity:0}100%{transform:scale(1);opacity:1}}.pop-in{animation:popIn .3s ease both}
+  table{border-collapse:collapse} th{background:#0f172a;color:#fbbf24;font-family:'JetBrains Mono',monospace;font-size:10px;text-transform:uppercase;letter-spacing:.06em;padding:9px 10px;text-align:left;position:sticky;top:0}td{padding:8px 10px;font-family:'JetBrains Mono',monospace;font-size:11px;border-bottom:1px dashed rgba(15,23,42,.15)}tr:hover td{background:#fef3c7}
+  .field{width:100%;padding:10px;border:2px solid #0f172a;background:#fff;font-family:'JetBrains Mono',monospace;font-size:12px}
+</style>
+</head>
+<body class="min-h-screen">
+<div id="loginView" class="min-h-screen flex items-center justify-center p-4">
+  <div class="w-full max-w-md pop-in">
+    <div class="text-center mb-6">
+      <div class="inline-block sharp-card px-5 py-2 mb-3 font-mono font-black tracking-widest text-sm bg-slate-900 text-amber-400">@SunNetWin · ADMIN</div>
+      <h1 class="text-4xl font-black gradient-text">Bảng Điều Khiển</h1>
+    </div>
+    <div class="sharp-card p-6 md:p-8 space-y-4">
+      <label class="block text-xs font-mono font-bold uppercase">Mật khẩu quản trị</label>
+      <input id="pwInput" type="password" autocomplete="current-password" placeholder="Nhập mật khẩu admin" class="field">
+      <button id="loginBtn" onclick="doLogin()" class="sharp-btn w-full py-3 bg-slate-900 text-amber-400 font-mono uppercase tracking-widest text-sm">Đăng Nhập Admin</button>
+      <div id="loginError" class="hidden text-center text-rose-600 font-mono text-xs font-bold p-2 bg-rose-50 border border-rose-300"></div>
+    </div>
+  </div>
+</div>
+
+<div id="panelView" class="hidden max-w-[1500px] mx-auto p-3 md:p-6 space-y-5">
+  <header class="sharp-card px-4 md:px-5 py-3 flex flex-wrap items-center justify-between gap-3">
+    <div class="flex items-center gap-3"><div class="bg-slate-900 text-amber-400 font-mono font-black px-3 py-1.5 text-sm tracking-wider">ADMIN CONTROL</div><div><div class="font-black">VIP ORACLE</div><div class="text-xs font-mono text-slate-500">BẢN QUYỀN @SunNetWin</div></div></div>
+    <button onclick="doLogout()" class="sharp-btn px-3 py-2 bg-rose-500 text-white text-xs font-mono uppercase">Đăng Xuất</button>
+  </header>
+  <div id="statsRow" class="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-5 gap-3"></div>
+  <nav class="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-8 gap-2">
+    <button onclick="switchTab('keys')" id="tab-keys" class="sharp-btn py-2.5 text-xs uppercase tab-active">Quản lý Key</button>
+    <button onclick="switchTab('games')" id="tab-games" class="sharp-btn py-2.5 text-xs uppercase tab-inactive">API Game</button>
+    <button onclick="switchTab('history')" id="tab-history" class="sharp-btn py-2.5 text-xs uppercase tab-inactive">Lịch sử phiên</button>
+    <button onclick="switchTab('accuracy')" id="tab-accuracy" class="sharp-btn py-2.5 text-xs uppercase tab-inactive">Đúng / Sai</button>
+    <button onclick="switchTab('engine')" id="tab-engine" class="sharp-btn py-2.5 text-xs uppercase tab-inactive">Engine</button>
+    <button onclick="switchTab('telegram')" id="tab-telegram" class="sharp-btn py-2.5 text-xs uppercase tab-inactive">Telegram / VietQR</button>
+    <button onclick="switchTab('requests')" id="tab-requests" class="sharp-btn py-2.5 text-xs uppercase tab-inactive">Duyệt yêu cầu</button>
+    <button onclick="switchTab('logs')" id="tab-logs" class="sharp-btn py-2.5 text-xs uppercase tab-inactive">Nhật ký</button>
+  </nav>
+
+  <section id="panel-keys" class="sharp-card p-4 md:p-5 space-y-4">
+    <div class="p-4 bg-amber-50 border-2 border-amber-500 space-y-3">
+      <h3 class="font-black text-sm uppercase text-amber-900">Tạo Key mới</h3>
+      <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+        <input id="newKey" class="field" placeholder="Key tuỳ chọn · để trống để tự tạo">
+        <input id="newLabel" class="field" placeholder="Tên / nhãn key">
+        <div><label class="block text-[11px] font-bold mb-1">Thời hạn (giờ, 0 = vô hạn)</label><input id="newHours" type="number" min="0" value="0" class="field"></div>
+        <div><label class="block text-[11px] font-bold mb-1">Giới hạn thiết bị</label><input id="newDeviceLimit" type="number" min="1" max="100" value="1" class="field"></div>
+      </div>
+      <button onclick="addKey()" class="sharp-btn px-5 py-2.5 bg-emerald-500 text-white text-xs font-mono uppercase">＋ Tạo Key</button>
+      <div id="createdKeyBox" class="hidden border-2 border-emerald-600 bg-emerald-50 p-3"><div class="font-black text-xs mb-1">KEY VỪA TẠO · HÃY SAO CHÉP</div><div class="flex flex-wrap items-center gap-2"><code id="createdKeyText" class="text-sm font-black break-all"></code><button onclick="copyCreatedKey()" class="sharp-btn px-3 py-1.5 bg-slate-900 text-amber-300 text-xs">Sao chép</button></div></div>
+    </div>
+    <div class="flex flex-wrap items-center justify-between gap-3"><h3 class="font-black uppercase">Danh sách Key</h3><div class="flex gap-2"><input id="keySearch" class="field !w-52" placeholder="Tìm nhãn / trạng thái" oninput="renderKeys()"><button onclick="loadKeys()" class="sharp-btn px-3 py-2 bg-sky-500 text-white text-xs">Làm mới</button></div></div>
+    <div id="keysList" class="space-y-2"><div class="text-center py-5 text-slate-500">Đang tải…</div></div>
+  </section>
+
+  <section id="panel-games" class="hidden sharp-card p-4 md:p-5 space-y-4">
+    <div class="p-4 bg-sky-50 border-2 border-sky-500 space-y-3">
+      <h3 class="font-black uppercase text-sm">Thêm API Game mới</h3>
+      <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+        <input id="gameId" class="field" placeholder="Mã game · ví dụ lc79_hu">
+        <input id="gameLabel" class="field" placeholder="Tên hiển thị · ví dụ LC79 Hũ">
+        <input id="gameUrl" type="url" class="field" placeholder="https://api.example.com/sessions">
+        <select id="gameParser" class="field"><option value="lc79">Parser LC79 / tổng điểm</option><option value="sunwin">Parser Sunwin</option></select>
+      </div>
+      <button onclick="addGame()" class="sharp-btn px-5 py-2.5 bg-sky-500 text-white text-xs font-mono uppercase">＋ Thêm Game API</button>
+    </div>
+    <div id="gamesList" class="space-y-3"></div>
+  </section>
+
+  <section id="panel-history" class="hidden sharp-card p-4 md:p-5 space-y-4">
+    <div class="flex flex-wrap items-center gap-3"><label class="font-bold text-xs uppercase">Game</label><select id="historyGame" class="field !w-auto min-w-44" onchange="loadHistory()"></select><input id="histFilter" class="field !w-48" placeholder="Lọc theo phiên" oninput="renderHistoryTable()"><select id="resFilter" class="field !w-auto" onchange="renderHistoryTable()"><option value="">Tất cả kết quả</option><option value="T">TÀI</option><option value="X">XỈU</option></select><button onclick="loadHistory()" class="sharp-btn px-3 py-2 bg-sky-500 text-white text-xs">Tải 5000 phiên</button><span id="histMeta" class="font-mono text-xs ml-auto"></span></div>
+    <div class="border-2 border-slate-900 overflow-auto max-h-[650px]"><table class="w-full"><thead><tr><th>Phiên</th><th>Xúc xắc</th><th>Tổng</th><th>Kết quả thực</th><th>Dự đoán trước</th><th>Đúng / Sai</th><th>Thời điểm ghi nhận</th></tr></thead><tbody id="histBody"></tbody></table></div>
+  </section>
+
+  <section id="panel-accuracy" class="hidden sharp-card p-4 md:p-5 space-y-4">
+    <div class="flex flex-wrap items-center gap-3"><label class="font-bold text-xs uppercase">Game</label><select id="accuracyGame" class="field !w-auto min-w-44" onchange="loadAccuracy()"></select><button onclick="loadAccuracy()" class="sharp-btn px-3 py-2 bg-sky-500 text-white text-xs">Tải toàn bộ lịch sử</button><span id="accuracyMeta" class="font-mono text-xs ml-auto"></span></div>
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3" id="accuracySummary"></div>
+    <div class="border-2 border-slate-900 overflow-auto max-h-[650px]"><table class="w-full"><thead><tr><th>Phiên</th><th>Dự đoán</th><th>Kết quả thực</th><th>Đánh giá</th><th>Thời điểm</th></tr></thead><tbody id="accuracyBody"></tbody></table></div>
+  </section>
+
+  <section id="panel-engine" class="hidden sharp-card p-4 md:p-5 space-y-4">
+    <div class="flex flex-wrap gap-3 items-center"><label class="font-bold text-xs uppercase">Game</label><select id="engineGame" class="field !w-auto min-w-44" onchange="loadEngine()"></select><button onclick="loadEngine()" class="sharp-btn px-3 py-2 bg-sky-500 text-white text-xs">Làm mới</button><button onclick="resetEngine()" class="sharp-btn px-3 py-2 bg-rose-500 text-white text-xs">Reset game</button></div>
+    <div id="engineMeta" class="grid grid-cols-2 md:grid-cols-4 gap-2"></div>
+    <div class="border-2 border-slate-900 overflow-auto max-h-[500px]"><table class="w-full"><thead><tr><th>Model</th><th>Trọng số</th><th>EWMA</th><th>Đúng / Sai</th></tr></thead><tbody id="engineBody"></tbody></table></div>
+  </section>
+
+  <section id="panel-telegram" class="hidden sharp-card p-4 md:p-5 space-y-5">
+    <div class="flex flex-wrap items-center justify-between gap-2"><h3 class="font-black uppercase">Cấu hình Bot Telegram và VietQR</h3><div id="botEnvStatus" class="font-mono text-xs"></div></div>
+    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+      <div><label class="block text-xs font-bold uppercase mb-1">Username bot Telegram</label><input id="tgUsername" class="field" placeholder="ten_bot (không cần @)"></div>
+      <div><label class="block text-xs font-bold uppercase mb-1">Ngân hàng / Bank ID VietQR</label><input id="bankCode" class="field" placeholder="Ví dụ: MB, VCB, ACB"></div>
+      <div><label class="block text-xs font-bold uppercase mb-1">Số tài khoản</label><input id="bankAccount" class="field" inputmode="numeric" placeholder="Số tài khoản nhận tiền"></div>
+      <div><label class="block text-xs font-bold uppercase mb-1">Tên chủ tài khoản</label><input id="bankAccountName" class="field" placeholder="TÊN CHỦ TÀI KHOẢN"></div>
+      <div class="md:col-span-2 xl:col-span-3"><label class="block text-xs font-bold uppercase mb-1">Nội dung nhiệm vụ nhóm</label><textarea id="groupTaskText" rows="4" class="field" placeholder="Nội dung admin yêu cầu người dùng đăng vào nhóm trên 500 thành viên"></textarea></div>
+    </div>
+    <div class="border-t-2 border-slate-900 pt-4 space-y-3">
+      <div class="flex flex-wrap items-center justify-between gap-2"><h3 class="font-black uppercase">Gói key trả phí</h3><span class="text-xs font-mono text-slate-500">Mỗi gói có giá và thời hạn riêng</span></div>
+      <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-2">
+        <input id="planId" class="field" placeholder="Mã gói · vip24">
+        <input id="planLabel" class="field" placeholder="Tên gói · VIP 24 giờ">
+        <input id="planPrice" type="number" min="1" class="field" placeholder="Giá VNĐ">
+        <input id="planHours" type="number" min="1" class="field" placeholder="Thời hạn giờ">
+        <button onclick="addPlan()" class="sharp-btn py-2 bg-emerald-500 text-white text-xs uppercase">＋ Thêm gói</button>
+      </div>
+      <div id="plansList" class="space-y-2"></div>
+    </div>
+    <button onclick="saveSettings()" class="sharp-btn px-6 py-3 bg-slate-900 text-amber-400 text-sm font-mono uppercase">Lưu cấu hình Telegram / VietQR</button>
+  </section>
+
+  <section id="panel-requests" class="hidden sharp-card p-4 md:p-5 space-y-4">
+    <div class="flex flex-wrap items-center gap-3"><h3 class="font-black uppercase">Yêu cầu nhận key</h3><select id="requestStatus" class="field !w-auto" onchange="loadRequests()"><option value="pending">Chờ duyệt</option><option value="all">Tất cả</option><option value="approved">Đã duyệt</option><option value="rejected">Từ chối</option></select><button onclick="loadRequests()" class="sharp-btn px-3 py-2 bg-sky-500 text-white text-xs">Làm mới</button></div>
+    <div id="requestsList" class="space-y-3"></div>
+  </section>
+
+  <section id="panel-logs" class="hidden sharp-card p-4 md:p-5 space-y-3"><button onclick="loadLogs()" class="sharp-btn px-3 py-2 bg-sky-500 text-white text-xs">Làm mới nhật ký</button><pre id="logsBody" class="bg-slate-900 text-emerald-400 font-mono text-[11px] p-4 border-2 border-slate-900 overflow-auto max-h-[600px] whitespace-pre-wrap">Đang tải…</pre></section>
+  <footer class="text-center font-mono text-xs text-slate-500 py-2">© VIP ORACLE · BẢN QUYỀN @SunNetWin</footer>
+</div>
+
+<script>
+(function(){
+  const $=id=>document.getElementById(id);
+  let token=sessionStorage.getItem('admin_token')||null;
+  const apiBase=String(window.VIP_CONFIG?.API_BASE||'').replace(/\/+$/,'');
+  let activeTab='keys', keysCache=[], gamesCache=[], historyCache=[], accuracyCache=[], settingsCache={plans:[]}, requestsCache=[];
+  const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const dateText=value=>value?new Date(value).toLocaleString('vi-VN'):'Không giới hạn';
+  async function request(path,method='GET',body){
+    const headers={}; if(token)headers.Authorization='Bearer '+token; if(body!==undefined)headers['Content-Type']='application/json';
+    const response=await fetch(apiBase+path,{method,headers,body:body===undefined?undefined:JSON.stringify(body)});
+    const data=await response.json().catch(()=>({}));
+    if(response.status===401&&token){doLogout();throw new Error(data.error||'Phiên admin hết hạn.');}
+    if(!response.ok)throw new Error(data.error||`HTTP ${response.status}`);
+    return data;
+  }
+  window.doLogin=async function(){
+    const button=$('loginBtn');button.disabled=true;
+    try{const data=await request('/api/admin/login','POST',{password:$('pwInput').value});token=data.token;sessionStorage.setItem('admin_token',token);$('loginView').classList.add('hidden');$('panelView').classList.remove('hidden');await Promise.all([loadStats(),loadKeys(),loadGames()]);}
+    catch(e){$('loginError').textContent=e.message;$('loginError').classList.remove('hidden');}
+    finally{button.disabled=false;}
+  };
+  window.doLogout=function(){sessionStorage.removeItem('admin_token');token=null;location.reload();};
+  window.switchTab=function(tab){
+    activeTab=tab;
+    ['keys','games','history','accuracy','engine','telegram','requests','logs'].forEach(name=>{$('tab-'+name).className='sharp-btn py-2.5 text-xs uppercase '+(name===tab?'tab-active':'tab-inactive');$('panel-'+name).classList.toggle('hidden',name!==tab);});
+    const loaders={keys:loadKeys,games:loadGames,history:loadHistory,accuracy:loadAccuracy,engine:loadEngine,telegram:loadSettings,requests:loadRequests,logs:loadLogs};
+    if(loaders[tab])loaders[tab]();
+  };
+  async function loadStats(){
+    try{const s=await request('/api/admin/stats');const rows=Object.entries(s.games||{}).map(([id,g])=>`<div class="sharp-card p-3"><div class="text-[10px] font-mono font-bold uppercase text-slate-500">${esc(g.label||id)}</div><div class="font-mono font-black text-2xl mt-1 ${Number(g.accuracy)>=50?'text-emerald-600':'text-rose-500'}">${g.accuracy??'--'}%</div><div class="text-[10px] font-mono text-slate-600">${g.correct}/${g.total} đúng · ${g.historyCount} phiên</div></div>`).join('');$('statsRow').innerHTML=rows+`<div class="sharp-card p-3 bg-amber-400"><div class="text-[10px] font-mono font-bold uppercase">Key đang hoạt động</div><div class="font-mono font-black text-2xl mt-1">${s.totalKeys??0}</div><div class="text-[10px] font-mono">Chờ duyệt: ${s.pendingRequests??0}</div></div>`;}
+    catch(e){console.warn(e);}
+  }
+  // Keys
+  window.loadKeys=async function(){try{const d=await request('/api/admin/keys');keysCache=d.keys||[];renderKeys();loadStats();}catch(e){alert(e.message);}};
+  window.renderKeys=function(){const q=$('keySearch').value.trim().toLowerCase();const list=keysCache.filter(k=>!q||`${k.label} ${k.status} ${k.id}`.toLowerCase().includes(q));
+    $('keysList').innerHTML=list.map(k=>{const state=k.status==='revoked'?'ĐÃ THU HỒI':k.expired?'HẾT HẠN':'HOẠT ĐỘNG';const stateClass=k.status==='revoked'||k.expired?'bg-rose-100 text-rose-700':'bg-emerald-100 text-emerald-700';return `<article class="border-2 border-slate-900 p-3 flex flex-col xl:flex-row xl:items-center justify-between gap-3"><div class="min-w-0"><div class="flex flex-wrap items-center gap-2"><b class="text-sm break-all">${esc(k.label)}</b><span class="px-2 py-1 text-[10px] font-black ${stateClass}">${state}</span><span class="text-[10px] text-slate-500">${esc(k.id.slice(0,8))}</span></div><div class="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-1 mt-2 text-[11px] font-mono text-slate-600"><span>Hết hạn: ${esc(dateText(k.expiresAt))}</span><span>Thiết bị: ${k.deviceCount}/${k.deviceLimit}</span><span>Lượt dùng: ${k.uses||0}</span><span>Dùng gần nhất: ${esc(k.lastUsed?new Date(k.lastUsed).toLocaleString('vi-VN'):'Chưa dùng')}</span></div></div><div class="flex flex-wrap gap-2 shrink-0"><button onclick="editKey('${k.id}')" class="sharp-btn px-3 py-2 bg-amber-300 text-xs">Sửa</button><button onclick="resetDevices('${k.id}')" class="sharp-btn px-3 py-2 bg-sky-400 text-xs">Reset thiết bị</button>${k.status==='revoked'?'':`<button onclick="revokeKey('${k.id}')" class="sharp-btn px-3 py-2 bg-rose-500 text-white text-xs">Thu hồi</button>`}</div></article>`;}).join('')||'<div class="text-center py-6 text-slate-500">Không có key khớp bộ lọc.</div>';
+  };
+  window.addKey=async function(){try{const d=await request('/api/admin/keys','POST',{key:$('newKey').value.trim(),label:$('newLabel').value.trim()||'Key VIP',durationHours:Number($('newHours').value||0),deviceLimit:Number($('newDeviceLimit').value||1)});$('newKey').value='';$('newLabel').value='';$('createdKeyText').textContent=d.key;$('createdKeyBox').classList.remove('hidden');await loadKeys();alert('Tạo key thành công. Hãy sao chép key vừa tạo vì hệ thống chỉ hiển thị key gốc ngay lúc tạo.');}catch(e){alert(e.message);}};
+  window.copyCreatedKey=async function(){try{await navigator.clipboard.writeText($('createdKeyText').textContent);alert('Đã sao chép key.');}catch{alert('Hãy chọn và sao chép key thủ công.');}};
+  window.editKey=async function(id){const k=keysCache.find(x=>x.id===id);if(!k)return;const label=prompt('Tên/nhãn key:',k.label);if(label===null)return;const deviceLimit=prompt('Giới hạn thiết bị:',String(k.deviceLimit||1));if(deviceLimit===null)return;const current=k.expiresAt?(()=>{const d=new Date(k.expiresAt);const pad=n=>String(n).padStart(2,'0');return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;})():'';const expires=prompt('Ngày giờ hết hạn dạng YYYY-MM-DDTHH:mm. Để trống = không hết hạn:',current);if(expires===null)return;let expiresAt=null;if(expires.trim()){const date=new Date(expires);if(!Number.isFinite(date.getTime())||date.getTime()<=Date.now())return alert('Ngày hết hạn không hợp lệ hoặc đã qua.');expiresAt=date.toISOString();}try{await request('/api/admin/keys/'+id,'PATCH',{label:label.trim()||'Key VIP',deviceLimit:Number(deviceLimit||1),expiresAt});await loadKeys();}catch(e){alert(e.message);}};
+  window.resetDevices=async function(id){if(!confirm('Xoá danh sách thiết bị đã dùng key này?'))return;try{await request('/api/admin/keys/'+id+'/reset-devices','POST',{});await loadKeys();alert('Đã reset thiết bị.');}catch(e){alert(e.message);}};
+  window.revokeKey=async function(id){if(!confirm('Thu hồi key này? Các phiên đang mở sẽ mất quyền sau lần gọi API tiếp theo.'))return;try{await request('/api/admin/keys/'+id,'DELETE');await loadKeys();}catch(e){alert(e.message);}};
+  // Game APIs
+  function updateGameSelectors(){const active=gamesCache.filter(g=>g.enabled!==false);[['historyGame','history'],['accuracyGame','accuracy'],['engineGame','engine']].forEach(([id])=>{const el=$(id),old=el.value;el.innerHTML=active.map(g=>`<option value="${esc(g.id)}">${esc(g.label)} · ${esc(g.id)}</option>`).join('');if(active.some(g=>g.id===old))el.value=old;});}
+  window.loadGames=async function(){try{const d=await request('/api/admin/games');gamesCache=d.games||[];updateGameSelectors();renderGames();await loadStats();}catch(e){console.warn(e);}};
+  window.renderGames=function(){$('gamesList').innerHTML=gamesCache.map(g=>`<article class="border-2 border-slate-900 p-3 space-y-2"><div class="flex flex-wrap justify-between gap-2"><div><b>${esc(g.label)}</b> <span class="font-mono text-xs text-slate-500">${esc(g.id)}</span><span class="ml-2 px-2 py-1 text-[10px] font-bold ${g.enabled?'bg-emerald-100 text-emerald-700':'bg-slate-200 text-slate-600'}">${g.enabled?'ĐANG CHẠY':'ĐANG TẮT'}</span></div><div class="flex gap-2"><button class="sharp-btn px-3 py-1.5 bg-amber-300 text-xs" onclick="editGame('${esc(g.id)}')">Sửa API</button><button class="sharp-btn px-3 py-1.5 bg-rose-500 text-white text-xs" onclick="deleteGame('${esc(g.id)}')">Xoá</button></div></div><div class="font-mono text-xs break-all">${esc(g.url)}</div><div class="flex flex-wrap gap-4 text-[11px] font-mono text-slate-500"><span>Parser: ${esc(g.parser)}</span><span>Phiên đã lưu: ${g.historyCount||0}</span><span>Phiên mới nhất: ${esc(g.lastSession??'--')}</span>${g.lastError?`<span class="text-rose-600">API lỗi: ${esc(g.lastError)}</span>`:''}</div></article>`).join('')||'<div class="py-6 text-center">Chưa có game API.</div>';};
+  window.addGame=async function(){const data={id:$('gameId').value.trim().toLowerCase(),label:$('gameLabel').value.trim(),url:$('gameUrl').value.trim(),parser:$('gameParser').value};try{await request('/api/admin/games','POST',data);['gameId','gameLabel','gameUrl'].forEach(id=>$(id).value='');await loadGames();alert('Đã thêm game API. Hãy kiểm tra parser có khớp cấu trúc JSON của API.');}catch(e){alert(e.message);}};
+  window.editGame=async function(id){const g=gamesCache.find(x=>x.id===id);if(!g)return;const label=prompt('Tên game:',g.label);if(label===null)return;const url=prompt('URL API:',g.url);if(url===null)return;const parser=prompt('Parser nhập sunwin hoặc lc79:',g.parser);if(parser===null)return;const enabled=confirm('Bật game này? Bấm Cancel để tắt.');try{await request('/api/admin/games/'+id,'PATCH',{label,url,parser:parser.toLowerCase()==='sunwin'?'sunwin':'lc79',enabled});await loadGames();}catch(e){alert(e.message);}};
+  window.deleteGame=async function(id){if(!confirm('Xoá game '+id+' và cấu hình API?'))return;try{await request('/api/admin/games/'+id,'DELETE');await loadGames();}catch(e){alert(e.message);}};
+  // History and accuracy
+  window.loadHistory=async function(){const game=$('historyGame').value;if(!game)return;try{const d=await request(`/api/admin/history?game=${encodeURIComponent(game)}&limit=5000`);historyCache=d.history||[];$('histMeta').textContent=`${historyCache.length} phiên được lưu`;renderHistoryTable();}catch(e){console.warn(e);}};
+  window.renderHistoryTable=function(){const q=$('histFilter').value.trim().toLowerCase(),filter=$('resFilter').value;const list=historyCache.filter(h=>(!q||String(h.session).toLowerCase().includes(q))&&(!filter||h.char===filter));$('histBody').innerHTML=list.map(h=>`<tr><td class="font-bold">#${esc(h.session)}</td><td>[${esc((h.dice||[]).join('-'))}]</td><td>${esc(h.sum)}</td><td class="font-black ${h.char==='T'?'text-blue-700':'text-rose-600'}">${h.char==='T'?'TÀI':'XỈU'}</td><td>${h.prediction?`<b>${h.prediction==='T'?'TÀI':'XỈU'}</b>`:'--'}</td><td>${h.isCorrect===true?'<span class="text-emerald-700 font-black">ĐÚNG</span>':h.isCorrect===false?'<span class="text-rose-600 font-black">SAI</span>':'--'}</td><td>${h.ts?new Date(h.ts).toLocaleString('vi-VN'):'--'}</td></tr>`).join('')||'<tr><td colspan="7" class="text-center py-6">Không có dữ liệu.</td></tr>';};
+  window.loadAccuracy=async function(){const game=$('accuracyGame').value;if(!game)return;try{const d=await request(`/api/admin/accuracy?game=${encodeURIComponent(game)}&limit=10000`);accuracyCache=d.history||[];$('accuracyMeta').textContent=`${accuracyCache.length} lần đánh giá`;const scored=accuracyCache.filter(x=>x.isCorrect===true||x.isCorrect===false);$('accuracySummary').innerHTML=[['Đúng',scored.filter(x=>x.isCorrect).length],['Sai',scored.filter(x=>x.isCorrect===false).length],['Bỏ qua',accuracyCache.filter(x=>x.skipped).length],['Tỷ lệ đúng',d.accuracy===null?'--':d.accuracy+'%']].map(([l,v])=>`<div class="border-2 border-slate-900 p-3 bg-slate-50"><div class="text-[10px] font-mono uppercase text-slate-500">${l}</div><div class="font-mono font-black text-xl mt-1">${v}</div></div>`).join('');$('accuracyBody').innerHTML=accuracyCache.map(h=>`<tr><td class="font-bold">#${esc(h.session)}</td><td>${h.predicted==='T'?'TÀI':h.predicted==='X'?'XỈU':'--'}</td><td>${h.actual==='T'?'TÀI':h.actual==='X'?'XỈU':'--'}</td><td class="font-black ${h.isCorrect===true?'text-emerald-700':h.isCorrect===false?'text-rose-600':'text-slate-500'}">${h.isCorrect===true?'ĐÚNG':h.isCorrect===false?'SAI':h.skipped?'BỎ QUA':'CHƯA ĐÁNH GIÁ'}</td><td>${h.ts?new Date(h.ts).toLocaleString('vi-VN'):'--'}</td></tr>`).join('')||'<tr><td colspan="5" class="text-center py-6">Chưa có lịch sử dự đoán được chấm.</td></tr>';}catch(e){console.warn(e);}};
+  // Engine
+  window.loadEngine=async function(){const game=$('engineGame').value;if(!game)return;try{const s=await request('/api/admin/stats');const g=s.games[game];if(!g)return;$('engineMeta').innerHTML=[['Xu hướng',g.trend],['Dạng cầu',g.regime],['Autocorr',g.autocorr],['Độ chính xác',g.accuracy===null?'--':g.accuracy+'%']].map(([l,v])=>`<div class="border-2 border-slate-900 p-3 bg-slate-50"><div class="text-[10px] font-mono uppercase text-slate-500">${esc(l)}</div><div class="font-mono font-black text-sm mt-1">${esc(v??'--')}</div></div>`).join('');const weights=g.weights||{},hits=g.modelEwma||{};$('engineBody').innerHTML=Object.keys(weights).sort().map(m=>`<tr><td class="font-bold">${esc(m)}</td><td>${weights[m]}</td><td>${hits[m]?hits[m].ewma:'--'}</td><td>${hits[m]?hits[m].win+' / '+hits[m].loss:'--'}</td></tr>`).join('');}catch(e){console.warn(e);}};
+  window.resetEngine=async function(){const game=$('engineGame').value;if(!game)return;if(!confirm('Reset engine và lịch sử dự đoán của game '+game+'?'))return;try{await request('/api/admin/reset','POST',{game});await Promise.all([loadEngine(),loadStats(),loadHistory(),loadAccuracy()]);alert('Đã reset game.');}catch(e){alert(e.message);}};
+  // Settings and price plans
+  window.loadSettings=async function(){try{const d=await request('/api/admin/settings');settingsCache=d.settings||{plans:[]};$('tgUsername').value=settingsCache.telegramUsername||'';$('groupTaskText').value=settingsCache.groupTaskText||'';$('bankCode').value=settingsCache.bankCode||'';$('bankAccount').value=settingsCache.bankAccount||'';$('bankAccountName').value=settingsCache.bankAccountName||'';$('botEnvStatus').textContent=`Bot token: ${d.telegramConfigured?'ĐÃ CẤU HÌNH':'CHƯA CẤU HÌNH'} · Admin Telegram ID: ${d.adminsConfigured?'ĐÃ CẤU HÌNH':'CHƯA CẤU HÌNH'}`;$('botEnvStatus').className='font-mono text-xs '+(d.telegramConfigured&&d.adminsConfigured?'text-emerald-700':'text-rose-600');renderPlans();}catch(e){alert(e.message);}};
+  function renderPlans(){$('plansList').innerHTML=(settingsCache.plans||[]).map((p,i)=>`<div class="border-2 border-slate-900 p-3 flex flex-wrap items-center justify-between gap-2"><div><b>${esc(p.label)}</b><div class="font-mono text-xs text-slate-600">${esc(p.id)} · ${Number(p.price).toLocaleString('vi-VN')}đ · ${p.durationHours} giờ · ${p.active===false?'TẮT':'ĐANG BÁN'}</div></div><div class="flex gap-2"><button class="sharp-btn px-3 py-1.5 bg-amber-300 text-xs" onclick="togglePlan(${i})">${p.active===false?'Bật':'Tắt'}</button><button class="sharp-btn px-3 py-1.5 bg-rose-500 text-white text-xs" onclick="removePlan(${i})">Xoá</button></div></div>`).join('')||'<div class="text-sm text-slate-500">Chưa có gói key trả phí.</div>';}
+  window.addPlan=function(){const id=$('planId').value.trim().toLowerCase().replace(/[^a-z0-9_-]/g,'');const label=$('planLabel').value.trim();const price=Number($('planPrice').value);const durationHours=Number($('planHours').value);if(!id||!label||!Number.isInteger(price)||price<1||!Number.isInteger(durationHours)||durationHours<1)return alert('Nhập mã gói, tên gói, giá VNĐ và thời hạn giờ hợp lệ.');if((settingsCache.plans||[]).some(p=>p.id===id))return alert('Mã gói đã tồn tại.');settingsCache.plans=settingsCache.plans||[];settingsCache.plans.push({id,label,price,durationHours,active:true});['planId','planLabel','planPrice','planHours'].forEach(x=>$(x).value='');renderPlans();};
+  window.togglePlan=function(i){settingsCache.plans[i].active=settingsCache.plans[i].active===false;renderPlans();};window.removePlan=function(i){settingsCache.plans.splice(i,1);renderPlans();};
+  window.saveSettings=async function(){const payload={telegramUsername:$('tgUsername').value.trim(),groupTaskText:$('groupTaskText').value,bankCode:$('bankCode').value.trim(),bankAccount:$('bankAccount').value.trim(),bankAccountName:$('bankAccountName').value.trim(),plans:settingsCache.plans||[]};try{const d=await request('/api/admin/settings','PUT',payload);settingsCache=d.settings;renderPlans();await loadSettings();alert('Đã lưu cấu hình. Các gói trả phí và nội dung bot đã được cập nhật.');}catch(e){alert(e.message);}};
+  // Review queue
+  window.loadRequests=async function(){try{const d=await request('/api/admin/requests?status='+encodeURIComponent($('requestStatus').value));requestsCache=d.requests||[];renderRequests();}catch(e){alert(e.message);}};
+  function renderRequests(){$('requestsList').innerHTML=requestsCache.map(r=>`<article class="border-2 border-slate-900 p-3 space-y-2"><div class="flex flex-wrap items-start justify-between gap-2"><div><b class="font-mono">#${esc(r.id)}</b> <span class="ml-2 px-2 py-1 text-[10px] font-black ${r.status==='pending'?'bg-amber-100 text-amber-800':r.status==='approved'?'bg-emerald-100 text-emerald-800':'bg-rose-100 text-rose-800'}">${esc(r.status.toUpperCase())}</span><div class="text-sm font-bold mt-1">${r.type==='payment'?'Thanh toán key':'Nhiệm vụ nhóm'} · ${esc(r.userName||'User')} (@${esc(r.username||'không có username')})</div><div class="font-mono text-xs text-slate-600">Telegram ID: ${esc(r.telegramId)} · ${esc(dateText(r.createdAt))}</div></div>${r.status==='pending'?`<div class="flex gap-2"><button class="sharp-btn px-3 py-2 bg-emerald-500 text-white text-xs" onclick="reviewRequest('${esc(r.id)}',true)">Duyệt & cấp key</button><button class="sharp-btn px-3 py-2 bg-rose-500 text-white text-xs" onclick="reviewRequest('${esc(r.id)}',false)">Từ chối</button></div>`:''}</div><div class="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs font-mono"><span>Gói: ${esc(r.planLabel||'Key free 5h')}</span><span>Giá: ${Number(r.price||0).toLocaleString('vi-VN')}đ</span><span>Thời hạn: ${r.durationHours||5} giờ</span><span>Ảnh chứng từ: ${r.proofAttached?'Đã gửi':'Không có'}</span></div>${r.groupLink?`<div class="text-xs break-all">Link nhóm: <a class="text-sky-700 underline" href="${esc(r.groupLink.startsWith('http')?'': 'https://')}${esc(r.groupLink)}" target="_blank" rel="noreferrer">${esc(r.groupLink)}</a></div>`:''}<div class="text-xs text-slate-500">Mở tin nhắn bot Telegram của admin để kiểm tra ảnh chứng từ trước khi duyệt.</div></article>`).join('')||'<div class="text-center py-6 text-slate-500">Không có yêu cầu trong bộ lọc.</div>';}
+  window.reviewRequest=async function(id,approved){if(!confirm((approved?'Duyệt và cấp key':'Từ chối')+' yêu cầu #'+id+'?'))return;try{await request('/api/admin/requests/'+id+'/review','POST',{approved});await loadRequests();await loadStats();alert(approved?'Đã duyệt và gửi key qua Telegram.':'Đã từ chối yêu cầu.');}catch(e){alert(e.message);}};
+  window.loadLogs=async function(){try{const d=await request('/api/admin/logs');$('logsBody').textContent=(d.logs||[]).join('\n')||'(Chưa có nhật ký)';}catch(e){$('logsBody').textContent=e.message;}};
+  if(token){$('loginView').classList.add('hidden');$('panelView').classList.remove('hidden');Promise.all([loadStats(),loadKeys(),loadGames()]).catch(()=>{});}
+})();
+</script>
+</body>
+</html>
