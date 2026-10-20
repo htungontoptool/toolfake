@@ -700,7 +700,7 @@ function startTelegramBot(options) {
   // ─── USER MENU (command only, no buttons) ───────────────
   async function showStart(chatId, name) {
     await send(chatId,
-`✨ <b>VIP ORACLE</b>
+`✨ <b>Tool tưng tửng</b>
 ────────────────
 👋 Xin chào <b>${esc(name)}</b>
 
@@ -715,12 +715,9 @@ function startTelegramBot(options) {
 /tiktok &lt;@user|link&gt; — 📱 TikTok
 /fb &lt;user|link&gt; — 📘 Facebook
 
-💡 <b>Khác</b>
-/tips — Mẹo dùng tool
-/note — Lưu ý quan trọng
-
 🔑 Key dạng <code>KYT-...</code> · 3 thiết bị
-💬 Hỗ trợ: @SunNetWin`);
+💬 Hỗ trợ: @SunNetWin
+💡 Mẹo & lưu ý xem trên web`);
   }
 
   async function showAdminHelp(chatId) {
@@ -744,6 +741,9 @@ function startTelegramBot(options) {
 /setpromo &lt;câu copy quảng cáo&gt;
 /settaskphotos &lt;số ảnh&gt;
 /settasktime &lt;giây&gt;
+/setmaint on|off [nội dung]
+/lockgame &lt;id&gt; · /unlockgame &lt;id&gt;
+/lockcmd &lt;lệnh&gt; · /unlockcmd &lt;lệnh&gt;
 /setbank &lt;NH&gt; &lt;STK&gt; &lt;chủ&gt;
 /addplan &lt;id&gt; &lt;nhãn&gt; &lt;giá&gt; &lt;giờ&gt;
 /delplan &lt;id&gt;
@@ -807,7 +807,7 @@ ${request.groupLink ? `🔗 ${esc(request.groupLink)}\n` : ''}${request.resetKey
 ⏱ ${req.durationHours}h · Hết: ${expiresText}
 📱 Tối đa <b>3 thiết bị</b>
 
-🌐 Nhập key trên website VIP ORACLE`;
+🌐 Nhập key trên website Tool tưng tửng`;
     try {
       await send(req.telegramId, text);
       if (options.markDelivered) options.markDelivered(req.id);
@@ -1201,6 +1201,39 @@ ${promo ? `📌 <b>Câu cần sao chép:</b>\n<code>${esc(promo)}</code>\n` : ''
       if (options.saveConfig) options.saveConfig(cfg);
       return send(chatId, `✅ Thời gian nhiệm vụ: ${n}s`);
     }
+    if (cmd === 'setmaint') {
+      const cfg = options.getConfig();
+      const on = ['1','on','true','yes','bat'].includes(String(args[0]||'').toLowerCase());
+      const off = ['0','off','false','no','tat'].includes(String(args[0]||'').toLowerCase());
+      if (!on && !off) return send(chatId, '📌 <code>/setmaint on|off [nội dung]</code>\n<code>/lockgame id</code> <code>/unlockgame id</code>\n<code>/lockcmd getkey</code> <code>/unlockcmd getkey</code>');
+      cfg.maintenance = cfg.maintenance || { enabled:false, message:'', lockedGames:[], lockedCommands:[] };
+      cfg.maintenance.enabled = on;
+      if (argText.replace(/^\S+\s*/, '').trim()) cfg.maintenance.message = argText.replace(/^\S+\s*/, '').trim().slice(0,500);
+      if (options.saveConfig) options.saveConfig(cfg);
+      return send(chatId, (on?'🛠 Bật bảo trì':'✅ Tắt bảo trì') + (cfg.maintenance.message ? '\n'+cfg.maintenance.message : ''));
+    }
+    if (cmd === 'lockgame' || cmd === 'unlockgame') {
+      const id = String(args[0]||'').toLowerCase();
+      if (!id) return send(chatId, '📌 <code>/lockgame sunwin</code>');
+      const cfg = options.getConfig();
+      cfg.maintenance = cfg.maintenance || { enabled:false, message:'', lockedGames:[], lockedCommands:[] };
+      const list = new Set(cfg.maintenance.lockedGames || []);
+      if (cmd === 'lockgame') list.add(id); else list.delete(id);
+      cfg.maintenance.lockedGames = [...list];
+      if (options.saveConfig) options.saveConfig(cfg);
+      return send(chatId, `🎮 lockedGames: <code>${cfg.maintenance.lockedGames.join(', ')||'—'}</code>`);
+    }
+    if (cmd === 'lockcmd' || cmd === 'unlockcmd') {
+      const id = String(args[0]||'').toLowerCase().replace(/^\//,'');
+      if (!id) return send(chatId, '📌 <code>/lockcmd getkey</code>');
+      const cfg = options.getConfig();
+      cfg.maintenance = cfg.maintenance || { enabled:false, message:'', lockedGames:[], lockedCommands:[] };
+      const list = new Set(cfg.maintenance.lockedCommands || []);
+      if (cmd === 'lockcmd') list.add(id); else list.delete(id);
+      cfg.maintenance.lockedCommands = [...list];
+      if (options.saveConfig) options.saveConfig(cfg);
+      return send(chatId, `⌨️ lockedCommands: <code>${cfg.maintenance.lockedCommands.join(', ')||'—'}</code>`);
+    }
 
     if (cmd === 'setbank') {
       if (args.length < 3) return send(chatId, '📌 <code>/setbank &lt;NH&gt; &lt;STK&gt; &lt;chủ&gt;</code>');
@@ -1275,7 +1308,7 @@ ${promo ? `📌 <b>Câu cần sao chép:</b>\n<code>${esc(promo)}</code>\n` : ''
     // admin commands first
     if (text.startsWith('/') && isAdmin(fromId)) {
       const cmd = text.split(/\s+/)[0].toLowerCase().replace(/^\//, '').split('@')[0];
-      const adminCmds = new Set(['admin', 'panel', 'stats', 'keys', 'key', 'createkey', 'resetdevice', 'resetdevices', 'revoke', 'pending', 'approve', 'reject', 'settask', 'setpromo', 'settaskphotos', 'settasktime', 'setbank', 'settg', 'addplan', 'delplan', 'plans']);
+      const adminCmds = new Set(['admin', 'panel', 'stats', 'keys', 'key', 'createkey', 'resetdevice', 'resetdevices', 'revoke', 'pending', 'approve', 'reject', 'settask', 'setpromo', 'settaskphotos', 'settasktime', 'setmaint', 'lockgame', 'unlockgame', 'lockcmd', 'unlockcmd', 'setbank', 'settg', 'addplan', 'delplan', 'plans']);
       if (adminCmds.has(cmd)) return handleAdminCommand(message, text);
     }
 
@@ -1283,6 +1316,17 @@ ${promo ? `📌 <b>Câu cần sao chép:</b>\n<code>${esc(promo)}</code>\n` : ''
     const cmd = parts[0].toLowerCase().replace(/^\//, '').split('@')[0];
     const args = parts.slice(1);
     const argText = text.replace(/^\/\S+\s*/, '').trim();
+
+    // Bảo trì / khóa lệnh (admin vẫn dùng được)
+    if (!isAdmin(fromId)) {
+      const mt = (options.getConfig && options.getConfig().maintenance) || {};
+      if (mt.enabled && Array.isArray(mt.lockedCommands) && mt.lockedCommands.includes(cmd)) {
+        return send(chatId, '🛠 ' + (mt.message || 'Lệnh đang bảo trì.'));
+      }
+      if (mt.enabled && Array.isArray(mt.lockedCommands) && mt.lockedCommands.includes('*')) {
+        return send(chatId, '🛠 ' + (mt.message || 'Bot đang bảo trì.'));
+      }
+    }
 
     if (cmd === 'start') return showStart(chatId, displayName(from));
 
@@ -1435,40 +1479,6 @@ ${info.private ? '🔒 Private' : '🌐 Public'}
       } catch (e) {
         return send(chatId, `❌ ${e.message}`);
       }
-    }
-
-    if (cmd === 'tips' || cmd === 'meo') {
-      return send(chatId,
-`💡 <b>MẸO SỬ DỤNG</b>
-────────────────
-🔑 <b>Key bị full 3 thiết bị?</b>
-Gõ <code>/resetkey</code> → gửi mã key
-→ Reset auto · hạn key không đổi
-
-🧠 <b>Chơi toàn bị bẻ / thua ngược?</b>
-Nghỉ 1 lúc, xem cầu thêm trước khi chốt.
-
-📊 Theo dõi lịch sử đúng/sai trên web
-để đánh giá độ tin cậy engine.
-
-💬 Hỗ trợ: @SunNetWin`);
-    }
-
-    if (cmd === 'note' || cmd === 'luuy') {
-      return send(chatId,
-`⚠️ <b>LƯU Ý</b>
-────────────────
-Tất cả công cụ mang tính <b>giải trí</b>,
-không dùng để kiếm tiền lâu dài / đầu tư.
-
-❌ Không nên dính vào cờ bạc —
-chơi lâu dài chỉ có thua, ảnh hưởng
-tài chính và cuộc sống.
-
-Kết quả dự đoán chỉ mang tính
-tham khảo.
-
-💬 Telegram hỗ trợ: @SunNetWin`);
     }
 
     if (text.startsWith('/')) {
@@ -1831,6 +1841,15 @@ let botSettings = loadJSON(SETTINGS_FILE, null) || {
   groupPromoText: '@SunNetWin tool dự đoán TX VIP — getkey miễn phí, hỗ trợ 24/7',
   groupTaskPhotos: 3,
   groupTaskTimeoutSec: 300,
+  supportUrl: 'https://t.me/SunNetWin',
+  watermarkText: 'SunWin · MD5 · HitClub · Tool tưng tửng',
+  siteTitle: 'Tool tưng tửng',
+  maintenance: {
+    enabled: false,
+    message: 'Hệ thống đang bảo trì, vui lòng quay lại sau.',
+    lockedGames: [],
+    lockedCommands: []
+  },
   bankCode: '', bankAccount: '', bankAccountName: '', plans: []
 };
 function normalizeSettings(value) {
@@ -1850,6 +1869,19 @@ function normalizeSettings(value) {
     groupPromoText: String(v.groupPromoText || '').slice(0, 500),
     groupTaskPhotos: Math.min(10, Math.max(1, Number(v.groupTaskPhotos) || 3)),
     groupTaskTimeoutSec: Math.min(3600, Math.max(60, Number(v.groupTaskTimeoutSec) || 300)),
+    supportUrl: String(v.supportUrl || 'https://t.me/SunNetWin').trim().slice(0, 200),
+    watermarkText: String(v.watermarkText || 'SunWin · MD5 · HitClub · Tool tưng tửng').trim().slice(0, 300),
+    siteTitle: String(v.siteTitle || 'Tool tưng tửng').trim().slice(0, 80),
+    maintenance: {
+      enabled: !!(v.maintenance && v.maintenance.enabled),
+      message: String((v.maintenance && v.maintenance.message) || 'Hệ thống đang bảo trì, vui lòng quay lại sau.').slice(0, 500),
+      lockedGames: Array.isArray(v.maintenance && v.maintenance.lockedGames)
+        ? v.maintenance.lockedGames.map(x => String(x).trim().toLowerCase()).filter(Boolean).slice(0, 50)
+        : [],
+      lockedCommands: Array.isArray(v.maintenance && v.maintenance.lockedCommands)
+        ? v.maintenance.lockedCommands.map(x => String(x).trim().toLowerCase().replace(/^\//, '')).filter(Boolean).slice(0, 50)
+        : []
+    },
     bankCode: String(v.bankCode || '').trim().slice(0, 40), bankAccount: String(v.bankAccount || '').trim().slice(0, 40),
     bankAccountName: String(v.bankAccountName || '').trim().slice(0, 120), plans
   };
@@ -1896,7 +1928,24 @@ function reviewRequest(id, approved, reviewer) {
 
 // ---------- public endpoints ----------
 app.get('/api/health', (req, res) => res.json({ ok: true, time: Date.now(), games: Object.keys(FEEDS) }));
-app.get('/api/public/config', (req, res) => res.json({ brand: BRAND, telegramUsername: botSettings.telegramUsername || '', telegramUrl: botSettings.telegramUsername ? `https://t.me/${botSettings.telegramUsername}` : '' }));
+app.get('/api/public/config', (req, res) => {
+  const games = (Array.isArray(gameConfigs) ? gameConfigs : []).map(g => g.label || g.id).filter(Boolean);
+  const wm = botSettings.watermarkText || (games.length ? games.join(' · ') + ' · Tool tưng tửng' : 'Tool tưng tửng');
+  res.json({
+    brand: BRAND,
+    siteTitle: botSettings.siteTitle || 'Tool tưng tửng',
+    telegramUsername: botSettings.telegramUsername || '',
+    telegramUrl: botSettings.telegramUsername ? `https://t.me/${botSettings.telegramUsername}` : '',
+    supportUrl: botSettings.supportUrl || 'https://t.me/SunNetWin',
+    watermarkText: wm,
+    games,
+    maintenance: {
+      enabled: !!(botSettings.maintenance && botSettings.maintenance.enabled),
+      message: (botSettings.maintenance && botSettings.maintenance.message) || '',
+      lockedGames: (botSettings.maintenance && botSettings.maintenance.lockedGames) || []
+    }
+  });
+});
 app.post('/api/auth', (req, res) => {
   if (!rateLimit(req.ip)) return res.status(429).json({ error: 'Bạn thử quá nhiều lần. Vui lòng đợi 1 phút.' });
   const plain = String(req.body?.key || '').trim();
@@ -1933,6 +1982,11 @@ app.get('/api/me', requireUser, (req, res) => res.json({ label: req.userKey.labe
 app.get('/api/predict', requireUser, (req, res) => {
   const f = FEEDS[req.query.game];
   if (!f || !f.enabled) return res.status(400).json({ error: 'Game không tồn tại hoặc đang tắt.' });
+  const mt = botSettings.maintenance || {};
+  const gid = String(req.query.game || '').toLowerCase();
+  if (mt.enabled && Array.isArray(mt.lockedGames) && mt.lockedGames.map(String).map(s=>s.toLowerCase()).includes(gid)) {
+    return res.status(503).json({ error: mt.message || 'Game đang bảo trì.', maintenance: true });
+  }
   const ensemble = f.engine.getEnsemblePrediction();
   res.json({ game: req.query.game, label: f.label, predictedResult: ensemble.predictedResult, confidence: ensemble.confidence,
     taiProb: ensemble.taiProb, xiuProb: ensemble.xiuProb, activeModels: ensemble.activeModels, topReason: ensemble.topReason,
