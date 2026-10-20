@@ -569,113 +569,122 @@ function startTelegramBot(options) {
     if (!response.ok || !data.ok) throw new Error(data.description || `Telegram ${method} failed (${response.status})`);
     return data.result;
   }
-  const sendMessage = (chat_id, text, extra = {}) => tg('sendMessage', { chat_id, text, parse_mode: 'HTML', ...extra });
+  const send = (chat_id, text, extra = {}) => tg('sendMessage', { chat_id, text, parse_mode: 'HTML', disable_web_page_preview: false, ...extra });
   const sendPhoto = (chat_id, photo, extra = {}) => tg('sendPhoto', { chat_id, photo, parse_mode: 'HTML', ...extra });
-  const answer = (callback_query_id, text, show_alert = false) => tg('answerCallbackQuery', { callback_query_id, text, show_alert }).catch(() => null);
-  const userIdOf = update => String(update?.message?.from?.id ?? update?.callback_query?.from?.id ?? '');
+  const isAdmin = id => adminIds.has(String(id));
   const displayName = from => [from?.first_name, from?.last_name].filter(Boolean).join(' ') || from?.username || 'Bạn';
   const plans = () => (options.getConfig().plans || []).filter(p => p.active !== false && Number(p.price) > 0 && Number(p.durationHours) > 0);
   const idShort = () => crypto.randomBytes(5).toString('hex').toUpperCase();
-  const isAdmin = id => adminIds.has(String(id));
   const esc = s => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const fmt = n => Number(n || 0).toLocaleString('vi-VN');
 
-  // ─── User menu ───────────────────────────────────────────
-  async function showMenu(chatId, firstName = '') {
-    const title =
-      `✨ <b>VIP ORACLE</b> · @SunNetWin\n` +
-      `────────────────────\n` +
-      `Xin chào <b>${esc(firstName) || 'bạn'}</b>!\n\n` +
-      `Chọn cách nhận key bên dưới:`;
-    const keyboard = [
-      [{ text: '🎯 Key miễn phí · Nhiệm vụ nhóm', callback_data: 'free_group' }],
-      [{ text: '💎 Mua key VIP', callback_data: 'buy' }],
-      [{ text: '📋 Hướng dẫn sử dụng', callback_data: 'help' }],
-      [{ text: '🔑 Kiểm tra trạng thái', callback_data: 'mystatus' }]
-    ];
-    await sendMessage(chatId, title, { reply_markup: { inline_keyboard: keyboard } });
+  // ─── USER MENU (command only, no buttons) ───────────────
+  async function showStart(chatId, name) {
+    await send(chatId,
+`✨ <b>VIP ORACLE</b>
+────────────────
+👋 Xin chào <b>${esc(name)}</b>
+
+📌 <b>Lệnh nhanh</b>
+/free — 🎯 Key miễn phí
+/buy — 💎 Mua key VIP
+/resetkey — 🔄 Reset thiết bị (tự động)
+/tiktok &lt;user|link&gt; — 📱 Info TikTok
+/fb &lt;user|link&gt; — 📘 Info Facebook
+/status — 🔑 Trạng thái yêu cầu
+
+🔑 Key · tối đa <b>3 thiết bị</b>
+💬 Hỗ trợ: @SunNetWin`);
   }
 
-  async function showAdminMenu(chatId) {
-    const text =
-      `🛠 <b>ADMIN CONTROL PANEL</b>\n` +
-      `────────────────────\n` +
-      `Dùng lệnh bên dưới (gõ trực tiếp):\n\n` +
-      `<b>Quản lý key</b>\n` +
-      `/keys — danh sách key gần đây\n` +
-      `/key &lt;id|mãkey&gt; — chi tiết 1 key\n` +
-      `/createkey [giờ] [thiếtbị] [nhãn] — tạo key\n` +
-      `/resetdevice &lt;id|mãkey&gt; — xóa hết thiết bị đã gắn\n` +
-      `/revoke &lt;id|mãkey&gt; — thu hồi key\n\n` +
-      `<b>Yêu cầu</b>\n` +
-      `/pending — danh sách chờ duyệt\n` +
-      `/approve &lt;id&gt; — duyệt yêu cầu\n` +
-      `/reject &lt;id&gt; — từ chối yêu cầu\n\n` +
-      `<b>Cấu hình</b>\n` +
-      `/settask &lt;nội dung&gt; — nhiệm vụ nhóm (admin tự soạn)\n` +
-      `/setbank &lt;mãNH&gt; &lt;STK&gt; &lt;chủTK&gt; — VietQR\n` +
-      `/addplan &lt;id&gt; &lt;nhãn&gt; &lt;giá&gt; &lt;giờ&gt;\n` +
-      `/delplan &lt;id&gt;\n` +
-      `/plans — xem gói đang bán\n` +
-      `/stats — thống kê nhanh\n` +
-      `/settg &lt;username&gt; — username bot (không @)\n\n` +
-      `Ví dụ:\n` +
-      `<code>/createkey 24 3 Key VIP 1 ngày</code>\n` +
-      `<code>/resetdevice ABC12</code>\n` +
-      `<code>/settask Đăng bài vào nhóm bất kỳ và gửi ảnh + link</code>`;
-    await sendMessage(chatId, text);
+  async function showAdminHelp(chatId) {
+    await send(chatId,
+`🛠 <b>ADMIN</b>
+────────────────
+🔑 <b>Key</b>
+/keys — danh sách
+/key &lt;id|mã&gt; — chi tiết
+/createkey [giờ] [TB] [nhãn]
+/resetdevice &lt;id|mã&gt;
+/revoke &lt;id|mã&gt;
+
+📩 <b>Yêu cầu</b>
+/pending
+/approve &lt;id&gt;
+/reject &lt;id&gt;
+
+⚙️ <b>Cấu hình</b>
+/settask &lt;nội dung&gt;
+/setbank &lt;NH&gt; &lt;STK&gt; &lt;chủ&gt;
+/addplan &lt;id&gt; &lt;nhãn&gt; &lt;giá&gt; &lt;giờ&gt;
+/delplan &lt;id&gt;
+/plans
+/settg &lt;user&gt;
+/stats
+
+VD: <code>/createkey 24 3 VIP 1N</code>`);
   }
 
   async function notifyAdmins(request, proofFileId) {
     if (!adminIds.size) return;
     const planText = request.type === 'payment'
-      ? `Gói: ${request.planLabel}\nGiá: ${Number(request.price || 0).toLocaleString('vi-VN')}đ\nThời hạn: ${request.durationHours} giờ`
-      : 'Phần thưởng: Key miễn phí';
+      ? `💎 ${request.planLabel} · ${fmt(request.price)}đ · ${request.durationHours}h`
+      : request.type === 'reset' ? '🔄 Xin reset thiết bị' : '🎯 Key free';
     const caption =
-      `📩 <b>YÊU CẦU #${request.id}</b>\n` +
-      `Loại: ${request.type === 'payment' ? '💳 Thanh toán' : '🎯 Nhiệm vụ nhóm'}\n` +
-      `User: ${esc(request.userName || 'Người dùng')} (@${esc(request.username || '—')})\n` +
-      `TG ID: <code>${request.telegramId}</code>\n` +
-      `${request.groupLink ? `Nhóm: ${esc(request.groupLink)}\n` : ''}` +
-      `${planText}\n` +
-      `Gửi lúc: ${new Date(request.createdAt).toLocaleString('vi-VN')}\n\n` +
-      `Kiểm tra ảnh/chứng từ rồi duyệt.`;
-    const reply_markup = {
-      inline_keyboard: [[
-        { text: '✅ DUYỆT & CẤP KEY', callback_data: `review:yes:${request.id}` },
-        { text: '❌ TỪ CHỐI', callback_data: `review:no:${request.id}` }
-      ]]
-    };
+`📩 <b>#${request.id}</b> · ${request.type === 'payment' ? '💳' : request.type === 'reset' ? '🔄' : '🎯'}
+👤 ${esc(request.userName)} (@${esc(request.username || '—')})
+🆔 <code>${request.telegramId}</code>
+${request.groupLink ? `🔗 ${esc(request.groupLink)}\n` : ''}${request.resetKeyHint ? `🔑 Key: <code>${esc(request.resetKeyHint)}</code>\n` : ''}${planText}
+🕐 ${new Date(request.createdAt).toLocaleString('vi-VN')}
+
+✅ /approve ${request.id}
+❌ /reject ${request.id}`;
     for (const adminId of adminIds) {
       try {
-        if (proofFileId) await sendPhoto(adminId, proofFileId, { caption, reply_markup });
-        else await sendMessage(adminId, caption, { reply_markup });
+        if (proofFileId) await sendPhoto(adminId, proofFileId, { caption });
+        else await send(adminId, caption);
       } catch (e) {
-        console.warn('[telegram] cannot notify admin', adminId, e.message);
+        console.warn('[telegram] notify admin fail', adminId, e.message);
       }
     }
   }
 
   async function deliverReviewedKey(result, chatIdForReview) {
-    if (!result || !result.ok || !result.key || !result.request) return;
+    if (!result || !result.ok || !result.request) return;
     const req = result.request;
+    if (req.type === 'reset') {
+      try {
+        await send(req.telegramId,
+`✅ <b>RESET THÀNH CÔNG</b>
+────────────────
+🔑 Key đã được xóa hết thiết bị cũ.
+📱 Giờ đăng nhập lại tối đa <b>3 máy</b>.`);
+        if (options.markDelivered) options.markDelivered(req.id);
+      } catch (e) {
+        if (chatIdForReview) await send(chatIdForReview, `Đã reset nhưng chưa gửi được tin cho user: ${e.message}`).catch(() => null);
+      }
+      return;
+    }
+    if (!result.key) return;
     const expiresText = req.durationHours > 0
       ? new Date(Date.now() + req.durationHours * 3600000).toLocaleString('vi-VN')
       : 'Không hết hạn';
     const text =
-      `✅ <b>YÊU CẦU ĐÃ ĐƯỢC DUYỆT</b>\n` +
-      `────────────────────\n` +
-      `🔑 Key của bạn:\n<code>${result.key}</code>\n\n` +
-      `Gói: ${esc(req.planLabel || 'Key miễn phí')}\n` +
-      `Thời hạn: ${req.durationHours} giờ\n` +
-      `Hết hạn dự kiến: ${expiresText}\n` +
-      `Giới hạn thiết bị: <b>3 máy</b>\n\n` +
-      `Mở website VIP ORACLE → nhập key.\nKhông chia sẻ key với người khác.`;
+`✅ <b>KEY ĐÃ DUYỆT</b>
+────────────────
+🔑 <code>${result.key}</code>
+
+📦 ${esc(req.planLabel || 'Key free')}
+⏱ ${req.durationHours}h · Hết: ${expiresText}
+📱 Tối đa <b>3 thiết bị</b>
+
+🌐 Nhập key trên website VIP ORACLE`;
     try {
-      await sendMessage(req.telegramId, text);
+      await send(req.telegramId, text);
       if (options.markDelivered) options.markDelivered(req.id);
     } catch (e) {
-      console.warn('[telegram] send issued key failed for', req.telegramId, e.message);
-      if (chatIdForReview) await sendMessage(chatIdForReview, `Đã duyệt nhưng bot chưa gửi được key. Yêu cầu user nhắn /start rồi thử lại. Lỗi: ${e.message}`).catch(() => null);
+      console.warn('[telegram] deliver key fail', req.telegramId, e.message);
+      if (chatIdForReview) await send(chatIdForReview, `Duyệt OK nhưng chưa gửi key: ${e.message}`).catch(() => null);
     }
   }
 
@@ -685,7 +694,7 @@ function startTelegramBot(options) {
     const sessions = options.getSessions();
     const session = sessions[userId];
     if (!session || session.type !== mode) {
-      await sendMessage(message.chat.id, '⚠️ Hãy chọn đúng loại yêu cầu từ menu trước khi gửi ảnh.\nGõ /start để mở menu.');
+      await send(message.chat.id, '⚠️ Gõ /free hoặc /buy trước khi gửi ảnh.');
       return;
     }
     const photos = message.photo || [];
@@ -695,7 +704,7 @@ function startTelegramBot(options) {
     if (mode === 'group') {
       const match = caption.match(/(https?:\/\/\S+|t\.me\/\S+|www\.\S+)/i);
       if (!match) {
-        await sendMessage(message.chat.id, '📷 Ảnh chưa có <b>đường dẫn nhóm</b>.\nGửi lại ảnh và ghi <b>link nhóm</b> vào phần chú thích của ảnh.');
+        await send(message.chat.id, '📷 Gửi lại ảnh + <b>link nhóm</b> trong chú thích.');
         return;
       }
       groupLink = match[0];
@@ -705,7 +714,7 @@ function startTelegramBot(options) {
       plan = plans().find(p => p.id === session.planId);
       if (!plan) {
         delete sessions[userId]; options.saveSessions(sessions);
-        await sendMessage(message.chat.id, 'Gói key này hiện không còn khả dụng. Gõ /start để chọn lại.');
+        await send(message.chat.id, '⚠️ Gói hết hạn. Gõ /buy chọn lại.');
         return;
       }
     }
@@ -713,30 +722,79 @@ function startTelegramBot(options) {
       id: idShort(), type: mode === 'payment' ? 'payment' : 'group', status: 'pending',
       telegramId: userId, username: from.username || '', userName: displayName(from),
       groupLink, caption, proofFileId: photos[photos.length - 1].file_id,
-      planId: plan?.id || null, planLabel: plan?.label || 'Key miễn phí',
+      planId: plan?.id || null, planLabel: plan?.label || 'Key free',
       price: Number(plan?.price || 0), durationHours: Number(plan?.durationHours || 5),
       createdAt: Date.now()
     };
     options.addRequest(request);
     delete sessions[userId]; options.saveSessions(sessions);
-    await sendMessage(message.chat.id,
-      `✅ Đã gửi yêu cầu <b>#${request.id}</b> cho admin.\nBot sẽ nhắn bạn ngay khi có kết quả.`);
+    await send(message.chat.id, `✅ Đã gửi <b>#${request.id}</b>\n⏳ Chờ admin duyệt.`);
     await notifyAdmins(request, request.proofFileId);
   }
 
-  // ─── Resolve key by id or plain key ──────────────────────
   function resolveKey(query) {
     const q = String(query || '').trim();
     if (!q) return null;
-    // try by id first
-    let k = (options.getKeys ? options.getKeys() : []).find(x => x.id === q || x.id?.toLowerCase() === q.toLowerCase());
+    const list = options.getKeys ? options.getKeys() : [];
+    let k = list.find(x => x.id === q || String(x.id).toLowerCase() === q.toLowerCase());
     if (k) return k;
-    // try plain key hash
     if (options.findKey) return options.findKey(q);
     return null;
   }
 
-  // ─── Admin command handlers ──────────────────────────────
+  // ─── TikTok / Facebook lookup ───────────────────────────
+  async function lookupTikTok(input) {
+    let username = String(input || '').trim();
+    const urlMatch = username.match(/tiktok\.com\/@([A-Za-z0-9._]+)/i);
+    if (urlMatch) username = urlMatch[1];
+    username = username.replace(/^@/, '').split(/[/?#\s]/)[0];
+    if (!username || username.length < 2) throw new Error('Username/link không hợp lệ.');
+    const profileUrl = `https://www.tiktok.com/@${username}`;
+    const oembedUrl = `https://www.tiktok.com/oembed?url=${encodeURIComponent(profileUrl)}`;
+    const r = await fetch(oembedUrl, { signal: AbortSignal.timeout(10000), headers: { 'user-agent': 'Mozilla/5.0' } });
+    if (!r.ok) throw new Error('Không lấy được info (user ẩn / không tồn tại).');
+    const d = await r.json();
+    return {
+      username,
+      title: d.title || d.author_name || username,
+      author: d.author_name || username,
+      authorUrl: d.author_url || profileUrl,
+      thumb: d.thumbnail_url || '',
+      profileUrl
+    };
+  }
+
+  async function lookupFacebook(input) {
+    let raw = String(input || '').trim();
+    let url = raw;
+    if (!/^https?:\/\//i.test(raw)) {
+      raw = raw.replace(/^@/, '');
+      url = `https://www.facebook.com/${encodeURIComponent(raw)}`;
+    }
+    // Facebook oEmbed for posts; for profiles use open graph best-effort
+    try {
+      const oembed = `https://www.facebook.com/plugins/post/oembed.json?url=${encodeURIComponent(url)}`;
+      const r = await fetch(oembed, { signal: AbortSignal.timeout(10000), headers: { 'user-agent': 'Mozilla/5.0' } });
+      if (r.ok) {
+        const d = await r.json();
+        return {
+          url: d.author_url || url,
+          author: d.author_name || 'Facebook',
+          html: (d.html || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 200),
+          provider: d.provider_name || 'Facebook'
+        };
+      }
+    } catch {}
+    // fallback: just validate URL shape
+    return {
+      url,
+      author: raw.replace(/^https?:\/\/(www\.)?facebook\.com\//i, '').split(/[/?#]/)[0] || 'Facebook',
+      html: 'Không lấy được chi tiết công khai (profile private hoặc cần đăng nhập).',
+      provider: 'Facebook'
+    };
+  }
+
+  // ─── Admin commands ─────────────────────────────────────
   async function handleAdminCommand(message, text) {
     const chatId = message.chat.id;
     const parts = text.split(/\s+/);
@@ -744,124 +802,128 @@ function startTelegramBot(options) {
     const args = parts.slice(1);
     const argText = text.replace(/^\/\S+\s*/, '').trim();
 
-    if (cmd === 'admin' || cmd === 'panel') return showAdminMenu(chatId);
+    if (cmd === 'admin' || cmd === 'panel') return showAdminHelp(chatId);
 
     if (cmd === 'stats') {
       const keys = options.getKeys ? options.getKeys() : [];
-      const active = keys.filter(k => k.status === 'active' && !options.isExpired?.(k)).length;
+      const active = keys.filter(k => k.status === 'active' && !(options.isExpired?.(k))).length;
       const pending = (options.getRequests ? options.getRequests() : []).filter(r => r.status === 'pending').length;
-      return sendMessage(chatId,
-        `📊 <b>THỐNG KÊ</b>\n` +
-        `────────────────────\n` +
-        `Key tổng: ${keys.length}\n` +
-        `Key đang hoạt động: ${active}\n` +
-        `Yêu cầu chờ duyệt: ${pending}`);
+      return send(chatId, `📊 <b>STATS</b>\n🔑 Key: ${keys.length} · ✅ Active: ${active}\n⏳ Pending: ${pending}`);
     }
 
     if (cmd === 'keys') {
-      const keys = (options.getKeys ? options.getKeys() : []).slice().sort((a, b) => (b.created || 0) - (a.created || 0)).slice(0, 15);
-      if (!keys.length) return sendMessage(chatId, 'Chưa có key nào.');
+      const keys = (options.getKeys ? options.getKeys() : []).slice().sort((a, b) => (b.created || 0) - (a.created || 0)).slice(0, 12);
+      if (!keys.length) return send(chatId, '📭 Chưa có key.');
       const lines = keys.map(k => {
-        const devices = (k.deviceHashes || []).length;
+        const d = (k.deviceHashes || []).length;
         const lim = k.deviceLimit || 3;
-        const exp = k.expiresAt ? new Date(k.expiresAt).toLocaleString('vi-VN') : '∞';
         const st = k.status === 'revoked' ? '🚫' : (options.isExpired?.(k) ? '⏰' : '✅');
-        return `${st} <code>${k.id}</code> · ${esc(k.label)} · ${devices}/${lim} TB · hết ${exp}`;
+        return `${st} <code>${k.id}</code> · ${esc(k.label)} · 📱${d}/${lim}`;
       });
-      return sendMessage(chatId, `🔑 <b>KEY GẦN ĐÂY</b> (15)\n────────────────────\n` + lines.join('\n'));
+      return send(chatId, `🔑 <b>KEYS</b>\n` + lines.join('\n'));
     }
 
     if (cmd === 'key') {
-      if (!args[0]) return sendMessage(chatId, 'Cú pháp: <code>/key &lt;id|mãkey&gt;</code>');
+      if (!args[0]) return send(chatId, '📌 <code>/key &lt;id|mã&gt;</code>');
       const k = resolveKey(args[0]);
-      if (!k) return sendMessage(chatId, 'Không tìm thấy key.');
-      const devices = (k.deviceHashes || []).length;
-      return sendMessage(chatId,
-        `🔑 <b>CHI TIẾT KEY</b>\n` +
-        `────────────────────\n` +
-        `ID: <code>${k.id}</code>\n` +
-        `Nhãn: ${esc(k.label)}\n` +
-        `Trạng thái: ${k.status}\n` +
-        `Thiết bị: ${devices}/${k.deviceLimit || 3}\n` +
-        `Hết hạn: ${k.expiresAt ? new Date(k.expiresAt).toLocaleString('vi-VN') : 'Không'}\n` +
-        `Nguồn: ${k.source || '—'}\n` +
-        `TG ID: ${k.telegramId || '—'}\n` +
-        `Tạo: ${new Date(k.created).toLocaleString('vi-VN')}\n` +
-        `Dùng lần cuối: ${k.lastUsed ? new Date(k.lastUsed).toLocaleString('vi-VN') : '—'}`);
+      if (!k) return send(chatId, '❌ Không tìm thấy.');
+      const d = (k.deviceHashes || []).length;
+      return send(chatId,
+`🔑 <b>${esc(k.label)}</b>
+🆔 <code>${k.id}</code>
+📊 ${k.status} · 📱 ${d}/${k.deviceLimit || 3}
+⏱ ${k.expiresAt ? new Date(k.expiresAt).toLocaleString('vi-VN') : '∞'}
+📡 ${k.source || '—'} · TG ${k.telegramId || '—'}`);
     }
 
     if (cmd === 'createkey') {
       const hours = Math.max(0, parseInt(args[0], 10) || 24);
       const devices = Math.max(1, Math.min(10, parseInt(args[1], 10) || 3));
-      const label = args.slice(2).join(' ') || `Key admin ${hours}h`;
+      const label = args.slice(2).join(' ') || `Key ${hours}h`;
       try {
         const issued = options.createKey({ label, durationHours: hours, deviceLimit: devices, source: 'telegram-admin' });
-        return sendMessage(chatId,
-          `✅ <b>ĐÃ TẠO KEY</b>\n` +
-          `────────────────────\n` +
-          `Key: <code>${issued.plainKey}</code>\n` +
-          `ID: <code>${issued.record.id}</code>\n` +
-          `Nhãn: ${esc(label)}\n` +
-          `Thời hạn: ${hours || '∞'} giờ\n` +
-          `Thiết bị tối đa: ${devices}`);
+        return send(chatId,
+`✅ <b>TẠO KEY</b>
+🔑 <code>${issued.plainKey}</code>
+🆔 <code>${issued.record.id}</code>
+⏱ ${hours || '∞'}h · 📱 ${devices} TB`);
       } catch (e) {
-        return sendMessage(chatId, `Lỗi: ${e.message}`);
+        return send(chatId, `❌ ${e.message}`);
       }
     }
 
     if (cmd === 'resetdevice' || cmd === 'resetdevices') {
-      if (!args[0]) return sendMessage(chatId, 'Cú pháp: <code>/resetdevice &lt;id|mãkey&gt;</code>');
+      if (!args[0]) return send(chatId, '📌 <code>/resetdevice &lt;id|mã&gt;</code>');
       const k = resolveKey(args[0]);
-      if (!k) return sendMessage(chatId, 'Không tìm thấy key.');
+      if (!k) return send(chatId, '❌ Không tìm thấy.');
       k.deviceHashes = [];
       if (options.saveKeys) options.saveKeys();
-      return sendMessage(chatId, `✅ Đã reset thiết bị cho key <code>${k.id}</code> (${esc(k.label)}).\nGiờ key có thể đăng nhập lại tối đa ${k.deviceLimit || 3} thiết bị.`);
+      return send(chatId, `🔄 Đã reset 📱 key <code>${k.id}</code>\nGiới hạn: ${k.deviceLimit || 3} TB`);
     }
 
     if (cmd === 'revoke') {
-      if (!args[0]) return sendMessage(chatId, 'Cú pháp: <code>/revoke &lt;id|mãkey&gt;</code>');
+      if (!args[0]) return send(chatId, '📌 <code>/revoke &lt;id|mã&gt;</code>');
       const k = resolveKey(args[0]);
-      if (!k) return sendMessage(chatId, 'Không tìm thấy key.');
+      if (!k) return send(chatId, '❌ Không tìm thấy.');
       k.status = 'revoked';
       if (options.saveKeys) options.saveKeys();
-      return sendMessage(chatId, `🚫 Đã thu hồi key <code>${k.id}</code> (${esc(k.label)}).`);
+      return send(chatId, `🚫 Đã thu hồi <code>${k.id}</code>`);
     }
 
     if (cmd === 'pending') {
-      const list = (options.getRequests ? options.getRequests() : []).filter(r => r.status === 'pending').slice(0, 20);
-      if (!list.length) return sendMessage(chatId, 'Không có yêu cầu nào đang chờ.');
-      const lines = list.map(r =>
-        `#${r.id} · ${r.type === 'payment' ? '💳' : '🎯'} · ${esc(r.userName)} · ${new Date(r.createdAt).toLocaleString('vi-VN')}`
-      );
-      return sendMessage(chatId, `⏳ <b>CHỜ DUYỆT</b> (${list.length})\n────────────────────\n` + lines.join('\n') + `\n\nDuyệt: <code>/approve ID</code>\nTừ chối: <code>/reject ID</code>`);
+      const list = (options.getRequests ? options.getRequests() : []).filter(r => r.status === 'pending').slice(0, 15);
+      if (!list.length) return send(chatId, '✅ Không có pending.');
+      const lines = list.map(r => {
+        const icon = r.type === 'payment' ? '💳' : r.type === 'reset' ? '🔄' : '🎯';
+        return `${icon} <code>${r.id}</code> · ${esc(r.userName)} · ${new Date(r.createdAt).toLocaleString('vi-VN')}`;
+      });
+      return send(chatId, `⏳ <b>PENDING</b>\n` + lines.join('\n') + `\n\n✅ /approve ID\n❌ /reject ID`);
     }
 
     if (cmd === 'approve' || cmd === 'reject') {
-      if (!args[0]) return sendMessage(chatId, `Cú pháp: <code>/${cmd} &lt;id&gt;</code>`);
+      if (!args[0]) return send(chatId, `📌 <code>/${cmd} &lt;id&gt;</code>`);
       const approved = cmd === 'approve';
+      // special handling for reset type
+      const req = (options.getRequests ? options.getRequests() : []).find(r => r.id === args[0]);
+      if (req && req.type === 'reset' && approved) {
+        const k = resolveKey(req.resetKeyPlain || req.resetKeyHint || '');
+        if (!k) {
+          // try by id stored
+          const byId = (options.getKeys ? options.getKeys() : []).find(x => x.id === req.resetKeyId);
+          if (byId) {
+            byId.deviceHashes = [];
+            if (options.saveKeys) options.saveKeys();
+          } else {
+            return send(chatId, '❌ Không tìm thấy key để reset.');
+          }
+        } else {
+          k.deviceHashes = [];
+          if (options.saveKeys) options.saveKeys();
+        }
+      }
       const result = options.reviewRequest(args[0], approved, `telegram-cmd:${message.from.id}`);
-      if (!result.ok) return sendMessage(chatId, result.error || 'Không xử lý được.');
+      if (!result.ok) return send(chatId, `❌ ${result.error || 'Lỗi'}`);
       if (approved) await deliverReviewedKey(result, chatId);
-      else await sendMessage(result.request.telegramId, `❌ Yêu cầu #${result.request.id} đã bị từ chối.`).catch(() => null);
-      return sendMessage(chatId, approved ? `✅ Đã duyệt #${args[0]} và gửi key.` : `Đã từ chối #${args[0]}.`);
+      else await send(result.request.telegramId, `❌ Yêu cầu #${result.request.id} bị từ chối.`).catch(() => null);
+      return send(chatId, approved ? `✅ #${args[0]}` : `🚫 #${args[0]}`);
     }
 
     if (cmd === 'settask') {
-      if (!argText) return sendMessage(chatId, 'Cú pháp: <code>/settask &lt;nội dung nhiệm vụ nhóm&gt;</code>\nAdmin tự soạn toàn bộ nội dung, không bị giới hạn 500 TV.');
+      if (!argText) return send(chatId, '📌 <code>/settask &lt;nội dung&gt;</code>');
       const cfg = options.getConfig();
       cfg.groupTaskText = argText.slice(0, 2000);
       if (options.saveConfig) options.saveConfig(cfg);
-      return sendMessage(chatId, `✅ Đã cập nhật nhiệm vụ nhóm:\n\n${esc(cfg.groupTaskText)}`);
+      return send(chatId, `✅ Nhiệm vụ nhóm:\n${esc(cfg.groupTaskText)}`);
     }
 
     if (cmd === 'setbank') {
-      if (args.length < 3) return sendMessage(chatId, 'Cú pháp: <code>/setbank &lt;mãNH&gt; &lt;STK&gt; &lt;chủ tài khoản&gt;</code>\nVD: <code>/setbank VCB 0123456789 NGUYEN VAN A</code>');
+      if (args.length < 3) return send(chatId, '📌 <code>/setbank &lt;NH&gt; &lt;STK&gt; &lt;chủ&gt;</code>');
       const cfg = options.getConfig();
       cfg.bankCode = args[0];
       cfg.bankAccount = args[1];
       cfg.bankAccountName = args.slice(2).join(' ');
       if (options.saveConfig) options.saveConfig(cfg);
-      return sendMessage(chatId, `✅ VietQR đã cập nhật:\nNH: ${esc(cfg.bankCode)}\nSTK: ${esc(cfg.bankAccount)}\nChủ TK: ${esc(cfg.bankAccountName)}`);
+      return send(chatId, `✅ 🏦 ${esc(cfg.bankCode)} · <code>${esc(cfg.bankAccount)}</code>\n👤 ${esc(cfg.bankAccountName)}`);
     }
 
     if (cmd === 'settg') {
@@ -869,229 +931,273 @@ function startTelegramBot(options) {
       const cfg = options.getConfig();
       cfg.telegramUsername = u;
       if (options.saveConfig) options.saveConfig(cfg);
-      return sendMessage(chatId, `✅ Username bot: @${esc(u) || '(xóa)'}`);
+      return send(chatId, `✅ Bot: @${esc(u) || '—'}`);
     }
 
     if (cmd === 'addplan') {
-      if (args.length < 4) return sendMessage(chatId, 'Cú pháp: <code>/addplan &lt;id&gt; &lt;nhãn&gt; &lt;giá&gt; &lt;giờ&gt;</code>\nVD: <code>/addplan vip1 "VIP 1 ngày" 50000 24</code>');
+      if (args.length < 4) return send(chatId, '📌 <code>/addplan id nhãn giá giờ</code>');
       const id = args[0].toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 24);
       const price = parseInt(args[args.length - 2], 10);
       const hours = parseInt(args[args.length - 1], 10);
       const label = args.slice(1, -2).join(' ').replace(/^["']|["']$/g, '');
-      if (!id || !label || !price || !hours) return sendMessage(chatId, 'Thiếu thông tin gói.');
+      if (!id || !label || !price || !hours) return send(chatId, '❌ Thiếu thông tin.');
       const cfg = options.getConfig();
       cfg.plans = cfg.plans || [];
-      if (cfg.plans.some(p => p.id === id)) return sendMessage(chatId, 'ID gói đã tồn tại.');
+      if (cfg.plans.some(p => p.id === id)) return send(chatId, '❌ ID trùng.');
       cfg.plans.push({ id, label, price, durationHours: hours, active: true });
       if (options.saveConfig) options.saveConfig(cfg);
-      return sendMessage(chatId, `✅ Đã thêm gói <b>${esc(label)}</b> (${id}) · ${price.toLocaleString('vi-VN')}đ · ${hours}h`);
+      return send(chatId, `✅ 💎 ${esc(label)} · ${fmt(price)}đ · ${hours}h`);
     }
 
     if (cmd === 'delplan') {
-      if (!args[0]) return sendMessage(chatId, 'Cú pháp: <code>/delplan &lt;id&gt;</code>');
+      if (!args[0]) return send(chatId, '📌 <code>/delplan &lt;id&gt;</code>');
       const cfg = options.getConfig();
       const before = (cfg.plans || []).length;
       cfg.plans = (cfg.plans || []).filter(p => p.id !== args[0].toLowerCase());
       if (options.saveConfig) options.saveConfig(cfg);
-      return sendMessage(chatId, cfg.plans.length < before ? `✅ Đã xóa gói ${args[0]}` : 'Không tìm thấy gói.');
+      return send(chatId, cfg.plans.length < before ? `✅ Xóa ${args[0]}` : '❌ Không thấy.');
     }
 
     if (cmd === 'plans') {
       const list = plans();
-      if (!list.length) return sendMessage(chatId, 'Chưa có gói nào. Dùng /addplan để thêm.');
-      const lines = list.map(p => `• <code>${p.id}</code> · ${esc(p.label)} · ${Number(p.price).toLocaleString('vi-VN')}đ · ${p.durationHours}h`);
-      return sendMessage(chatId, `💎 <b>GÓI ĐANG BÁN</b>\n────────────────────\n` + lines.join('\n'));
+      if (!list.length) return send(chatId, '📭 Chưa có gói.');
+      return send(chatId, `💎 <b>GÓI</b>\n` + list.map(p => `• <code>${p.id}</code> ${esc(p.label)} · ${fmt(p.price)}đ · ${p.durationHours}h`).join('\n'));
     }
 
-    return sendMessage(chatId, 'Lệnh không nhận diện. Gõ /admin để xem danh sách lệnh.');
+    return send(chatId, '❓ Gõ /admin');
   }
 
+  // ─── Message router ─────────────────────────────────────
   async function handleMessage(message) {
     if (!message || !message.chat) return;
     const from = message.from || {};
     const text = String(message.text || '').trim();
     const chatId = message.chat.id;
     const fromId = String(from.id);
+    const sessions = options.getSessions();
 
-    // Admin commands
+    // photo proofs
+    if (message.photo?.length) {
+      const session = sessions[fromId];
+      if (session?.type === 'group') return createProofRequest(message, 'group');
+      if (session?.type === 'payment') return createProofRequest(message, 'payment');
+      return send(chatId, '⚠️ Gõ /free hoặc /buy trước.');
+    }
+
+    if (!text) return;
+
+    // admin commands first
     if (text.startsWith('/') && isAdmin(fromId)) {
       const cmd = text.split(/\s+/)[0].toLowerCase().replace(/^\//, '').split('@')[0];
       const adminCmds = new Set(['admin', 'panel', 'stats', 'keys', 'key', 'createkey', 'resetdevice', 'resetdevices', 'revoke', 'pending', 'approve', 'reject', 'settask', 'setbank', 'settg', 'addplan', 'delplan', 'plans']);
       if (adminCmds.has(cmd)) return handleAdminCommand(message, text);
     }
 
-    if (text === '/start' || text.startsWith('/start ')) return showMenu(chatId, displayName(from));
-    if (text === '/help') {
-      return sendMessage(chatId,
-        `📋 <b>HƯỚNG DẪN</b>\n` +
-        `────────────────────\n` +
-        `1. <b>Key miễn phí</b>: làm nhiệm vụ nhóm do admin quy định → gửi ảnh + link → chờ duyệt.\n` +
-        `2. <b>Mua key VIP</b>: chọn gói → chuyển khoản VietQR → gửi ảnh chứng từ.\n` +
-        `3. Mỗi key dùng tối đa <b>3 thiết bị</b>. Vượt quá sẽ không đăng nhập được.\n` +
-        `4. Gõ /start để mở menu bất cứ lúc nào.`);
+    const parts = text.split(/\s+/);
+    const cmd = parts[0].toLowerCase().replace(/^\//, '').split('@')[0];
+    const args = parts.slice(1);
+    const argText = text.replace(/^\/\S+\s*/, '').trim();
+
+    if (cmd === 'start') return showStart(chatId, displayName(from));
+
+    if (cmd === 'status') {
+      const pending = (options.getRequests ? options.getRequests() : []).filter(r => r.telegramId === fromId && r.status === 'pending');
+      if (!pending.length) return send(chatId, '✅ Không có yêu cầu chờ.');
+      return send(chatId, `⏳ <b>${pending.length} yêu cầu</b>\n` + pending.map(r => `• #${r.id} ${r.type === 'payment' ? '💳' : r.type === 'reset' ? '🔄' : '🎯'}`).join('\n'));
     }
-    if (text === '/admin' && isAdmin(fromId)) return showAdminMenu(chatId);
 
-    if (message.photo?.length) {
-      const userId = String(from.id);
-      const session = options.getSessions()[userId];
-      if (session?.type === 'group') return createProofRequest(message, 'group');
-      if (session?.type === 'payment') return createProofRequest(message, 'payment');
-      return sendMessage(chatId, 'Chưa có yêu cầu chờ ảnh.\nGõ /start và chọn “Key miễn phí” hoặc “Mua key VIP” trước.');
+    if (cmd === 'free') {
+      sessions[fromId] = { type: 'group', startedAt: Date.now() };
+      options.saveSessions(sessions);
+      const task = String(options.getConfig().groupTaskText || 'Làm nhiệm vụ theo yêu cầu admin.');
+      return send(chatId,
+`🎯 <b>KEY FREE</b>
+────────────────
+📋 ${esc(task)}
+
+📷 Gửi <b>ảnh</b> + <b>link nhóm</b> trong chú thích
+⏳ Admin duyệt → nhận key (3 TB)`);
     }
-    if (text) return sendMessage(chatId, 'Gõ /start để mở menu nhận key.');
-  }
 
-  async function handleCallback(query) {
-    const data = String(query.data || '');
-    const fromId = String(query.from?.id || '');
-    const chatId = query.message?.chat?.id || fromId;
+    if (cmd === 'buy') {
+      const available = plans();
+      if (!available.length) return send(chatId, '📭 Admin chưa mở bán gói.');
+      const lines = available.map((p, i) => `${i + 1}. <b>${esc(p.label)}</b>\n   💰 ${fmt(p.price)}đ · ⏱ ${p.durationHours}h\n   👉 <code>/pay ${p.id}</code>`);
+      return send(chatId,
+`💎 <b>MUA KEY VIP</b>
+────────────────
+${lines.join('\n\n')}
+📱 Key = 3 thiết bị`);
+    }
 
-    if (data.startsWith('review:')) {
-      if (!adminIds.has(fromId)) return answer(query.id, 'Bạn không có quyền duyệt.', true);
-      const [, decision, requestId] = data.split(':');
-      const approved = decision === 'yes';
-      try {
-        const result = await options.reviewRequest(requestId, approved, `telegram:${fromId}`);
-        if (!result || !result.ok) return answer(query.id, result?.error || 'Yêu cầu đã xử lý hoặc không tồn tại.', true);
-        await answer(query.id, approved ? 'Đã duyệt yêu cầu.' : 'Đã từ chối yêu cầu.');
-        if (approved) await deliverReviewedKey(result, chatId);
-        else await sendMessage(result.request.telegramId, `❌ Yêu cầu #${result.request.id} đã bị từ chối.`).catch(() => null);
-        const revised = `${query.message?.caption || query.message?.text || ''}\n\nTRẠNG THÁI: ${approved ? '✅ ĐÃ DUYỆT' : '❌ ĐÃ TỪ CHỐI'} bởi ${fromId}`;
-        if (query.message?.photo) {
-          await tg('editMessageCaption', { chat_id: chatId, message_id: query.message.message_id, caption: revised.slice(0, 1020) }).catch(() => null);
-        } else {
-          await tg('editMessageText', { chat_id: chatId, message_id: query.message.message_id, text: revised.slice(0, 4000), parse_mode: 'HTML' }).catch(() => null);
-        }
-      } catch (e) {
-        await answer(query.id, `Lỗi: ${e.message}`, true);
-      }
+    if (cmd === 'pay') {
+      const planId = (args[0] || '').toLowerCase();
+      const plan = plans().find(p => p.id === planId);
+      if (!plan) return send(chatId, '❌ Gói không tồn tại. Gõ /buy');
+      const config = options.getConfig();
+      if (!config.bankCode || !config.bankAccount || !config.bankAccountName) return send(chatId, '⚠️ Admin chưa cấu hình VietQR.');
+      const addInfo = `KEYVIP ${fromId}`;
+      const qr = `https://img.vietqr.io/image/${encodeURIComponent(config.bankCode)}-${encodeURIComponent(config.bankAccount)}-compact2.jpg?amount=${encodeURIComponent(String(plan.price))}&addInfo=${encodeURIComponent(addInfo)}&accountName=${encodeURIComponent(config.bankAccountName)}`;
+      sessions[fromId] = { type: 'payment', planId: plan.id, startedAt: Date.now() };
+      options.saveSessions(sessions);
+      await sendPhoto(chatId, qr, {
+        caption:
+`💳 <b>${esc(plan.label)}</b>
+💰 ${fmt(plan.price)}đ · ⏱ ${plan.durationHours}h
+🏦 ${esc(config.bankCode)} · <code>${esc(config.bankAccount)}</code>
+👤 ${esc(config.bankAccountName)}
+📝 CK: <code>${addInfo}</code>
+
+📷 Sau CK → gửi <b>ảnh chứng từ</b>`
+      });
       return;
     }
 
-    const sessions = options.getSessions();
-    const userId = fromId;
-    const config = options.getConfig();
-
-    if (data === 'help') {
-      await answer(query.id);
-      return sendMessage(chatId,
-        `📋 <b>HƯỚNG DẪN CHI TIẾT</b>\n` +
-        `────────────────────\n` +
-        `<b>1) Key miễn phí</b>\n` +
-        `Hoàn thành nhiệm vụ do admin quy định (nội dung + điều kiện do admin tự đặt).\n` +
-        `Gửi ảnh kèm link nhóm trong chú thích → admin duyệt → nhận key.\n\n` +
-        `<b>2) Mua key VIP</b>\n` +
-        `Chọn gói → quét VietQR → chuyển khoản đúng nội dung → gửi ảnh chứng từ.\n` +
-        `Admin xác minh rồi cấp key.\n\n` +
-        `<b>3) Giới hạn thiết bị</b>\n` +
-        `Mỗi key chỉ dùng được <b>tối đa 3 thiết bị</b>. Vượt quá sẽ không đăng nhập được. Admin có thể reset thiết bị nếu cần.`);
-    }
-
-    if (data === 'mystatus') {
-      await answer(query.id);
-      const pending = (options.getRequests ? options.getRequests() : []).filter(r => r.telegramId === userId && r.status === 'pending');
-      if (pending.length) {
-        return sendMessage(chatId, `⏳ Bạn đang có ${pending.length} yêu cầu chờ duyệt:\n` + pending.map(r => `• #${r.id} (${r.type === 'payment' ? 'Thanh toán' : 'Nhiệm vụ'})`).join('\n'));
+    if (cmd === 'resetkey') {
+      if (!argText) {
+        sessions[fromId] = { type: 'await_reset_key', startedAt: Date.now() };
+        options.saveSessions(sessions);
+        return send(chatId,
+`🔄 <b>RESET THIẾT BỊ</b>
+────────────────
+Gửi <b>mã key</b> cần reset.
+⚡ Tự động · không cần admin
+⏱ Thời hạn key <b>không đổi</b>`);
       }
-      return sendMessage(chatId, 'Bạn không có yêu cầu nào đang chờ. Gõ /start để nhận hoặc mua key.');
+      const plain = argText.trim();
+      const k = options.findKey ? options.findKey(plain) : null;
+      if (!k) return send(chatId, '❌ Key không hợp lệ.');
+      if (k.status === 'revoked') return send(chatId, '🚫 Key đã bị thu hồi.');
+      if (options.isExpired?.(k)) return send(chatId, '⏰ Key đã hết hạn.');
+      k.deviceHashes = [];
+      if (options.saveKeys) options.saveKeys();
+      delete sessions[fromId]; options.saveSessions(sessions);
+      const exp = k.expiresAt ? new Date(k.expiresAt).toLocaleString('vi-VN') : 'Không hết hạn';
+      return send(chatId,
+`✅ <b>RESET XONG</b>
+────────────────
+🔑 <code>${esc(k.id)}</code>
+📱 Đã xóa hết thiết bị cũ
+⏱ Hạn key: <b>${exp}</b> (không đổi)
+👉 Đăng nhập lại trên web (tối đa ${k.deviceLimit || 3} máy)`);
     }
 
-    if (data === 'free_group') {
-      sessions[userId] = { type: 'group', startedAt: Date.now() }; options.saveSessions(sessions);
-      await answer(query.id);
-      const task = String(config.groupTaskText || 'Đăng nội dung do admin cung cấp theo yêu cầu.');
-      return sendMessage(chatId,
-        `🎯 <b>NHIỆM VỤ NHẬN KEY FREE</b>\n` +
-        `────────────────────\n` +
-        `<b>Nội dung / yêu cầu:</b>\n${esc(task)}\n\n` +
-        `Sau khi hoàn thành, <b>gửi ảnh chụp màn hình</b> và ghi <b>link nhóm</b> vào phần chú thích ảnh.\n` +
-        `Admin sẽ kiểm tra rồi duyệt key (tối đa 3 thiết bị).`);
+    // waiting for reset key text — auto reset, no admin
+    if (sessions[fromId]?.type === 'await_reset_key' && !text.startsWith('/')) {
+      const plain = text.trim();
+      const k = options.findKey ? options.findKey(plain) : null;
+      if (!k) return send(chatId, '❌ Key không hợp lệ. Gửi lại hoặc /resetkey');
+      if (k.status === 'revoked') return send(chatId, '🚫 Key đã bị thu hồi.');
+      if (options.isExpired?.(k)) return send(chatId, '⏰ Key đã hết hạn.');
+      k.deviceHashes = [];
+      if (options.saveKeys) options.saveKeys();
+      delete sessions[fromId]; options.saveSessions(sessions);
+      const exp = k.expiresAt ? new Date(k.expiresAt).toLocaleString('vi-VN') : 'Không hết hạn';
+      return send(chatId,
+`✅ <b>RESET XONG</b>
+────────────────
+🔑 <code>${esc(k.id)}</code>
+📱 Đã xóa hết thiết bị cũ
+⏱ Hạn key: <b>${exp}</b> (không đổi)
+👉 Đăng nhập lại trên web (tối đa ${k.deviceLimit || 3} máy)`);
     }
 
-    if (data === 'buy') {
-      const available = plans();
-      if (!available.length) return answer(query.id, 'Admin chưa cấu hình gói key đang bán.', true);
-      await answer(query.id);
-      const keyboard = available.map(p => [{ text: `${p.label} · ${Number(p.price).toLocaleString('vi-VN')}đ · ${p.durationHours}h`, callback_data: `plan:${p.id}` }]);
-      keyboard.push([{ text: '« Quay lại menu', callback_data: 'back_menu' }]);
-      return sendMessage(chatId,
-        `💎 <b>CHỌN GÓI KEY VIP</b>\n` +
-        `────────────────────\n` +
-        `Sau khi chọn gói, chuyển khoản đúng số tiền theo QR.\nKey được cấp sau khi admin xác minh thanh toán.\nMỗi key dùng tối đa <b>3 thiết bị</b>.`,
-        { reply_markup: { inline_keyboard: keyboard } });
+    if (cmd === 'tiktok') {
+      if (!argText) return send(chatId, '📌 <code>/tiktok @user</code>\nhoặc <code>/tiktok https://tiktok.com/@user</code>');
+      await send(chatId, '⏳ Đang lấy info TikTok...');
+      try {
+        const info = await lookupTikTok(argText);
+        return send(chatId,
+`📱 <b>TIKTOK</b>
+────────────────
+👤 <b>${esc(info.author)}</b>
+🆔 @${esc(info.username)}
+🔗 ${info.profileUrl}
+📝 ${esc((info.title || '').slice(0, 180))}`);
+      } catch (e) {
+        return send(chatId, `❌ ${e.message}`);
+      }
     }
 
-    if (data === 'back_menu') {
-      await answer(query.id);
-      return showMenu(chatId, displayName(query.from));
+    if (cmd === 'fb' || cmd === 'facebook') {
+      if (!argText) return send(chatId, '📌 <code>/fb username</code>\nhoặc <code>/fb https://facebook.com/...</code>');
+      await send(chatId, '⏳ Đang lấy info Facebook...');
+      try {
+        const info = await lookupFacebook(argText);
+        return send(chatId,
+`📘 <b>FACEBOOK</b>
+────────────────
+👤 ${esc(info.author)}
+🔗 ${esc(info.url)}
+📝 ${esc(info.html || '—')}`);
+      } catch (e) {
+        return send(chatId, `❌ ${e.message}`);
+      }
     }
 
-    if (data.startsWith('plan:')) {
-      const planId = data.slice(5);
-      const plan = plans().find(p => p.id === planId);
-      if (!plan) return answer(query.id, 'Gói này không tồn tại hoặc đã tắt.', true);
-      if (!config.bankCode || !config.bankAccount || !config.bankAccountName) return answer(query.id, 'Admin chưa cấu hình thông tin VietQR.', true);
-      const addInfo = `KEYVIP ${userId}`;
-      const qr = `https://img.vietqr.io/image/${encodeURIComponent(config.bankCode)}-${encodeURIComponent(config.bankAccount)}-compact2.jpg?amount=${encodeURIComponent(String(plan.price))}&addInfo=${encodeURIComponent(addInfo)}&accountName=${encodeURIComponent(config.bankAccountName)}`;
-      sessions[userId] = { type: 'payment', planId: plan.id, startedAt: Date.now() }; options.saveSessions(sessions);
-      await answer(query.id);
-      return sendPhoto(chatId, qr, {
-        caption:
-          `💳 <b>THANH TOÁN KEY VIP</b>\n` +
-          `────────────────────\n` +
-          `Gói: <b>${esc(plan.label)}</b>\n` +
-          `Số tiền: <b>${Number(plan.price).toLocaleString('vi-VN')} VNĐ</b>\n` +
-          `Thời hạn: ${plan.durationHours} giờ\n` +
-          `Ngân hàng: ${esc(config.bankCode)}\n` +
-          `STK: <code>${esc(config.bankAccount)}</code>\n` +
-          `Chủ TK: ${esc(config.bankAccountName)}\n` +
-          `Nội dung CK: <code>${addInfo}</code>\n\n` +
-          `Sau khi chuyển khoản, gửi <b>ảnh chứng từ</b> ngay trong chat này.`,
-        reply_markup: { inline_keyboard: [[{ text: '📷 Tôi đã chuyển · gửi ảnh', callback_data: `paid:${plan.id}` }]] }
-      });
+    if (text.startsWith('/')) {
+      return send(chatId, '❓ Gõ /start xem lệnh.');
     }
-
-    if (data.startsWith('paid:')) {
-      const planId = data.slice(5);
-      const plan = plans().find(p => p.id === planId);
-      if (!plan) return answer(query.id, 'Gói không còn khả dụng.', true);
-      sessions[userId] = { type: 'payment', planId: plan.id, startedAt: Date.now() }; options.saveSessions(sessions);
-      await answer(query.id);
-      return sendMessage(chatId, '📷 Hãy gửi <b>ảnh chụp chứng từ</b> chuyển khoản ở tin nhắn kế tiếp.\nBảo đảm số tiền và nội dung KEYVIP khớp với QR.');
-    }
-
-    await answer(query.id, 'Lựa chọn không hợp lệ.', true);
   }
+
+  // reviewRequest for reset type shouldn't create a key - patch behavior via wrapper
+  const originalReview = options.reviewRequest;
+  options.reviewRequest = function (id, approved, reviewer) {
+    const req = (options.getRequests ? options.getRequests() : []).find(r => r.id === id);
+    if (req && req.type === 'reset') {
+      if (!req || req.status !== 'pending') return { ok: false, error: 'Yêu cầu đã xử lý hoặc không tồn tại.' };
+      req.status = approved ? 'approved' : 'rejected';
+      req.reviewedAt = Date.now();
+      req.reviewer = String(reviewer || 'admin');
+      // device reset already done in approve handler for admin cmd; also do here for safety
+      if (approved) {
+        const k = resolveKey(req.resetKeyPlain || '') || (options.getKeys ? options.getKeys() : []).find(x => x.id === req.resetKeyId);
+        if (k) { k.deviceHashes = []; if (options.saveKeys) options.saveKeys(); }
+      }
+      if (options.saveRequests) {
+        // requests saved inside reviewRequest normally - ensure
+      }
+      // persist via side effect: original list is same array
+      try {
+        const fsPath = null; // save handled by mark/list mutation + existing save on original
+      } catch {}
+      // force save requests if available
+      if (typeof options.forceSaveRequests === 'function') options.forceSaveRequests();
+      return { ok: true, request: req, key: null, meta: null };
+    }
+    return originalReview(id, approved, reviewer);
+  };
 
   async function loop() {
     try { await tg('deleteWebhook', { drop_pending_updates: false }); } catch {}
     while (!stopped) {
       try {
-        const updates = await tg('getUpdates', { offset, timeout: 25, allowed_updates: ['message', 'callback_query'] });
+        const updates = await tg('getUpdates', { offset, timeout: 25, allowed_updates: ['message'] });
         for (const update of updates || []) {
           offset = Math.max(offset, Number(update.update_id) + 1);
           try {
-            if (update.callback_query) await handleCallback(update.callback_query);
-            else if (update.message) await handleMessage(update.message);
-          } catch (e) { console.warn('[telegram] update handler error:', e.message); }
+            if (update.message) await handleMessage(update.message);
+          } catch (e) { console.warn('[telegram] handler:', e.message); }
         }
       } catch (e) {
-        console.warn('[telegram] polling error:', e.message);
-        await new Promise(resolve => setTimeout(resolve, 3000));
+        console.warn('[telegram] poll:', e.message);
+        await new Promise(r => setTimeout(r, 3000));
       }
     }
   }
 
   const bot = {
-    sendKeyToUser: async (telegramId, key, meta = {}) => sendMessage(telegramId,
-      `✅ <b>KEY VIP ĐÃ ĐƯỢC DUYỆT</b>\n\n<code>${key}</code>\n\nGói: ${esc(meta.label || 'VIP')}\nThời hạn: ${meta.durationHours || 5} giờ\nHạn: ${meta.expiresAt ? new Date(meta.expiresAt).toLocaleString('vi-VN') : 'theo cài đặt'}\nGiới hạn: 3 thiết bị\n\nNhập key trên website VIP ORACLE.`),
-    sendTextToUser: async (telegramId, text) => sendMessage(telegramId, text),
+    sendKeyToUser: async (telegramId, key, meta = {}) => send(telegramId,
+`✅ <b>KEY VIP</b>
+🔑 <code>${key}</code>
+📦 ${esc(meta.label || 'VIP')} · ⏱ ${meta.durationHours || 5}h
+📱 3 thiết bị`),
+    sendTextToUser: async (telegramId, text) => send(telegramId, text),
     notifyAdmins,
     stop: () => { stopped = true; }
   };
   loop();
-  console.log(`[telegram] polling bot started; admin count=${adminIds.size}`);
+  console.log(`[telegram] cmd-only bot started; admins=${adminIds.size}`);
   return bot;
 }
 
@@ -1432,7 +1538,10 @@ function reviewRequest(id, approved, reviewer) {
   if (request.status !== 'pending') return { ok: false, error: 'Yêu cầu này đã được xử lý.' };
   request.status = approved ? 'approved' : 'rejected'; request.reviewedAt = Date.now(); request.reviewer = String(reviewer || 'admin');
   let issued = null;
-  if (approved) {
+  if (approved && request.type === 'reset') {
+    const k = findKey(request.resetKeyPlain || '') || keys.find(x => x.id === request.resetKeyId);
+    if (k) { k.deviceHashes = []; saveKeys(); }
+  } else if (approved) {
     const hours = Math.max(1, Number(request.durationHours || 5));
     issued = createKey({ label: `${request.planLabel || 'Key free'} · TG ${request.telegramId}`, durationHours: hours, deviceLimit: 3,
       source: request.type === 'payment' ? 'telegram-payment' : 'telegram-group', telegramId: request.telegramId });
@@ -1496,7 +1605,13 @@ app.get('/api/live', requireUser, (req, res) => {
 app.get('/api/history', requireUser, (req, res) => {
   const f = FEEDS[req.query.game]; if (!f || !f.enabled) return res.status(400).json({ error: 'Game không tồn tại hoặc đang tắt.' });
   const limit = Math.min(5000, Math.max(1, parseInt(req.query.limit, 10) || 50));
-  res.json({ game: req.query.game, history: f.history.slice(0, limit) });
+  const accLimit = Math.min(100, Math.max(1, parseInt(req.query.accLimit, 10) || 30));
+  res.json({
+    game: req.query.game,
+    history: f.history.slice(0, limit),
+    accuracyHistory: (f.accuracyHistory || []).slice(0, accLimit),
+    accuracy: f.total ? { correct: f.correct, total: f.total, pct: +(f.correct / f.total * 100).toFixed(1) } : null
+  });
 });
 
 // ---------- admin: keys, devices, validity ----------
@@ -1504,7 +1619,7 @@ app.get('/api/admin/keys', requireAdmin, (req, res) => res.json({ keys: keys.map
 app.post('/api/admin/keys', requireAdmin, (req, res) => {
   try {
     const result = createKey({ key: req.body?.key || '', label: req.body?.label || 'Key VIP', durationHours: req.body?.durationHours || 0,
-      expiresAt: req.body?.expiresAt ?? null, deviceLimit: req.body?.deviceLimit || 1, source: 'admin' });
+      expiresAt: req.body?.expiresAt ?? null, deviceLimit: req.body?.deviceLimit || 3, source: 'admin' });
     res.json({ ok: true, key: result.plainKey, keyInfo: publicKeyInfo(result.record) });
   } catch (e) { res.status(400).json({ error: e.message || 'Không tạo được key.' }); }
 });
@@ -1649,6 +1764,7 @@ if (process.env.TELEGRAM_BOT_TOKEN) {
     saveConfig: (cfg) => { botSettings = normalizeSettings(cfg); saveBotSettings(); },
     getSessions, saveSessions, addRequest,
     getRequests: () => botRequests,
+    forceSaveRequests: () => saveRequests(),
     getKeys: () => keys,
     saveKeys,
     findKey,
