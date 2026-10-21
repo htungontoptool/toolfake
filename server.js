@@ -864,6 +864,234 @@ try {
     else Engine.PATTERN8 = {};
 } catch { Engine.PATTERN8 = {}; }
 
+
+// ================= BACCARAT ENGINE (14 models + ensemble) =================
+class BaccaratEngine {
+  constructor() {
+    this.history = []; // 'B'|'P'|'T'
+    this.goodRoad = '';
+    this.lastAlgos = [];
+  }
+  addResult(char, _sum, meta) {
+    const c = String(char || '').toUpperCase();
+    if (c !== 'B' && c !== 'P' && c !== 'T') return;
+    this.history.push(c);
+    if (this.history.length > 300) this.history = this.history.slice(-300);
+    if (meta && meta.goodRoad) this.goodRoad = String(meta.goodRoad);
+  }
+  saveState() {
+    return { history: this.history.slice(-300), goodRoad: this.goodRoad };
+  }
+  loadState(s) {
+    if (!s) return;
+    if (Array.isArray(s.history)) this.history = s.history.filter(x => x === 'B' || x === 'P' || x === 'T').slice(-300);
+    if (s.goodRoad) this.goodRoad = String(s.goodRoad);
+  }
+  _clamp(v, a, b) { return Math.min(b, Math.max(a, v)); }
+  _lastN(arr, n) { return arr.slice(Math.max(0, arr.length - n)); }
+  _wilson(h, n, z = 1.645) {
+    if (n < 1) return 0.5;
+    const p = h / n, d = z * Math.sqrt(p * (1 - p) / n + z * z / (4 * n * n));
+    return this._clamp(Math.round(((p + z * z / (2 * n) + d) / (1 + z * z / n)) * 100), 50, 96);
+  }
+  _streak(arr) {
+    if (!arr.length) return { val: '', len: 0 };
+    const l = arr[arr.length - 1]; let n = 1;
+    for (let i = arr.length - 2; i >= 0; i--) { if (arr[i] === l) n++; else break; }
+    return { val: l, len: n };
+  }
+  a_trend(arr) {
+    const r5 = this._lastN(arr, 5).filter(c => c !== 'T'); if (r5.length < 3) return null;
+    const b = r5.filter(c => c === 'B').length, p = r5.length - b;
+    if (b === p) return null;
+    const dom = b > p ? 'B' : 'P'; const ratio = Math.max(b, p) / r5.length;
+    if (ratio < 0.6) return null;
+    return { pred: dom, conf: this._clamp(52 + Math.round((ratio - .6) * 80), 52, 78), reason: `Gần: ${dom}${Math.max(b, p)}/${r5.length}`, type: 'trend', name: 'Xu hướng' };
+  }
+  a_revert(arr) {
+    const r8 = this._lastN(arr, 8).filter(c => c !== 'T'); if (r8.length < 5) return null;
+    const b = r8.filter(c => c === 'B').length, p = r8.length - b;
+    const ratio = Math.max(b, p) / r8.length; if (ratio < 0.75) return null;
+    const dom = b > p ? 'B' : 'P', opp = b > p ? 'P' : 'B';
+    return { pred: opp, conf: this._clamp(54 + Math.round((ratio - .75) * 100), 54, 84), reason: `Quá lệch ${dom}${Math.round(ratio * 100)}%→đảo`, type: 'counter', name: 'Đảo chiều' };
+  }
+  a_markov1(arr) {
+    if (arr.length < 6) return null;
+    const last = arr[arr.length - 1];
+    const cnt = { B: { B: 0, P: 0, T: 0 }, P: { B: 0, P: 0, T: 0 }, T: { B: 0, P: 0, T: 0 } };
+    for (let i = 0; i < arr.length - 1; i++) { const f = arr[i], t = arr[i + 1]; if (cnt[f] && cnt[f][t] !== undefined) cnt[f][t]++; }
+    const row = cnt[last]; if (!row) return null;
+    const tot = row.B + row.P + row.T; if (tot < 3) return null;
+    const pred = row.B >= row.P ? 'B' : 'P'; const mx = Math.max(row.B, row.P);
+    const conf = this._wilson(mx, tot); if (conf < 54) return null;
+    return { pred, conf, reason: `${last}→${pred}: ${mx}/${tot}`, type: 'pattern', name: 'Markov-1' };
+  }
+  a_markov2(arr) {
+    if (arr.length < 8) return null;
+    const n = arr.length, last2 = arr[n - 2] + arr[n - 1]; const cnt = {};
+    for (let i = 0; i < n - 2; i++) { const k = arr[i] + arr[i + 1]; if (!cnt[k]) cnt[k] = { B: 0, P: 0, T: 0 }; if (cnt[k][arr[i + 2]] !== undefined) cnt[k][arr[i + 2]]++; }
+    const row = cnt[last2]; if (!row) return null;
+    const tot = row.B + row.P + row.T; if (tot < 3) return null;
+    const pred = row.B >= row.P ? 'B' : 'P'; const mx = Math.max(row.B, row.P);
+    const conf = this._wilson(mx, tot, 1.5); if (conf < 55) return null;
+    return { pred, conf, reason: `${last2}→${pred}: ${mx}/${tot}`, type: 'pattern', name: 'Markov-2' };
+  }
+  a_markov3(arr) {
+    if (arr.length < 12) return null;
+    const n = arr.length, last3 = arr[n - 3] + arr[n - 2] + arr[n - 1]; const cnt = {};
+    for (let i = 0; i < n - 3; i++) { const k = arr[i] + arr[i + 1] + arr[i + 2]; if (!cnt[k]) cnt[k] = { B: 0, P: 0, T: 0 }; if (cnt[k][arr[i + 3]] !== undefined) cnt[k][arr[i + 3]]++; }
+    const row = cnt[last3]; if (!row) return null;
+    const tot = row.B + row.P + row.T; if (tot < 2) return null;
+    const pred = row.B >= row.P ? 'B' : 'P'; const mx = Math.max(row.B, row.P);
+    const conf = this._wilson(mx, tot, 1.3) + 2; if (conf < 56) return null;
+    return { pred, conf, reason: `${last3}→${pred}: ${mx}/${tot}`, type: 'pattern', name: 'Markov-3' };
+  }
+  a_stkFollow(arr) {
+    const { val, len } = this._streak(arr); if (val === 'T' || len < 2 || len > 5) return null;
+    return { pred: val, conf: this._clamp(58 + len * 4, 58, 82), reason: `Bệt ${val}×${len}→theo`, type: 'trend', name: 'Streak+' };
+  }
+  a_stkBreak(arr) {
+    const { val, len } = this._streak(arr); if (val === 'T' || len < 4) return null;
+    return { pred: val === 'B' ? 'P' : 'B', conf: this._clamp(56 + len * 3, 56, 86), reason: `Bệt ${val}×${len}→bẻ`, type: 'counter', name: 'Streak-' };
+  }
+  a_dragon(arr) {
+    const { val, len } = this._streak(arr); if (val === 'T' || len < 7) return null;
+    return { pred: val === 'B' ? 'P' : 'B', conf: this._clamp(72 + len * 2, 72, 92), reason: `Dragon ${val}×${len}→đảo`, type: 'counter', name: 'Dragon' };
+  }
+  a_pingpong(arr) {
+    const tail = this._lastN(arr.filter(c => c !== 'T'), 6); if (tail.length < 5) return null;
+    let alt = 0; for (let i = 0; i < tail.length - 1; i++) if (tail[i] !== tail[i + 1]) alt++;
+    if (alt < tail.length - 1) return null;
+    const last = tail[tail.length - 1];
+    return { pred: last === 'B' ? 'P' : 'B', conf: this._clamp(58 + alt * 3, 58, 80), reason: `Ping-Pong ×${alt + 1}`, type: 'pattern', name: 'Ping-Pong' };
+  }
+  a_pattern46(arr) {
+    const noT = arr.filter(c => c !== 'T'); if (noT.length < 5) return null;
+    const n = noT, L = n.length;
+    if (L >= 5 && n[L - 1] === n[L - 2] && n[L - 3] === n[L - 4] && n[L - 1] !== n[L - 3])
+      return { pred: n[L - 1], conf: 64, reason: 'AABB→tiếp đôi', type: 'pattern', name: 'AABB' };
+    if (L >= 6) {
+      let ok = true; for (let i = L - 5; i < L - 1; i++) if (n[i] === n[i + 1]) { ok = false; break; }
+      if (ok) return { pred: n[L - 1] === 'B' ? 'P' : 'B', conf: 68, reason: 'ABABAB→xen', type: 'pattern', name: 'ABAB' };
+    }
+    return null;
+  }
+  a_momentum(arr) {
+    if (arr.length < 10) return null;
+    const r5 = this._lastN(arr, 5), p5 = arr.slice(arr.length - 10, arr.length - 5);
+    const rB = r5.filter(c => c === 'B').length, rP = r5.filter(c => c === 'P').length;
+    const pB = p5.filter(c => c === 'B').length, pP = p5.filter(c => c === 'P').length;
+    const mB = rB - pB, mP = rP - pP; if (Math.abs(mB - mP) < 2) return null;
+    const pred = mB > mP ? 'B' : 'P'; const str = Math.abs(mB - mP);
+    return { pred, conf: this._clamp(56 + str * 6, 56, 76), reason: `Đà ${pred} +${str}`, type: 'trend', name: 'Momentum' };
+  }
+  a_hotzone(arr) {
+    if (arr.length < 12) return null;
+    const z1 = this._lastN(arr, 4).filter(c => c !== 'T'), z2 = arr.slice(arr.length - 8, arr.length - 4).filter(c => c !== 'T');
+    if (z1.length < 3 || z2.length < 3) return null;
+    const b1 = z1.filter(c => c === 'B').length / z1.length, b2 = z2.filter(c => c === 'B').length / z2.length;
+    const p1 = 1 - b1, p2 = 1 - b2;
+    if (b1 > b2 + .25 && b1 > .6) return { pred: 'B', conf: this._clamp(56 + Math.round((b1 - .6) * 80), 56, 78), reason: `Hot B↑${Math.round(b1 * 100)}%`, type: 'trend', name: 'Hot Zone' };
+    if (p1 > p2 + .25 && p1 > .6) return { pred: 'P', conf: this._clamp(56 + Math.round((p1 - .6) * 80), 56, 78), reason: `Hot P↑${Math.round(p1 * 100)}%`, type: 'trend', name: 'Hot Zone' };
+    if (b1 >= .9) return { pred: 'P', conf: this._clamp(60 + Math.round((b1 - .75) * 80), 60, 86), reason: `Cháy B→đảo`, type: 'counter', name: 'Hot Zone' };
+    if (p1 >= .9) return { pred: 'B', conf: this._clamp(60 + Math.round((p1 - .75) * 80), 60, 86), reason: `Cháy P→đảo`, type: 'counter', name: 'Hot Zone' };
+    return null;
+  }
+  a_runlen(arr) {
+    if (arr.length < 10) return null;
+    const runs = []; let cur = arr[0], cnt = 1;
+    for (let i = 1; i < arr.length; i++) {
+      if (arr[i] === cur && arr[i] !== 'T') cnt++;
+      else { runs.push({ v: cur, n: cnt }); cur = arr[i]; cnt = 1; }
+    }
+    runs.push({ v: cur, n: cnt }); if (runs.length < 3) return null;
+    const avg = runs.slice(0, -1).reduce((a, r) => a + r.n, 0) / (runs.length - 1);
+    const last = runs[runs.length - 1]; if (last.v === 'T') return null;
+    if (last.n >= avg * 2) return { pred: last.v === 'B' ? 'P' : 'B', conf: this._clamp(58 + Math.round((last.n / avg - 2) * 10), 58, 82), reason: `Run ${last.n}→bẻ`, type: 'counter', name: 'Run-Len' };
+    if (last.n <= 1 && avg > 2) return { pred: last.v, conf: 60, reason: `Run ngắn→tiếp`, type: 'trend', name: 'Run-Len' };
+    return null;
+  }
+  a_bayesian(arr) {
+    if (arr.length < 6) return null;
+    let aB = 1, aP = 1;
+    arr.forEach((c, i) => { const w = Math.pow(1.08, i); if (c === 'B') aB += w; else if (c === 'P') aP += w; });
+    const tot = aB + aP, pB = aB / tot, diff = Math.abs(pB - .5); if (diff < .04) return null;
+    const pred = pB > .5 ? 'B' : 'P';
+    return { pred, conf: this._clamp(52 + Math.round(diff * 120), 52, 82), reason: `Bayes P(B)=${Math.round(pB * 100)}%`, type: 'stat', name: 'Bayes' };
+  }
+  getEnsemblePrediction() {
+    const arr = this.history.slice();
+    const goodRoad = this.goodRoad || '';
+    if (arr.length < 5) {
+      return {
+        predictedResult: 'BANKER', confidence: 50, taiProb: 50, xiuProb: 50,
+        reason: 'Baccarat: chờ đủ dữ liệu', gameType: 'baccarat',
+        modelsUsed: 0, market: { regime: 'Chờ', trend: '—' }
+      };
+    }
+    const fns = [
+      this.a_trend, this.a_revert, this.a_markov1, this.a_markov2, this.a_markov3,
+      this.a_stkFollow, this.a_stkBreak, this.a_dragon, this.a_pingpong, this.a_pattern46,
+      this.a_momentum, this.a_hotzone, this.a_runlen, this.a_bayesian
+    ];
+    const hits = [];
+    for (const fn of fns) {
+      try { const r = fn.call(this, arr); if (r) hits.push(r); } catch (e) {}
+    }
+    if (goodRoad) {
+      const l = goodRoad.toLowerCase(); let ap = null;
+      if ((l.includes('bệt') || l.includes('dính')) && l.includes('cái')) ap = 'B';
+      else if ((l.includes('bệt') || l.includes('dính')) && l.includes('con')) ap = 'P';
+      else if (l.includes('đảo') || l.includes('xen')) {
+        const la = arr[arr.length - 1]; if (la === 'B') ap = 'P'; else if (la === 'P') ap = 'B';
+      }
+      if (ap) hits.push({ pred: ap, conf: 62, reason: goodRoad, type: 'api', name: 'API-Road' });
+    }
+    this.lastAlgos = hits;
+    if (!hits.length) {
+      const l = arr[arr.length - 1];
+      const cls = l === 'P' ? 'P' : 'B';
+      return {
+        predictedResult: cls === 'B' ? 'BANKER' : 'PLAYER', confidence: 52,
+        taiProb: cls === 'B' ? 52 : 48, xiuProb: cls === 'B' ? 48 : 52,
+        reason: 'Baccarat fallback', gameType: 'baccarat', modelsUsed: 0,
+        market: { regime: 'Fallback', trend: cls }
+      };
+    }
+    const tW = { trend: 0.85, counter: 0.9, pattern: 1.1, stat: 0.95, api: 0.75 };
+    const tally = {};
+    for (const h of hits) {
+      const w = tW[h.type] || 1;
+      if (!tally[h.pred]) tally[h.pred] = { wS: 0, wT: 0, cnt: 0, items: [] };
+      tally[h.pred].wS += h.conf * w; tally[h.pred].wT += w; tally[h.pred].cnt++; tally[h.pred].items.push(h);
+    }
+    let bK = null, bSc = -1;
+    for (const [k, v] of Object.entries(tally)) {
+      const avg = v.wS / v.wT, cb = Math.min((v.cnt / hits.length) * 20, 20), sc = avg + cb;
+      if (sc > bSc) { bSc = sc; bK = k; }
+    }
+    const win = tally[bK];
+    const conf = this._clamp(Math.round(bSc), 52, 95);
+    const cls = bK === 'P' ? 'P' : 'B';
+    const topName = win.items.sort((a, b) => b.conf - a.conf).slice(0, 2).map(x => x.name).join('+');
+    const bPct = Math.round((tally.B ? tally.B.wS / (tally.B.wT || 1) : 50));
+    const pPct = 100 - Math.min(99, Math.max(1, cls === 'B' ? conf : 100 - conf));
+    const bankerProb = cls === 'B' ? conf : 100 - conf;
+    return {
+      predictedResult: cls === 'B' ? 'BANKER' : 'PLAYER',
+      confidence: conf,
+      taiProb: bankerProb,
+      xiuProb: 100 - bankerProb,
+      reason: `Baccarat · ${topName} (${win.cnt}/${hits.length} vote)`,
+      gameType: 'baccarat',
+      modelsUsed: hits.length,
+      market: { regime: win.cnt >= 4 && conf >= 74 ? 'Super' : 'Normal', trend: cls === 'B' ? 'BANKER' : 'PLAYER' },
+      algos: hits.slice(0, 8)
+    };
+  }
+}
+
+
 // ================= SERVER WRAPPER =================
 // Telegram bot implementation is embedded below; no separate telegram-bot.js needed.
 
@@ -1922,14 +2150,17 @@ function requireAdmin(req, res, next) {
 const DEFAULT_GAMES = [
   { id: 'sunwin', label: 'Sunwin', url: 'https://apisunwin-cocalhahaha.onrender.com/api/sunwin', parser: 'sunwin', enabled: true },
   { id: 'lc79_hu', label: 'LC79 · Hũ', url: 'https://wtx.tele68.com/v1/tx/sessions', parser: 'lc79', enabled: true },
-  { id: 'lc79_md5', label: 'LC79 · MD5', url: 'https://wtxmd52.tele68.com/v1/txmd5/sessions', parser: 'lc79', enabled: true }
+  { id: 'lc79_md5', label: 'LC79 · MD5', url: 'https://wtxmd52.tele68.com/v1/txmd5/sessions', parser: 'lc79', enabled: true },
+  { id: 'baccarat', label: 'Baccarat', url: 'https://bcrsexy.onrender.com/api/baccarat', parser: 'baccarat', enabled: true, table: '' }
 ];
 let gameConfigs = loadJSON(GAMES_FILE, null);
 if (!Array.isArray(gameConfigs)) gameConfigs = DEFAULT_GAMES.map(g => ({ ...g }));
 const FEEDS = Object.create(null);
 function createFeed(config) {
-  return { id: config.id, label: config.label, url: config.url, parser: config.parser || 'lc79', enabled: config.enabled !== false,
-    engine: new Engine(), history: [], accuracyHistory: [], lastSession: null, pendingPred: null,
+  const parser = config.parser || 'lc79';
+  const engine = parser === 'baccarat' ? new BaccaratEngine() : new Engine();
+  return { id: config.id, label: config.label, url: config.url, parser, table: config.table || '', enabled: config.enabled !== false,
+    engine, history: [], accuracyHistory: [], lastSession: null, pendingPred: null,
     correct: 0, total: 0, lastLive: null, lastEnsemble: null, _seen: [], lastError: null };
 }
 function saveGameConfigs() { saveJSON(GAMES_FILE, gameConfigs); }
@@ -1937,7 +2168,7 @@ function initializeFeedConfigs() {
   for (const key of Object.keys(FEEDS)) delete FEEDS[key];
   for (const g of gameConfigs) {
     if (!g || !/^[a-z0-9_-]{2,32}$/i.test(String(g.id || '')) || !validHttpUrl(g.url)) continue;
-    g.id = String(g.id); g.label = String(g.label || g.id); g.parser = g.parser === 'sunwin' ? 'sunwin' : 'lc79'; g.enabled = g.enabled !== false;
+    g.id = String(g.id); g.label = String(g.label || g.id); g.parser = ['sunwin','baccarat'].includes(g.parser) ? g.parser : 'lc79'; g.table = g.table || ''; g.enabled = g.enabled !== false;
     FEEDS[g.id] = createFeed(g);
   }
 }
@@ -1971,7 +2202,49 @@ function parseLC79(data) {
     return { session: item.id ?? item.session ?? item.session_id ?? item.phien, sum, char, dice };
   }).filter(i => i.session !== undefined && i.session !== null && i.session !== '');
 }
-function parseFeedData(feed, data) { return feed.parser === 'sunwin' ? parseSunwin(data) : parseLC79(data); }
+function parseFeedData(feed, data) {
+  if (feed.parser === 'sunwin') return parseSunwin(data);
+  if (feed.parser === 'baccarat') return parseBaccarat(data, feed.table);
+  return parseLC79(data);
+}
+
+function parseBaccarat(data, tableFilter) {
+  // API: { success, data: [ { ban, results: "BPBT...", good_road } ] }
+  let rows = [];
+  if (Array.isArray(data)) rows = data;
+  else if (Array.isArray(data?.data)) rows = data.data;
+  else if (Array.isArray(data?.tables)) rows = data.tables;
+  if (!rows.length) return [];
+  let row = null;
+  const want = String(tableFilter || '').trim().toLowerCase();
+  if (want) {
+    row = rows.find(r => String(r.ban || r.table || r.name || r.id || '').toLowerCase() === want
+      || String(r.ban || r.table || '').toLowerCase().includes(want));
+  }
+  if (!row) {
+    // chọn bàn có nhiều phiên nhất
+    row = rows.slice().sort((a, b) => String(b.results || '').length - String(a.results || '').length)[0];
+  }
+  if (!row) return [];
+  const results = String(row.results || row.road || row.history || '').toUpperCase().replace(/[^BPT]/g, '');
+  if (results.length < 3) return [];
+  const goodRoad = row.good_road || row.goodRoad || row.road_name || '';
+  const tableName = row.ban || row.table || row.name || 'Baccarat';
+  // map chuỗi → list phiên giả (index làm session id)
+  const list = [];
+  for (let i = 0; i < results.length; i++) {
+    const ch = results[i];
+    list.push({
+      session: `${tableName}-${i}`,
+      char: ch,
+      sum: null,
+      goodRoad,
+      table: tableName
+    });
+  }
+  // mới nhất ở đầu (giống các parser khác)
+  return list.reverse();
+}
 function nextSessionNumber(session) {
   if (/^\d+$/.test(String(session))) return String(Number(session) + 1);
   return null;
@@ -2033,7 +2306,7 @@ async function pollFeed(id) {
           f.pendingPred = null;
         }
       }
-      f.engine.addResult(item.char, item.sum);
+      f.engine.addResult(item.char, item.sum, item.goodRoad ? { goodRoad: item.goodRoad } : undefined);
       const row = { session: item.session, char: item.char, sum: item.sum, dice: item.dice, ts: Date.now() };
       if (scoreRow) { row.prediction = scoreRow.predicted; row.isCorrect = scoreRow.isCorrect; }
       f.history.unshift(row);
@@ -2220,7 +2493,7 @@ app.post('/api/admin/login', (req, res) => {
 });
 
 // ---------- user prediction endpoints ----------
-app.get('/api/games', requireUser, (req, res) => res.json({ games: gameConfigs.filter(g => g.enabled !== false && FEEDS[g.id]).map(({ id, label }) => ({ id, label })) }));
+app.get('/api/games', requireUser, (req, res) => res.json({ games: gameConfigs.filter(g => g.enabled !== false && FEEDS[g.id]).map(g => ({ id: g.id, label: g.label, gameType: g.parser === 'baccarat' ? 'baccarat' : 'tx' })) }));
 app.get('/api/me', requireUser, (req, res) => res.json({ label: req.userKey.label, expiresAt: req.userKey.expiresAt || null, deviceLimit: req.userKey.deviceLimit || 1 }));
 app.get('/api/predict', requireUser, (req, res) => {
   const f = FEEDS[req.query.game];
@@ -2300,12 +2573,12 @@ app.post('/api/admin/games', requireAdmin, (req, res) => {
   const id = String(req.body?.id || '').trim().toLowerCase();
   const label = String(req.body?.label || '').trim();
   const url = String(req.body?.url || '').trim();
-  const parser = req.body?.parser === 'sunwin' ? 'sunwin' : 'lc79';
+  const parser = ['sunwin','baccarat'].includes(req.body?.parser) ? req.body.parser : 'lc79';
   if (!/^[a-z0-9_-]{2,32}$/.test(id)) return res.status(400).json({ error: 'Mã game chỉ gồm chữ thường, số, _ hoặc - (2–32 ký tự).' });
   if (gameConfigs.some(g => g.id === id)) return res.status(409).json({ error: 'Mã game đã tồn tại.' });
   if (!label) return res.status(400).json({ error: 'Hãy nhập tên game.' });
   if (!validHttpUrl(url)) return res.status(400).json({ error: 'API phải là URL HTTP hoặc HTTPS hợp lệ.' });
-  const config = { id, label: label.slice(0, 80), url, parser, enabled: req.body?.enabled !== false };
+  const config = { id, label: label.slice(0, 80), url, parser, table: String(req.body?.table || '').slice(0, 80), enabled: req.body?.enabled !== false };
   gameConfigs.push(config); saveGameConfigs(); FEEDS[id] = createFeed(config); logLine(`game added: ${id}`);
   res.json({ ok: true, game: config });
 });
@@ -2317,7 +2590,8 @@ app.patch('/api/admin/games/:id', requireAdmin, (req, res) => {
   if (!label) return res.status(400).json({ error: 'Tên game không được để trống.' });
   if (!validHttpUrl(url)) return res.status(400).json({ error: 'API phải là URL HTTP hoặc HTTPS hợp lệ.' });
   config.label = label.slice(0, 80); config.url = url;
-  if (req.body?.parser !== undefined) config.parser = req.body.parser === 'sunwin' ? 'sunwin' : 'lc79';
+  if (req.body?.parser !== undefined) config.parser = ['sunwin','baccarat'].includes(req.body.parser) ? req.body.parser : 'lc79';
+  if (req.body?.table !== undefined) config.table = String(req.body.table || '').slice(0, 80);
   if (req.body?.enabled !== undefined) config.enabled = req.body.enabled !== false;
   if (FEEDS[config.id]) { Object.assign(FEEDS[config.id], { label: config.label, url: config.url, parser: config.parser, enabled: config.enabled }); }
   saveGameConfigs(); logLine(`game updated: ${config.id}`); res.json({ ok: true, game: config });
@@ -2355,7 +2629,7 @@ app.post('/api/admin/reset', requireAdmin, (req, res) => {
   const ids = id === 'all' ? Object.keys(FEEDS) : [id];
   if (!ids.length || ids.some(k => !FEEDS[k])) return res.status(400).json({ error: 'Game không hợp lệ.' });
   for (const gameId of ids) {
-    const f = FEEDS[gameId]; f.engine = new Engine(); f.history = []; f.accuracyHistory = []; f.lastSession = null;
+    const f = FEEDS[gameId]; f.engine = (f.parser === 'baccarat') ? new BaccaratEngine() : new Engine(); f.history = []; f.accuracyHistory = []; f.lastSession = null;
     f.pendingPred = null; f.lastLive = null; f.correct = 0; f.total = 0; f._seen = [];
   }
   saveState(); logLine('reset engine(s): ' + ids.join(',')); res.json({ ok: true });
