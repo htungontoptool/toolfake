@@ -2155,6 +2155,12 @@ const DEFAULT_GAMES = [
 ];
 let gameConfigs = loadJSON(GAMES_FILE, null);
 if (!Array.isArray(gameConfigs)) gameConfigs = DEFAULT_GAMES.map(g => ({ ...g }));
+// đảm bảo có game baccarat nếu bản cũ chưa có
+if (!gameConfigs.some(g => g.parser === 'baccarat' || g.id === 'baccarat')) {
+  const bac = DEFAULT_GAMES.find(g => g.id === 'baccarat');
+  if (bac) gameConfigs.push({ ...bac });
+}
+
 const FEEDS = Object.create(null);
 function createFeed(config) {
   const parser = config.parser || 'lc79';
@@ -2209,40 +2215,49 @@ function parseFeedData(feed, data) {
 }
 
 function parseBaccarat(data, tableFilter) {
-  // API: { success, data: [ { ban, results: "BPBT...", good_road } ] }
+  // API thật: { success:true, data:[ { table:"7", result:"PPBBB...", shoeId, round } ] }
   let rows = [];
   if (Array.isArray(data)) rows = data;
   else if (Array.isArray(data?.data)) rows = data.data;
   else if (Array.isArray(data?.tables)) rows = data.tables;
   if (!rows.length) return [];
+
+  const resultStr = (r) => String(r.result || r.results || r.road || r.history || '').toUpperCase().replace(/[^BPT]/g, '');
+  const tableId = (r) => String(r.table || r.ban || r.name || r.id || '').trim();
+
   let row = null;
   const want = String(tableFilter || '').trim().toLowerCase();
   if (want) {
-    row = rows.find(r => String(r.ban || r.table || r.name || r.id || '').toLowerCase() === want
-      || String(r.ban || r.table || '').toLowerCase().includes(want));
+    row = rows.find(r => {
+      const id = tableId(r).toLowerCase();
+      return id === want || id.includes(want);
+    });
   }
   if (!row) {
-    // chọn bàn có nhiều phiên nhất
-    row = rows.slice().sort((a, b) => String(b.results || '').length - String(a.results || '').length)[0];
+    // bàn có chuỗi kết quả dài nhất (đủ data để đoán)
+    row = rows.slice().sort((a, b) => resultStr(b).length - resultStr(a).length)[0];
   }
   if (!row) return [];
-  const results = String(row.results || row.road || row.history || '').toUpperCase().replace(/[^BPT]/g, '');
+
+  const results = resultStr(row);
   if (results.length < 3) return [];
+
   const goodRoad = row.good_road || row.goodRoad || row.road_name || '';
-  const tableName = row.ban || row.table || row.name || 'Baccarat';
-  // map chuỗi → list phiên giả (index làm session id)
+  const tableName = tableId(row) || 'Baccarat';
+  const shoe = String(row.shoeId || row.shoe || '');
+
+  // mỗi ký tự = 1 phiên; session ổn định theo table + index + shoe
   const list = [];
   for (let i = 0; i < results.length; i++) {
-    const ch = results[i];
     list.push({
-      session: `${tableName}-${i}`,
-      char: ch,
+      session: shoe ? `${tableName}-${shoe}-${i}` : `${tableName}-${i}`,
+      char: results[i],
       sum: null,
       goodRoad,
       table: tableName
     });
   }
-  // mới nhất ở đầu (giống các parser khác)
+  // mới nhất ở đầu
   return list.reverse();
 }
 function nextSessionNumber(session) {
@@ -2318,7 +2333,13 @@ async function pollFeed(id) {
     f.lastLive = f.history.find(h => sessionEquals(h.session, latest.session)) || { ...latest, ts: Date.now() };
     const ensemble = f.engine.getEnsemblePrediction();
     f.lastEnsemble = ensemble;
-    const predicted = ensemble.predictedResult === 'TÀI' ? 'T' : 'X';
+    const pr = String(ensemble.predictedResult || '').toUpperCase();
+    let predicted = 'X';
+    if (pr === 'TÀI' || pr === 'TAI' || pr === 'T') predicted = 'T';
+    else if (pr === 'XỈU' || pr === 'XIU' || pr === 'X') predicted = 'X';
+    else if (pr === 'BANKER' || pr === 'B' || pr === 'CAI') predicted = 'B';
+    else if (pr === 'PLAYER' || pr === 'P' || pr === 'CON') predicted = 'P';
+    else if (f.parser === 'baccarat') predicted = 'B';
     f.pendingPred = { sourceSession: String(latest.session), targetSession: nextSessionNumber(latest.session), predicted, createdAt: Date.now() };
     f.lastError = null;
   } catch (e) {
@@ -2504,11 +2525,26 @@ app.get('/api/predict', requireUser, (req, res) => {
     return res.status(503).json({ error: mt.message || 'Game đang bảo trì.', maintenance: true });
   }
   const ensemble = f.engine.getEnsemblePrediction();
-  res.json({ game: req.query.game, label: f.label, predictedResult: ensemble.predictedResult, confidence: ensemble.confidence,
-    taiProb: ensemble.taiProb, xiuProb: ensemble.xiuProb, activeModels: ensemble.activeModels, topReason: ensemble.topReason,
-    regime: f.engine.marketState.regime, trend: f.engine.marketState.trend, nextSession: f.lastLive ? (Number.isFinite(Number(f.lastLive.session)) ? Number(f.lastLive.session) + 1 : null) : null,
-    live: f.lastLive || null, accuracy: f.total ? { correct: f.correct, total: f.total, pct: +(f.correct / f.total * 100).toFixed(1) } : null,
-    feedError: f.lastError || null });
+  const ms = f.engine.marketState || ensemble.market || {};
+  res.json({
+    game: req.query.game,
+    label: f.label,
+    gameType: ensemble.gameType || (f.parser === 'baccarat' ? 'baccarat' : 'tx'),
+    predictedResult: ensemble.predictedResult,
+    confidence: ensemble.confidence,
+    taiProb: ensemble.taiProb,
+    xiuProb: ensemble.xiuProb,
+    activeModels: ensemble.activeModels || ensemble.modelsUsed,
+    topReason: ensemble.topReason || ensemble.reason,
+    reason: ensemble.reason || ensemble.topReason,
+    regime: ms.regime || null,
+    trend: ms.trend || null,
+    nextSession: f.lastLive ? (Number.isFinite(Number(f.lastLive.session)) ? Number(f.lastLive.session) + 1 : (f.lastLive.session || null)) : null,
+    live: f.lastLive || null,
+    accuracy: f.total ? { correct: f.correct, total: f.total, pct: +(f.correct / f.total * 100).toFixed(1) } : null,
+    feedError: f.lastError || null,
+    algos: ensemble.algos || null
+  });
 });
 app.get('/api/live', requireUser, (req, res) => {
   const f = FEEDS[req.query.game]; if (!f || !f.enabled) return res.status(400).json({ error: 'Game không tồn tại hoặc đang tắt.' });
