@@ -27,6 +27,7 @@ class Engine {
         this.autocorr = 0;          // tu tuong quan lag-1 (+1: bet, -1: nhip)
         this.entropy = 1.0;
         this.streakSurvival = {};   // P(tiep tuc | do dai chuoi k) thuc nghiem
+        this.balancedLastPreds = []; // model19 — chống bệt dự đoán
         this.initAllModels();
     }
 
@@ -34,14 +35,14 @@ class Engine {
         for (let i = 1; i <= 10; i++) {
             if (this[`model${i}`]) {
                 this.models[`model${i}`] = this[`model${i}`].bind(this);
-                this.weights[`model${i}`] = i === 1 ? 0.45 : 1.0;
+                this.weights[`model${i}`] = i === 1 ? 0.25 : 1.0;
                 this.modelHits[`model${i}`] = { win: 0, loss: 0, ewma: 0.5 };
             }
         }
         this.models['model_antiBreak'] = this.model_antiBreak.bind(this);
         this.weights['model_antiBreak'] = 1.25;
         this.modelHits['model_antiBreak'] = { win: 0, loss: 0, ewma: 0.5 };
-        for (let i = 11; i <= 18; i++) {
+        for (let i = 11; i <= 20; i++) {
             if (this[`model${i}`]) {
                 this.models[`model${i}`] = this[`model${i}`].bind(this);
                 this.weights[`model${i}`] = 1.0;
@@ -50,8 +51,12 @@ class Engine {
         }
         // Pattern-8 lookup weight hơi cao vì bảng thực nghiệm
         if (this.models['model16']) this.weights['model16'] = 1.35;
-        if (this.models['model17']) this.weights['model17'] = 1.15;
-        if (this.models['model18']) this.weights['model18'] = 1.2;
+        if (this.models['model17']) this.weights['model17'] = 0.85; // RLE — không ưu tiên 1-1
+        if (this.models['model18']) this.weights['model18'] = 1.25;
+        if (this.models['model19']) this.weights['model19'] = 1.15;
+        if (this.models['model20']) this.weights['model20'] = 1.45; // VIP pattern reader
+        if (this.models['model_antiBreak']) this.weights['model_antiBreak'] = 1.55;
+        if (this.models['model16']) this.weights['model16'] = 1.5; // pattern8 table
     }
 
     addResult(result, diceSum = null) {
@@ -184,20 +189,18 @@ class Engine {
 
     // ===== CÁC MODEL DỰ ĐOÁN (giữ nguyên tên, nâng cấp logic) =====
 
-    // Model 1: Cau 1-1 (nhi p don) — boost khi autocorr am
+    // Model 1: chỉ nhận 1-1 khi xác nhận rõ (6+ phiên đan xen) — tránh bắt 1-1 ảo
     model1() {
-        const recent = this.history.slice(-6);
-        if (recent.length < 4) return null;
-        const last4 = recent.slice(-4).join('-');
-        const boost = this.autocorr < -0.1 ? 1.15 : 1.0;
-        if (last4 === 'T-X-T-X') return { prediction: 'T', confidence: Math.min(0.65 * boost, 0.85), reason: 'Bắt Nhịp Cầu Đơn 1-1 (Rõ Ràng)' };
-        if (last4 === 'X-T-X-T') return { prediction: 'X', confidence: Math.min(0.65 * boost, 0.85), reason: 'Bắt Nhịp Cầu Đơn 1-1 (Rõ Ràng)' };
-        if (recent.length >= 6) {
-            const s6 = recent.join('');
-            if (s6 === 'TXTXTX') return { prediction: 'T', confidence: 0.78, reason: 'Cầu Nhịp Hoàn Hảo 6 Phiên' };
-            if (s6 === 'XTXTXT') return { prediction: 'X', confidence: 0.78, reason: 'Cầu Nhịp Hoàn Hảo 6 Phiên' };
-        }
-        return null;
+        const recent = this.history.slice(-8);
+        if (recent.length < 6) return null;
+        // phải có ít nhất 5 lần đảo liên tiếp mới coi là 1-1
+        let flips = 0;
+        for (let i = 1; i < recent.length; i++) if (recent[i] !== recent[i-1]) flips++;
+        if (flips < recent.length - 1) return null; // có bệt xen → không phải 1-1 sạch
+        const last = recent[recent.length - 1];
+        const pred = last === 'T' ? 'X' : 'T';
+        const conf = recent.length >= 8 ? 0.72 : 0.58;
+        return { prediction: pred, confidence: conf, reason: `1-1 sạch ${recent.length} phiên → đảo` };
     }
 
     // Model Anti-Break: dung hazard thuc nghiem cua chuoi
@@ -388,6 +391,7 @@ class Engine {
             entropy: this.entropy,
             streakSurvival: this.streakSurvival,
             consecutiveLosses: this.consecutiveLosses,
+            balancedLastPreds: this.balancedLastPreds || [],
             ts: Date.now()
         };
     }
@@ -404,11 +408,22 @@ class Engine {
             if (typeof s.entropy === 'number') this.entropy = s.entropy;
             if (s.streakSurvival) this.streakSurvival = s.streakSurvival;
             if (typeof s.consecutiveLosses === 'number') this.consecutiveLosses = s.consecutiveLosses;
+            if (Array.isArray(s.balancedLastPreds)) this.balancedLastPreds = s.balancedLastPreds.slice(-20);
             // dam bao cac model moi deu co trong so / EWMA mac dinh
             for (const k in this.models) {
-                if (!(k in this.weights)) this.weights[k] = (k === 'model1') ? 0.45 : (k === 'model_antiBreak' ? 1.25 : 1.0);
+                if (!(k in this.weights)) {
+                    this.weights[k] = (k === 'model1') ? 0.25
+                        : (k === 'model_antiBreak' ? 1.55
+                        : (k === 'model19' ? 1.15
+                        : (k === 'model17' ? 0.85 : 1.0)));
+                }
                 if (!(k in this.modelHits)) this.modelHits[k] = { win: 0, loss: 0, ewma: 0.5 };
             }
+            // Chống bias 1-1 từ state cũ: hạ model1, nâng antiBreak
+            if (this.weights['model1'] && this.weights['model1'] > 0.35) this.weights['model1'] = 0.25;
+            if (this.weights['model17'] && this.weights['model17'] > 1.0) this.weights['model17'] = 0.85;
+            if (this.models['model_antiBreak'] && (!this.weights['model_antiBreak'] || this.weights['model_antiBreak'] < 1.3))
+                this.weights['model_antiBreak'] = 1.55;
         } catch (e) { console.warn('loadState failed:', e); }
     }
 
@@ -502,7 +517,7 @@ class Engine {
         return null;
     }
 
-    // MODEL 17: RLE nhịp a-b (cầu bệt / 1-1 / 2-2 / 3-1 ...)
+    // MODEL 17: RLE — đọc cầu thật (bệt / 2-2 / 3-3 / a-b), KHÔNG mặc định 1-1
     model17() {
         if (this.history.length < 6) return null;
         const rle = [];
@@ -512,41 +527,58 @@ class Engine {
             else { rle.push([cur, cnt]); cur = this.history[i]; cnt = 1; }
         }
         rle.push([cur, cnt]);
-        if (rle.length < 2) {
-            // đang bệt dài → xác suất gãy tăng theo độ dài
-            const len = rle[0][1];
-            if (len >= 4) {
-                const pred = rle[0][0] === 'T' ? 'X' : 'T';
-                return { prediction: pred, confidence: Math.min(0.82, 0.55 + len * 0.04), reason: `Cầu bệt ${len} → nghiêng gãy về ${pred === 'T' ? 'TÀI' : 'XỈU'}` };
+
+        const last = rle[rle.length - 1];
+        const prev = rle.length >= 2 ? rle[rle.length - 2] : null;
+        const prev2 = rle.length >= 3 ? rle[rle.length - 3] : null;
+
+        // --- Bệt đang chạy (count >= 2): ưu tiên TIẾP tục, không vội đảo ---
+        if (last[1] >= 2) {
+            // nhịp a-b ổn định: prev.count == last.count và prev2 cùng pattern
+            if (prev && last[1] === prev[1] && last[1] >= 2) {
+                // vừa khép nhịp a-b (vd 2-2 vừa đủ) → đảo sang cửa kia bắt nhịp mới
+                const pred = last[0] === 'T' ? 'X' : 'T';
+                return { prediction: pred, confidence: 0.70, reason: `Nhịp ${prev[1]}-${last[1]} vừa khép → sang cửa kia` };
             }
+            // đang trong bệt / nhịp chưa đủ so với nhịp trước → TIẾP
+            if (prev && last[1] < prev[1]) {
+                return { prediction: last[0], confidence: 0.68 + Math.min(0.1, last[1] * 0.02), reason: `Theo nhịp ${prev[1]}-${last[1]}: tiếp ${last[0] === 'T' ? 'TÀI' : 'XỈU'}` };
+            }
+            // bệt thuần (không có prev hoặc prev ngắn)
+            if (last[1] >= 3 && last[1] <= 6) {
+                return { prediction: last[0], confidence: 0.72 + Math.min(0.12, (last[1] - 3) * 0.03), reason: `Cầu bệt ${last[1]} → tiếp ${last[0] === 'T' ? 'TÀI' : 'XỈU'}` };
+            }
+            // bệt quá dài (>=7) mới nghiêng gãy
+            if (last[1] >= 7) {
+                const pred = last[0] === 'T' ? 'X' : 'T';
+                return { prediction: pred, confidence: Math.min(0.78, 0.55 + last[1] * 0.03), reason: `Bệt ${last[1]} dài → nghiêng gãy` };
+            }
+            // streak 2: tiếp nhẹ
+            return { prediction: last[0], confidence: 0.62, reason: `Streak 2 → nghiêng tiếp ${last[0] === 'T' ? 'TÀI' : 'XỈU'}` };
+        }
+
+        // --- last count === 1: vừa flip ---
+        if (last[1] === 1 && prev) {
+            // Nếu trước đó là bệt dài (>=3) rồi mới 1 nhịp ngược → có thể gãy cầu, chưa chắc 1-1
+            // → dự đoán theo hướng "xác nhận gãy" (tiếp cửa mới) với conf thấp-trung
+            if (prev[1] >= 3) {
+                return { prediction: last[0], confidence: 0.60, reason: `Bệt ${prev[1]} gãy 1 nhịp → xác nhận cửa ${last[0] === 'T' ? 'TÀI' : 'XỈU'}` };
+            }
+            // True 1-1: nhiều đoạn count=1 liên tiếp
+            const ones = [];
+            for (let i = rle.length - 1; i >= 0 && rle[i][1] === 1; i--) ones.push(rle[i]);
+            if (ones.length >= 4) {
+                const pred = last[0] === 'T' ? 'X' : 'T';
+                return { prediction: pred, confidence: 0.64, reason: `1-1 xác nhận (${ones.length} nhịp) → đảo` };
+            }
+            // 2-1 hoặc nhiễu: không ép 1-1 — theo cửa vừa ra (xác nhận)
+            if (prev[1] === 2) {
+                return { prediction: last[0], confidence: 0.58, reason: 'Nhịp 2-1: xác nhận cửa mới' };
+            }
+            // mặc định: không đoán 1-1 ảo
             return null;
         }
-        const last = rle[rle.length - 1];
-        const prev = rle[rle.length - 2];
-        // 1-1 đang chạy
-        if (last[1] === 1 && prev[1] === 1) {
-            const pred = last[0] === 'T' ? 'X' : 'T';
-            return { prediction: pred, confidence: 0.66, reason: 'Nhịp 1-1 → đảo chiều' };
-        }
-        // 2-2
-        if (last[1] === 2 && prev[1] === 2) {
-            const pred = last[0] === 'T' ? 'X' : 'T';
-            return { prediction: pred, confidence: 0.7, reason: 'Nhịp 2-2 vừa khép → đảo' };
-        }
-        // đang trong nhịp a của a-b: nếu last count == prev count → sắp đảo
-        if (last[1] === prev[1] && last[1] >= 2) {
-            const pred = last[0] === 'T' ? 'X' : 'T';
-            return { prediction: pred, confidence: 0.68, reason: `Nhịp ${prev[1]}-${last[1]} cân → đảo` };
-        }
-        // bệt đang dài hơn nhịp trước → nghiêng gãy
-        if (last[1] >= prev[1] + 2 && last[1] >= 3) {
-            const pred = last[0] === 'T' ? 'X' : 'T';
-            return { prediction: pred, confidence: Math.min(0.8, 0.55 + last[1] * 0.05), reason: `Bệt ${last[1]} vượt nhịp trước → gãy` };
-        }
-        // tiếp tục nhịp hiện tại nếu còn ngắn
-        if (last[1] < prev[1]) {
-            return { prediction: last[0], confidence: 0.62, reason: `Tiếp nhịp ${last[1]}/${prev[1]}` };
-        }
+
         return null;
     }
 
@@ -589,6 +621,164 @@ class Engine {
         return null;
     }
 
+    // MODEL 19: Balanced Predictor v3 — tỷ lệ cửa sổ + Markov + streak + random có kiểm soát
+    model19() {
+        const h = this.history;
+        if (!h || h.length < 10) return null;
+
+        // history engine: cũ → mới; balanced gốc dùng mới → cũ → đảo
+        const results = h.slice().reverse(); // [0] = mới nhất
+        const total = results.length;
+        const totalT = results.filter(r => r === 'T').length;
+        const totalRatio = totalT / total;
+
+        const winRatio = (size) => {
+            if (total < size) return totalRatio;
+            const slice = results.slice(0, size);
+            return slice.filter(r => r === 'T').length / size;
+        };
+        const recent10 = winRatio(10);
+        const recent20 = winRatio(20);
+        const recent50 = winRatio(50);
+
+        // streak từ phiên mới nhất
+        let streak = 1;
+        const currentSide = results[0];
+        for (let i = 1; i < results.length; i++) {
+            if (results[i] === currentSide) streak++;
+            else break;
+        }
+
+        // Markov bậc 1 (trên chuỗi mới→cũ vẫn đúng transition nếu duyệt i → i+1 theo hướng thời gian ngược... 
+        // Dùng chuỗi theo thời gian tăng: h
+        let t2t = 0, t2x = 0, x2t = 0, x2x = 0;
+        for (let i = 0; i < h.length - 1; i++) {
+            const cur = h[i], next = h[i + 1];
+            if (cur === 'T') next === 'T' ? t2t++ : t2x++;
+            else next === 'T' ? x2t++ : x2x++;
+        }
+        const totT = t2t + t2x, totX = x2t + x2x;
+        const pTfromT = totT > 0 ? t2t / totT : 0.5;
+        const pTfromX = totX > 0 ? x2t / totX : 0.5;
+        let markovT = (h[h.length - 1] === 'T' ? pTfromT : pTfromX);
+        markovT = markovT * 0.7 + 0.15; // làm mượt về 0.5
+
+        // trend score
+        const avgRatio = (totalRatio + recent10 + recent20 + recent50) / 4;
+        let trendScore = (avgRatio - 0.5) * 2;
+        const markovScore = (markovT - 0.5) * 2;
+        trendScore = trendScore * 0.7 + markovScore * 0.3;
+
+        // streak ngắn-trung (2-5): CỘNG theo hướng bệt, không vội đảo
+        if (streak >= 2 && streak <= 5) {
+            const direction = currentSide === 'T' ? 1 : -1;
+            trendScore += direction * (0.08 + streak * 0.03);
+        }
+        // chỉ khi bệt rất dài (>=6) mới nghiêng gãy nhẹ
+        if (streak >= 6) {
+            const direction = currentSide === 'T' ? 1 : -1;
+            if (trendScore * direction > 0) {
+                trendScore -= direction * 0.15 * Math.min(1, (streak - 5) / 4);
+            }
+        }
+
+        // random có kiểm soát
+        let finalScore;
+        if (Math.abs(trendScore) < 0.15) {
+            const base = (totalRatio - 0.5) * 2;
+            const noise = (Math.random() * 0.3) - 0.15;
+            finalScore = base * 0.5 + noise;
+        } else {
+            const noise = (Math.random() * 0.2) - 0.1;
+            finalScore = Math.min(0.6, Math.max(-0.6, trendScore + noise));
+        }
+
+        // chống bệt dự đoán model này
+        const recent = this.balancedLastPreds.slice(-3);
+        if (recent.length === 3 && recent.every(p => p === recent[0])) {
+            finalScore = -finalScore * 0.8;
+        }
+
+        const prediction = finalScore > 0 ? 'T' : 'X';
+        this.balancedLastPreds.push(prediction);
+        if (this.balancedLastPreds.length > 20) this.balancedLastPreds.shift();
+
+        const confidence = Math.min(0.85, Math.max(0.5, 0.5 + Math.abs(finalScore) * 0.4));
+        let reason;
+        if (streak >= 6) reason = `Balanced: bệt ${streak} ${currentSide === 'T' ? 'Tài' : 'Xỉu'} → nghiêng gãy`;
+        else if (streak >= 2) reason = `Balanced: theo bệt ${streak} ${currentSide === 'T' ? 'Tài' : 'Xỉu'}`;
+        else reason = `Balanced v3 · trend ${trendScore.toFixed(2)}`;
+
+        return { prediction, confidence, reason };
+    }
+
+
+    // MODEL 20: VIP Pattern Reader — đọc cầu đa khung + majority + streak context
+    model20() {
+        const h = this.history;
+        if (!h || h.length < 12) return null;
+        const last = h[h.length - 1];
+        let streak = 1;
+        for (let i = h.length - 2; i >= 0; i--) {
+            if (h[i] === last) streak++; else break;
+        }
+
+        // RLE segments
+        const segs = [];
+        let c = h[0], n = 1;
+        for (let i = 1; i < h.length; i++) {
+            if (h[i] === c) n++;
+            else { segs.push([c, n]); c = h[i]; n = 1; }
+        }
+        segs.push([c, n]);
+
+        // Cầu bệt rõ
+        if (streak >= 3 && streak <= 5) {
+            return { prediction: last, confidence: 0.74 + Math.min(0.1, streak * 0.02), reason: `VIP: bệt ${streak} → theo ${last === 'T' ? 'TÀI' : 'XỈU'}` };
+        }
+        if (streak >= 6) {
+            // hazard: long streak often breaks but not always
+            const breakP = Math.min(0.55, 0.35 + (streak - 6) * 0.04);
+            if (breakP > 0.48) {
+                return { prediction: last === 'T' ? 'X' : 'T', confidence: 0.62 + (streak - 6) * 0.02, reason: `VIP: bệt ${streak} dài → nghiêng gãy` };
+            }
+            return { prediction: last, confidence: 0.6, reason: `VIP: bệt ${streak} còn giữ` };
+        }
+
+        // Nhịp đều a-a (2-2, 3-3)
+        if (segs.length >= 4) {
+            const a = segs[segs.length - 1], b = segs[segs.length - 2], c2 = segs[segs.length - 3];
+            if (a[1] === b[1] && a[1] >= 2 && a[1] === c2[1]) {
+                // vừa đủ nhịp → đảo
+                if (a[1] === b[1]) {
+                    return { prediction: a[0] === 'T' ? 'X' : 'T', confidence: 0.71, reason: `VIP: nhịp ${a[1]}-${a[1]} đều → sang cửa` };
+                }
+            }
+            if (b[1] >= 2 && a[1] < b[1] && a[1] >= 1) {
+                return { prediction: a[0], confidence: 0.66, reason: `VIP: theo nhịp ${b[1]} → tiếp` };
+            }
+        }
+
+        // Majority cửa sổ 8/12/20 lệch rõ
+        const votes = { T: 0, X: 0 };
+        [8, 12, 20].forEach(sz => {
+            if (h.length < sz) return;
+            const sl = h.slice(-sz);
+            const tC = sl.filter(x => x === 'T').length;
+            if (tC / sz >= 0.62) votes.T++;
+            else if (tC / sz <= 0.38) votes.X++;
+        });
+        if (votes.T >= 2) return { prediction: 'T', confidence: 0.64, reason: 'VIP: đa khung nghiêng TÀI' };
+        if (votes.X >= 2) return { prediction: 'X', confidence: 0.64, reason: 'VIP: đa khung nghiêng XỈU' };
+
+        // True 1-1 only
+        const last6 = h.slice(-6).join('');
+        if (last6 === 'TXTXTX' || last6 === 'XTXTXT') {
+            return { prediction: last === 'T' ? 'X' : 'T', confidence: 0.63, reason: 'VIP: 1-1 sạch 6 phiên' };
+        }
+        return null;
+    }
+
     // Ensemble: Log-odds pooling + trong so EWMA accuracy + shrink + cooling
     getEnsemblePrediction() {
         const allPreds = this.getAllPredictions();
@@ -598,11 +788,19 @@ class Engine {
         let topReason = 'Thuật Toán Engine @SunNetWin';
         let highestW = 0;
 
+        const regime = (this.marketState && this.marketState.regime) || '';
+        const isBet = /Bệt|Chuỗi/.test(regime);
+        const isNhip = /Nhịp|1-1/.test(regime);
+
         for (const [modelName, pred] of Object.entries(allPreds)) {
             if (!pred || !pred.prediction) continue;
-            const baseW = (this.weights[modelName] !== undefined ? this.weights[modelName] : 1.0);
+            let baseW = (this.weights[modelName] !== undefined ? this.weights[modelName] : 1.0);
+            // Regime-aware: bệt → boost antiBreak/model20; 1-1 regime → modest model1
+            if (isBet && (modelName === 'model_antiBreak' || modelName === 'model20' || modelName === 'model17')) baseW *= 1.25;
+            if (isNhip && modelName === 'model1') baseW *= 1.1;
+            if (isBet && modelName === 'model1') baseW *= 0.5; // đừng bắt 1-1 khi đang bệt
             const ewma = this.modelHits[modelName] ? this.modelHits[modelName].ewma : 0.5;
-            const accMult = 0.5 + ewma; // 0.5 .. 1.5 — model hay dung duoc tang trong so
+            const accMult = 0.5 + ewma;
             const w = baseW * accMult * pred.confidence;
             activeCount++;
 
@@ -699,25 +897,7 @@ function startTelegramBot(options) {
 
   // ─── USER MENU (command only, no buttons) ───────────────
   async function showStart(chatId, name) {
-    await send(chatId,
-`✨ <b>Tool tưng tửng</b>
-────────────────
-👋 Xin chào <b>${esc(name)}</b>
-
-📌 <b>Key</b>
-/getkey — 🎯 Key free (nhiệm vụ 3 nhóm)
-/free — 🎯 Giống /getkey
-/buy — 💎 Mua key VIP
-/resetkey — 🔄 Reset thiết bị (auto)
-/status — ⏳ Yêu cầu đang chờ
-
-🔍 <b>Check info</b>
-/tiktok &lt;@user|link&gt; — 📱 TikTok
-/fb &lt;user|link&gt; — 📘 Facebook
-
-🔑 Key dạng <code>KYT-...</code> · 3 thiết bị
-💬 Hỗ trợ: @SunNetWin
-💡 Mẹo & lưu ý xem trên web`);
+    await send(chatId, '⚡ <b>TOOL TƯNG TỬNG</b> · VIP\n' + '────────────────────\n' + 'Xin chào <b>' + esc(name) + '</b>\n\n' + '🎁 <b>KEY FREE</b>\n' + '├ /getkey — nhiệm vụ nhóm\n' + '└ /free — giống getkey\n' + '\n' + '💎 <b>MUA KEY</b>\n' + '├ /buy — chọn gói + QR\n' + '└ /muakeytx — alias mua\n' + '\n' + '🔧 <b>KEY</b>\n' + '├ /resetkey — reset máy auto\n' + '└ /status — yêu cầu chờ duyệt\n' + '\n' + '🔎 <b>INFO</b>\n' + '├ /tiktok @user\n' + '└ /fb user|link\n' + '\n' + '────────────────────\n' + '🔑 KYT-... · 3 thiết bị\n' + '💬 @SunNetWin · /help\n');
   }
 
   async function showAdminHelp(chatId) {
@@ -798,16 +978,17 @@ ${request.groupLink ? `🔗 ${esc(request.groupLink)}\n` : ''}${request.resetKey
     const expiresText = req.durationHours > 0
       ? new Date(Date.now() + req.durationHours * 3600000).toLocaleString('vi-VN')
       : 'Không hết hạn';
-    const text =
-`✅ <b>KEY ĐÃ DUYỆT</b>
-────────────────
-🔑 <code>${result.key}</code>
-
-📦 ${esc(req.planLabel || 'Key free')}
-⏱ ${req.durationHours}h · Hết: ${expiresText}
-📱 Tối đa <b>3 thiết bị</b>
-
-🌐 Nhập key trên website Tool tưng tửng`;
+    const text = '<b>✅ KEY SẴN SÀNG</b>\n'
+      + '────────────────────\n'
+      + '🔑 <code>' + result.key + '</code>\n\n'
+      + '📦 ' + esc(req.planLabel || 'Key free') + '\n'
+      + '⏱ ' + (req.durationHours > 0 ? req.durationHours + 'h' : 'Vĩnh viễn') + '\n'
+      + '📅 ' + expiresText + '\n'
+      + '📱 3 thiết bị\n\n'
+      + '────────────────────\n'
+      + '🌐 Dán key vào web\n'
+      + '🔄 /resetkey khi full máy\n'
+      + '💬 @SunNetWin';
     try {
       await send(req.telegramId, text);
       if (options.markDelivered) options.markDelivered(req.id);
@@ -848,9 +1029,9 @@ ${request.groupLink ? `🔗 ${esc(request.groupLink)}\n` : ''}${request.resetKey
       const have = session.proofs.length;
       if (have < need) {
         await send(message.chat.id,
-`📷 Đã nhận ảnh <b>${have}/${need}</b>
-⏳ Còn gửi <b>${need - have}</b> ảnh nữa
-⌛️ Thời gian còn ~${Math.max(0, Math.ceil((timeoutSec * 1000 - (Date.now() - session.startedAt)) / 1000))}s`);
+`📷 Ảnh <b>${have}/${need}</b>
+⏳ Còn <b>${need - have}</b> ảnh
+⌛️ ~${Math.max(0, Math.ceil((timeoutSec * 1000 - (Date.now() - session.startedAt)) / 1000))}s`);
         return;
       }
       // đủ ảnh
@@ -867,9 +1048,10 @@ ${request.groupLink ? `🔗 ${esc(request.groupLink)}\n` : ''}${request.resetKey
       options.addRequest(request);
       delete sessions[userId]; options.saveSessions(sessions);
       await send(message.chat.id,
-`✅ Đã gửi đủ <b>${need} ảnh</b>
-🎫 Yêu cầu <b>#${request.id}</b>
-⏳ Chờ admin duyệt → nhận key (3 thiết bị)`);
+`✅ Đã nộp đủ <b>${need} ảnh</b>
+🎫 Mã: <b>#${request.id}</b>
+⏳ Chờ admin duyệt → nhận key
+📱 3 thiết bị · @SunNetWin`);
       // notify admins with all photos
       await notifyAdmins(request, request.proofFileId);
       for (let i = 1; i < (request.proofFileIds || []).length; i++) {
@@ -895,7 +1077,7 @@ ${request.groupLink ? `🔗 ${esc(request.groupLink)}\n` : ''}${request.resetKey
     };
     options.addRequest(request);
     delete sessions[userId]; options.saveSessions(sessions);
-    await send(message.chat.id, `✅ Đã gửi <b>#${request.id}</b>\n⏳ Chờ admin duyệt.`);
+    await send(message.chat.id, `✅ Bill đã gửi · <b>#${request.id}</b>\n⏳ Admin duyệt → nhận key VIP`);
     await notifyAdmins(request, request.proofFileId);
   }
 
@@ -1287,6 +1469,74 @@ ${promo ? `📌 <b>Câu cần sao chép:</b>\n<code>${esc(promo)}</code>\n` : ''
   }
 
   // ─── Message router ─────────────────────────────────────
+
+  async function showBuyMenu(chatId) {
+    const available = plans();
+    if (!available.length) return send(chatId, '📭 Tạm hết gói.\n/getkey nhận free · @SunNetWin');
+    const lines = available.map((p, i) => {
+      const days = p.durationHours >= 24 ? (Math.round(p.durationHours / 24) + ' ngày') : (p.durationHours + 'h');
+      return '<b>' + (i + 1) + '. ' + esc(p.label) + '</b>\n    💰 ' + fmt(p.price) + 'đ  ·  ⏱ ' + days;
+    }).join('\n\n');
+    const keyboard = {
+      inline_keyboard: available.map(p => {
+        const days = p.durationHours >= 24 ? (Math.round(p.durationHours / 24) + ' ngày') : (p.durationHours + 'h');
+        return [{ text: p.label + ' · ' + fmt(p.price) + 'đ · ' + days, callback_data: 'pay:' + p.id }];
+      })
+    };
+    await send(chatId,
+      '💳 <b>MUA KEY VIP</b>\n' + 
+      '────────────────────\n' + 
+      'Chọn gói 👇\n' + 
+      '\n' + lines + '\n\n' +
+      '────────────────────\n' + 
+      '✅ 3 thiết bị · Reset free\n' + 
+      '⚡ TX realtime · @SunNetWin\n',
+      { reply_markup: keyboard }
+    );
+  }
+
+  async function startPayment(chatId, fromId, planId) {
+    const plan = plans().find(p => p.id === String(planId || '').toLowerCase());
+    if (!plan) return send(chatId, '❌ Gói không tồn tại. Gõ /buy để chọn lại.');
+    const config = options.getConfig();
+    if (!config.bankCode || !config.bankAccount || !config.bankAccountName) {
+      return send(chatId, '⚠️ Admin chưa cấu hình ngân hàng VietQR.\nLiên hệ @SunNetWin');
+    }
+    const addInfo = `KEYVIP ${fromId}`;
+    const qr = `https://img.vietqr.io/image/${encodeURIComponent(config.bankCode)}-${encodeURIComponent(config.bankAccount)}-compact2.jpg?amount=${encodeURIComponent(String(plan.price))}&addInfo=${encodeURIComponent(addInfo)}&accountName=${encodeURIComponent(config.bankAccountName)}`;
+    const sessions = options.getSessions();
+    sessions[fromId] = { type: 'payment', planId: plan.id, startedAt: Date.now() };
+    options.saveSessions(sessions);
+    const days = plan.durationHours >= 24 ? `${Math.round(plan.durationHours / 24)} ngày` : `${plan.durationHours}h`;
+    await sendPhoto(chatId, qr, {
+      caption: '<b>💳 THANH TOÁN</b>\n'
+        + '────────────────────\n'
+        + '📦 <b>' + esc(plan.label) + '</b>\n'
+        + '💰 <b>' + fmt(plan.price) + 'đ</b> · ⏱ ' + days + '\n\n'
+        + '🏦 <b>' + esc(config.bankCode) + '</b>\n'
+        + '💳 <code>' + esc(config.bankAccount) + '</code>\n'
+        + '👤 ' + esc(config.bankAccountName) + '\n\n'
+        + '📝 CK: <code>' + addInfo + '</code>\n\n'
+        + '────────────────────\n'
+        + '📷 Gửi <b>ảnh bill</b> sau khi CK\n'
+        + '⏳ Duyệt xong → nhận key\n'
+        + '💬 @SunNetWin'
+    });
+  }
+
+  async function handleCallback(cq) {
+    if (!cq) return;
+    const data = String(cq.data || '');
+    const chatId = cq.message?.chat?.id;
+    const fromId = String(cq.from?.id || '');
+    try { await tg('answerCallbackQuery', { callback_query_id: cq.id }); } catch {}
+    if (!chatId) return;
+    if (data.startsWith('pay:')) {
+      const planId = data.slice(4);
+      return startPayment(chatId, fromId, planId);
+    }
+  }
+
   async function handleMessage(message) {
     if (!message || !message.chat) return;
     const from = message.from || {};
@@ -1340,38 +1590,17 @@ ${promo ? `📌 <b>Câu cần sao chép:</b>\n<code>${esc(promo)}</code>\n` : ''
       return startGroupKeyTask(chatId, fromId, from);
     }
 
-    if (cmd === 'buy') {
-      const available = plans();
-      if (!available.length) return send(chatId, '📭 Admin chưa mở bán gói.');
-      const lines = available.map((p, i) => `${i + 1}. <b>${esc(p.label)}</b>\n   💰 ${fmt(p.price)}đ · ⏱ ${p.durationHours}h\n   👉 <code>/pay ${p.id}</code>`);
-      return send(chatId,
-`💎 <b>MUA KEY VIP</b>
-────────────────
-${lines.join('\n\n')}
-📱 Key = 3 thiết bị`);
+    if (cmd === 'buy' || cmd === 'muakeytx' || cmd === 'muakey') {
+      return showBuyMenu(chatId);
     }
 
     if (cmd === 'pay') {
       const planId = (args[0] || '').toLowerCase();
-      const plan = plans().find(p => p.id === planId);
-      if (!plan) return send(chatId, '❌ Gói không tồn tại. Gõ /buy');
-      const config = options.getConfig();
-      if (!config.bankCode || !config.bankAccount || !config.bankAccountName) return send(chatId, '⚠️ Admin chưa cấu hình VietQR.');
-      const addInfo = `KEYVIP ${fromId}`;
-      const qr = `https://img.vietqr.io/image/${encodeURIComponent(config.bankCode)}-${encodeURIComponent(config.bankAccount)}-compact2.jpg?amount=${encodeURIComponent(String(plan.price))}&addInfo=${encodeURIComponent(addInfo)}&accountName=${encodeURIComponent(config.bankAccountName)}`;
-      sessions[fromId] = { type: 'payment', planId: plan.id, startedAt: Date.now() };
-      options.saveSessions(sessions);
-      await sendPhoto(chatId, qr, {
-        caption:
-`💳 <b>${esc(plan.label)}</b>
-💰 ${fmt(plan.price)}đ · ⏱ ${plan.durationHours}h
-🏦 ${esc(config.bankCode)} · <code>${esc(config.bankAccount)}</code>
-👤 ${esc(config.bankAccountName)}
-📝 CK: <code>${addInfo}</code>
+      return startPayment(chatId, fromId, planId);
+    }
 
-📷 Sau CK → gửi <b>ảnh chứng từ</b>`
-      });
-      return;
+    if (cmd === 'help') {
+      return showStart(chatId, displayName(from));
     }
 
     if (cmd === 'resetkey') {
@@ -1518,11 +1747,12 @@ ${info.private ? '🔒 Private' : '🌐 Public'}
     try { await tg('deleteWebhook', { drop_pending_updates: false }); } catch {}
     while (!stopped) {
       try {
-        const updates = await tg('getUpdates', { offset, timeout: 25, allowed_updates: ['message'] });
+        const updates = await tg('getUpdates', { offset, timeout: 25, allowed_updates: ['message', 'callback_query'] });
         for (const update of updates || []) {
           offset = Math.max(offset, Number(update.update_id) + 1);
           try {
             if (update.message) await handleMessage(update.message);
+            if (update.callback_query) await handleCallback(update.callback_query);
           } catch (e) { console.warn('[telegram] handler:', e.message); }
         }
       } catch (e) {
@@ -1854,13 +2084,23 @@ let botSettings = loadJSON(SETTINGS_FILE, null) || {
 };
 function normalizeSettings(value) {
   const v = value || {};
-  const plans = Array.isArray(v.plans) ? v.plans.map(p => ({
+  let plans = Array.isArray(v.plans) ? v.plans.map(p => ({
     id: String(p.id || '').trim().toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 24),
     label: String(p.label || '').trim().slice(0, 80),
     price: Math.max(0, Math.floor(Number(p.price || 0))),
     durationHours: Math.max(0, Math.floor(Number(p.durationHours || 0))),
     active: p.active !== false
   })).filter(p => p.id && p.label && p.price > 0 && p.durationHours > 0) : [];
+  if (!plans.length) {
+    plans = [
+      { id: '1d', label: '1 ngày', price: 3000, durationHours: 24, active: true },
+      { id: '3d', label: '3 ngày', price: 7000, durationHours: 72, active: true },
+      { id: '1w', label: '1 tuần', price: 15000, durationHours: 168, active: true },
+      { id: '1m', label: '1 tháng', price: 40000, durationHours: 720, active: true },
+      { id: '2m', label: '2 tháng', price: 70000, durationHours: 1440, active: true },
+      { id: 'lifetime', label: 'Vĩnh viễn', price: 100000, durationHours: 87600, active: true }
+    ];
+  }
   const ids = new Set();
   for (const plan of plans) { if (ids.has(plan.id)) throw new Error('Mã gói bị trùng: ' + plan.id); ids.add(plan.id); }
   return {
@@ -1943,7 +2183,10 @@ app.get('/api/public/config', (req, res) => {
       enabled: !!(botSettings.maintenance && botSettings.maintenance.enabled),
       message: (botSettings.maintenance && botSettings.maintenance.message) || '',
       lockedGames: (botSettings.maintenance && botSettings.maintenance.lockedGames) || []
-    }
+    },
+    plans: (botSettings.plans || []).filter(p => p.active !== false).map(p => ({
+      id: p.id, label: p.label, price: p.price, durationHours: p.durationHours
+    }))
   });
 });
 app.post('/api/auth', (req, res) => {
