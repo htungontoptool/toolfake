@@ -20,14 +20,17 @@ class Engine {
             recentAccuracy: 0,
             sumAverage: 10.5
         };
-        this.marketState = { trend: 'CÂN BẰNG', regime: 'NORMAL' };
+        this.marketState = { trend: 'CÃ‚N Báº°NG', regime: 'NORMAL' };
 
-        // ===== SIÊU VIP ENGINE UPGRADE =====
+        // ===== SIÃŠU VIP ENGINE UPGRADE =====
         this.modelHits = {};        // EWMA do chinh xac tung model
         this.autocorr = 0;          // tu tuong quan lag-1 (+1: bet, -1: nhip)
         this.entropy = 1.0;
         this.streakSurvival = {};   // P(tiep tuc | do dai chuoi k) thuc nghiem
-        this.balancedLastPreds = []; // model19 — chống bệt dự đoán
+        this.balancedLastPreds = []; // model19 â€” chá»‘ng bá»‡t dá»± Ä‘oÃ¡n
+        this.consecutiveSamePreds = []; // chá»‘ng láº·p dá»± Ä‘oÃ¡n liÃªn tiáº¿p
+        this.recentPredResults = []; // theo dÃµi Ä‘Ãºng/sai gáº§n Ä‘Ã¢y cá»§a ensemble
+        this.lastEnsemblePred = null; // dá»± Ä‘oÃ¡n ensemble cuá»‘i (Ä‘á»ƒ cháº¥m Ä‘iá»ƒm)
         this.initAllModels();
     }
 
@@ -35,7 +38,7 @@ class Engine {
         for (let i = 1; i <= 10; i++) {
             if (this[`model${i}`]) {
                 this.models[`model${i}`] = this[`model${i}`].bind(this);
-                this.weights[`model${i}`] = i === 1 ? 0.25 : 1.0;
+                this.weights[`model${i}`] = i === 1 ? 0.12 : 1.0;
                 this.modelHits[`model${i}`] = { win: 0, loss: 0, ewma: 0.5 };
             }
         }
@@ -49,25 +52,37 @@ class Engine {
                 this.modelHits[`model${i}`] = { win: 0, loss: 0, ewma: 0.5 };
             }
         }
-        // Pattern-8 lookup weight hơi cao vì bảng thực nghiệm
-        if (this.models['model16']) this.weights['model16'] = 1.35;
-        if (this.models['model17']) this.weights['model17'] = 0.85; // RLE — không ưu tiên 1-1
-        if (this.models['model18']) this.weights['model18'] = 1.25;
-        if (this.models['model19']) this.weights['model19'] = 1.15;
-        if (this.models['model20']) this.weights['model20'] = 1.45; // VIP pattern reader
-        if (this.models['model_antiBreak']) this.weights['model_antiBreak'] = 1.55;
-        if (this.models['model16']) this.weights['model16'] = 1.5; // pattern8 table
+        // === SIÃŠU Ká»¸: trá»ng sá»‘ tá»‘i Æ°u â€” giáº£m máº¡nh model dá»… báº¯t 1-1 áº£o ===
+        if (this.models['model16']) this.weights['model16'] = 1.55; // pattern8 table
+        if (this.models['model17']) this.weights['model17'] = 0.50; // RLE â€” giáº£m máº¡nh, dá»… nháº§m 2-2
+        if (this.models['model14']) this.weights['model14'] = 0.40; // nhá»‹p 5 phiÃªn â€” ráº¥t dá»… áº£o
+        if (this.models['model18']) this.weights['model18'] = 1.30;
+        if (this.models['model19']) this.weights['model19'] = 1.10;
+        if (this.models['model20']) this.weights['model20'] = 1.60; // VIP pattern reader â€” Ä‘Ã¡ng tin
+        if (this.models['model_antiBreak']) this.weights['model_antiBreak'] = 1.75; // theo bá»‡t â€” chÃ­nh xÃ¡c nháº¥t
+        if (this.models['model2']) this.weights['model2'] = 1.25;
+        if (this.models['model8']) this.weights['model8'] = 1.30; // N-gram máº¡nh
     }
 
     addResult(result, diceSum = null) {
+        // === SIÃŠU Ká»¸: cháº¥m Ä‘iá»ƒm dá»± Ä‘oÃ¡n ensemble cuá»‘i â†’ cáº­p nháº­t chuá»—i thua ===
+        if (this.lastEnsemblePred && this.lastEnsemblePred.prediction) {
+            const ensHit = this.lastEnsemblePred.prediction === result;
+            if (ensHit) { this.consecutiveLosses = 0; this.recentPredResults.push(1); }
+            else { this.consecutiveLosses++; this.recentPredResults.push(0); }
+            if (this.recentPredResults.length > 12) this.recentPredResults.shift();
+            this.lastEnsemblePred = null;
+        }
         // Cap nhat trong so adaptive + EWMA do chinh xac tung model
         for (const [modelName, lastPred] of Object.entries(this.lastPredictions)) {
             if (lastPred && lastPred.prediction) {
                 const hit = lastPred.prediction === result;
                 if (hit) {
-                    this.weights[modelName] = Math.min((this.weights[modelName] || 1.0) * 1.12, 3.5);
+                    this.weights[modelName] = Math.min((this.weights[modelName] || 1.0) * 1.10, 3.2);
                 } else {
-                    const penalty = (modelName === 'model1' || modelName === 'model_antiBreak') ? 0.40 : 0.70;
+                    // === SIÃŠU Ká»¸: pháº¡t náº·ng hÆ¡n cÃ¡c model dá»… báº¯t 1-1 áº£o ===
+                    const flipProne = (modelName === 'model1' || modelName === 'model14' || modelName === 'model17' || modelName === 'model9');
+                    const penalty = flipProne ? 0.45 : (modelName === 'model_antiBreak' ? 0.60 : 0.72);
                     this.weights[modelName] = Math.max((this.weights[modelName] || 1.0) * penalty, 0.05);
                 }
                 if (this.modelHits[modelName]) {
@@ -131,7 +146,7 @@ class Engine {
 
     updateAutocorrelation() {
         const N = Math.min(this.history.length, 40);
-        if (N < 8) { this.autocorr = 0; return; }
+        if (N < 10) { this.autocorr = 0; return; }
         const seq = this.history.slice(-N).map(c => c === 'T' ? 1 : -1);
         const mean = seq.reduce((a, b) => a + b, 0) / seq.length;
         let num = 0, den = 0;
@@ -139,11 +154,11 @@ class Engine {
             num += (seq[i-1] - mean) * (seq[i] - mean);
             den += (seq[i] - mean) * (seq[i] - mean);
         }
-        this.autocorr = den > 0 ? Math.max(-0.9, Math.min(0.9, num / den)) : 0;
+        this.autocorr = den > 0 ? Math.max(-0.85, Math.min(0.85, num / den)) : 0;
     }
 
     updateStreakSurvival() {
-        // P(chuoi tiep tuc | da chay k phien) — thuc nghiem tren toan bo lich su
+        // P(chuoi tiep tuc | da chay k phien) â€” thuc nghiem tren toan bo lich su
         const cont = {}, tot = {};
         let runChar = null, runLen = 0;
         for (let i = 0; i < this.history.length; i++) {
@@ -169,38 +184,38 @@ class Engine {
     }
 
     updateMarketState() {
-        if (this.history.length < 10) return;
+        if (this.history.length < 15) return;
         const recent = this.history.slice(-15);
         const tCount = recent.filter(x => x === 'T').length;
         const xCount = recent.filter(x => x === 'X').length;
         const diff = Math.abs(tCount - xCount) / recent.length;
 
-        if (this.autocorr < -0.18 || this.sessionStats.volatility > 0.7) {
-            this.marketState.regime = 'Cầu Nhịp Ngắn (1-1 / 1-2)';
+        // === SIÃŠU Ká»¸: chá»‰ gá»i lÃ  nhá»‹p khi Cáº¢ autocorr máº¡nh VÃ€ biáº¿n Ä‘á»™ng cao ===
+        if (this.autocorr < -0.28 && this.sessionStats.volatility > 0.75) {
+            this.marketState.regime = 'Cáº§u Nhá»‹p Ngáº¯n (1-1 / 1-2)';
         } else if (diff > 0.4) {
-            this.marketState.regime = tCount > xCount ? 'Cầu Nghiêng TÀI' : 'Cầu Nghiêng XỈU';
+            this.marketState.regime = tCount > xCount ? 'Cáº§u NghiÃªng TÃ€I' : 'Cáº§u NghiÃªng Xá»ˆU';
         } else if (this.sessionStats.streaks.T >= 3 || this.sessionStats.streaks.X >= 3) {
-            this.marketState.regime = 'Cầu Bệt / Chuỗi Dài';
+            this.marketState.regime = 'Cáº§u Bá»‡t / Chuá»—i DÃ i';
         } else {
-            this.marketState.regime = 'Cầu Tách / Khuôn 2-2';
+            this.marketState.regime = 'Cáº§u TÃ¡ch / KhuÃ´n 2-2';
         }
-        this.marketState.trend = tCount > xCount ? 'TÀI TẮC' : (xCount > tCount ? 'XỈU TẮC' : 'CÂN BẰNG');
+        this.marketState.trend = tCount > xCount ? 'TÃ€I Táº®C' : (xCount > tCount ? 'Xá»ˆU Táº®C' : 'CÃ‚N Báº°NG');
     }
 
-    // ===== CÁC MODEL DỰ ĐOÁN (giữ nguyên tên, nâng cấp logic) =====
+    // ===== CÃC MODEL Dá»° ÄOÃN (giá»¯ nguyÃªn tÃªn, nÃ¢ng cáº¥p logic) =====
 
-    // Model 1: chỉ nhận 1-1 khi xác nhận rõ (6+ phiên đan xen) — tránh bắt 1-1 ảo
+    // Model 1: chá»‰ nháº­n 1-1 khi xÃ¡c nháº­n rÃµ (6+ phiÃªn Ä‘an xen) â€” trÃ¡nh báº¯t 1-1 áº£o
     model1() {
-        const recent = this.history.slice(-8);
-        if (recent.length < 6) return null;
-        // phải có ít nhất 5 lần đảo liên tiếp mới coi là 1-1
+        // === SIÃŠU Ká»¸: chá»‰ báº¯t 1-1 khi 10 phiÃªn Ä‘an xen HOÃ€N Háº¢O (9/9 Ä‘áº£o) ===
+        const recent = this.history.slice(-10);
+        if (recent.length < 10) return null;
         let flips = 0;
         for (let i = 1; i < recent.length; i++) if (recent[i] !== recent[i-1]) flips++;
-        if (flips < recent.length - 1) return null; // có bệt xen → không phải 1-1 sạch
+        if (flips < 9) return null; // khÃ´ng cháº¥p nháº­n bá»‡t xen káº½
         const last = recent[recent.length - 1];
         const pred = last === 'T' ? 'X' : 'T';
-        const conf = recent.length >= 8 ? 0.72 : 0.58;
-        return { prediction: pred, confidence: conf, reason: `1-1 sạch ${recent.length} phiên → đảo` };
+        return { prediction: pred, confidence: 0.68, reason: `1-1 sáº¡ch 10 phiÃªn (xÃ¡c nháº­n máº¡nh) â†’ Ä‘áº£o nháº¹` };
     }
 
     // Model Anti-Break: dung hazard thuc nghiem cua chuoi
@@ -213,21 +228,21 @@ class Engine {
         const surv = this.streakSurvival[k];
         if (surv === undefined) {
             if (streak >= 2 && streak <= 5) {
-                return { prediction: last, confidence: 0.85 + (streak * 0.02), reason: `Anti Bẻ Cầu: Chuỗi ${streak} (${last === 'T' ? 'TÀI' : 'XỈU'})` };
+                return { prediction: last, confidence: 0.85 + (streak * 0.02), reason: `Anti Báº» Cáº§u: Chuá»—i ${streak} (${last === 'T' ? 'TÃ€I' : 'Xá»ˆU'})` };
             }
             return null;
         }
-        if (surv >= 0.52) {
-            const conf = Math.min(0.6 + (surv - 0.5) * 1.5, 0.9);
-            return { prediction: last, confidence: conf, reason: `Anti-Bẻ Thực Nghiệm: P(tiếp tục)=${(surv * 100).toFixed(0)}% @ chuỗi ${streak}` };
-        } else if (surv <= 0.45) {
-            const conf = Math.min(0.6 + (0.5 - surv) * 1.5, 0.9);
-            return { prediction: last === 'T' ? 'X' : 'T', confidence: conf, reason: `Hazard Bẻ Cầu: P(đứt)=${((1 - surv) * 100).toFixed(0)}% @ chuỗi ${streak}` };
+        if (surv >= 0.50) {
+            const conf = Math.min(0.62 + (surv - 0.5) * 1.4, 0.88);
+            return { prediction: last, confidence: conf, reason: `Anti-Báº» Thá»±c Nghiá»‡m: P(tiáº¿p tá»¥c)=${(surv * 100).toFixed(0)}% @ chuá»—i ${streak}` };
+        } else if (surv <= 0.42) {
+            const conf = Math.min(0.60 + (0.5 - surv) * 1.4, 0.85);
+            return { prediction: last === 'T' ? 'X' : 'T', confidence: conf, reason: `Hazard Báº» Cáº§u: P(Ä‘á»©t)=${((1 - surv) * 100).toFixed(0)}% @ chuá»—i ${streak}` };
         }
         return null;
     }
 
-    // Model 2: Bet dai — ket hop hazard thuc nghiem
+    // Model 2: Bet dai â€” ket hop hazard thuc nghiem
     model2() {
         const last = this.history[this.history.length - 1];
         if (!last) return null;
@@ -237,32 +252,32 @@ class Engine {
         const surv = this.streakSurvival[k];
         if (surv !== undefined) {
             if (streak <= 6 && surv >= 0.5) {
-                return { prediction: last, confidence: Math.min(0.7 + surv * 0.2, 0.9), reason: `Cầu Bệt ${streak} Phiên (Hazard ${(surv * 100).toFixed(0)}% tiếp)` };
+                return { prediction: last, confidence: Math.min(0.7 + surv * 0.2, 0.9), reason: `Cáº§u Bá»‡t ${streak} PhiÃªn (Hazard ${(surv * 100).toFixed(0)}% tiáº¿p)` };
             }
             if (streak > 6 || surv < 0.42) {
-                return { prediction: last === 'T' ? 'X' : 'T', confidence: 0.72, reason: `Cầu Quá Dài (${streak} Phiên) - Bẻ An Toàn` };
+                return { prediction: last === 'T' ? 'X' : 'T', confidence: 0.72, reason: `Cáº§u QuÃ¡ DÃ i (${streak} PhiÃªn) - Báº» An ToÃ n` };
             }
             return null;
         }
-        if (streak >= 3 && streak <= 6) return { prediction: last, confidence: 0.82, reason: `Cầu Bệt Dài ${streak} Phiên (Xu Hướng Trôi)` };
-        if (streak > 6) return { prediction: last === 'T' ? 'X' : 'T', confidence: 0.70, reason: `Cầu Quá Dài (${streak} Phiên) - Bẻ An Toàn` };
+        if (streak >= 3 && streak <= 6) return { prediction: last, confidence: 0.82, reason: `Cáº§u Bá»‡t DÃ i ${streak} PhiÃªn (Xu HÆ°á»›ng TrÃ´i)` };
+        if (streak > 6) return { prediction: last === 'T' ? 'X' : 'T', confidence: 0.70, reason: `Cáº§u QuÃ¡ DÃ i (${streak} PhiÃªn) - Báº» An ToÃ n` };
         return null;
     }
 
-    // Model 3: Khuon 2-2 / 3-1 — mo rong them mau
+    // Model 3: Khuon 2-2 / 3-1 â€” mo rong them mau
     model3() {
         const recent = this.history.slice(-4);
         if (recent.length < 4) return null;
         const str = recent.join('-');
         const map = {
-            'T-T-X-X': { p: 'T', c: 0.80, r: 'Khuôn Cầu Đôi 2-2 (Ưu Tiên TÀI)' },
-            'X-X-T-T': { p: 'X', c: 0.80, r: 'Khuôn Cầu Đôi 2-2 (Ưu Tiên XỈU)' },
-            'T-X-X-T': { p: 'T', c: 0.76, r: 'Khuôn Cầu Kép 2-1-2' },
-            'X-T-T-X': { p: 'X', c: 0.76, r: 'Khuôn Cầu Kép 2-1-2' },
-            'T-T-T-X': { p: 'T', c: 0.70, r: 'Mẫu Cầu 3-1 (Lệch Pha)' },
-            'X-X-X-T': { p: 'X', c: 0.70, r: 'Mẫu Cầu 3-1 (Lệch Pha)' },
-            'T-X-T-T': { p: 'T', c: 0.68, r: 'Mẫu 1-2-1 Kéo Dài' },
-            'X-T-X-X': { p: 'X', c: 0.68, r: 'Mẫu 1-2-1 Kéo Dài' }
+            'T-T-X-X': { p: 'T', c: 0.80, r: 'KhuÃ´n Cáº§u ÄÃ´i 2-2 (Æ¯u TiÃªn TÃ€I)' },
+            'X-X-T-T': { p: 'X', c: 0.80, r: 'KhuÃ´n Cáº§u ÄÃ´i 2-2 (Æ¯u TiÃªn Xá»ˆU)' },
+            'T-X-X-T': { p: 'T', c: 0.76, r: 'KhuÃ´n Cáº§u KÃ©p 2-1-2' },
+            'X-T-T-X': { p: 'X', c: 0.76, r: 'KhuÃ´n Cáº§u KÃ©p 2-1-2' },
+            'T-T-T-X': { p: 'T', c: 0.70, r: 'Máº«u Cáº§u 3-1 (Lá»‡ch Pha)' },
+            'X-X-X-T': { p: 'X', c: 0.70, r: 'Máº«u Cáº§u 3-1 (Lá»‡ch Pha)' },
+            'T-X-T-T': { p: 'T', c: 0.68, r: 'Máº«u 1-2-1 KÃ©o DÃ i' },
+            'X-T-X-X': { p: 'X', c: 0.68, r: 'Máº«u 1-2-1 KÃ©o DÃ i' }
         };
         const m = map[str];
         if (m) return { prediction: m.p, confidence: m.c, reason: m.r };
@@ -274,10 +289,10 @@ class Engine {
         const recent = this.history.slice(-5);
         if (recent.length < 5) return null;
         const str = recent.join('-');
-        if (str === 'T-X-X-T-T') return { prediction: 'X', confidence: 0.74, reason: 'Cầu Tách Mẫu 1-2-1-1 (Hồi XỈU)' };
-        if (str === 'X-T-T-X-X') return { prediction: 'T', confidence: 0.74, reason: 'Cầu Tách Mẫu 1-2-1-1 (Hồi TÀI)' };
-        if (str === 'T-T-X-X-T') return { prediction: 'X', confidence: 0.72, reason: 'Mẫu 2-2-1 Đảo Chiều' };
-        if (str === 'X-X-T-T-X') return { prediction: 'T', confidence: 0.72, reason: 'Mẫu 2-2-1 Đảo Chiều' };
+        if (str === 'T-X-X-T-T') return { prediction: 'X', confidence: 0.74, reason: 'Cáº§u TÃ¡ch Máº«u 1-2-1-1 (Há»“i Xá»ˆU)' };
+        if (str === 'X-T-T-X-X') return { prediction: 'T', confidence: 0.74, reason: 'Cáº§u TÃ¡ch Máº«u 1-2-1-1 (Há»“i TÃ€I)' };
+        if (str === 'T-T-X-X-T') return { prediction: 'X', confidence: 0.72, reason: 'Máº«u 2-2-1 Äáº£o Chiá»u' };
+        if (str === 'X-X-T-T-X') return { prediction: 'T', confidence: 0.72, reason: 'Máº«u 2-2-1 Äáº£o Chiá»u' };
         return null;
     }
 
@@ -285,8 +300,8 @@ class Engine {
     model5() {
         if (this.detailedHistory.length === 0) return null;
         const lastSum = this.detailedHistory[this.detailedHistory.length - 1];
-        if (lastSum <= 4) return { prediction: 'T', confidence: 0.88, reason: `Nút Cực Thấp (${lastSum} Nút) - Hồi Quy TÀI` };
-        if (lastSum >= 17) return { prediction: 'X', confidence: 0.88, reason: `Nút Cực Cao (${lastSum} Nút) - Hồi Quy XỈU` };
+        if (lastSum <= 4) return { prediction: 'T', confidence: 0.88, reason: `NÃºt Cá»±c Tháº¥p (${lastSum} NÃºt) - Há»“i Quy TÃ€I` };
+        if (lastSum >= 17) return { prediction: 'X', confidence: 0.88, reason: `NÃºt Cá»±c Cao (${lastSum} NÃºt) - Há»“i Quy Xá»ˆU` };
         return null;
     }
 
@@ -295,9 +310,9 @@ class Engine {
         if (this.detailedHistory.length < 4) return null;
         const avg = this.sessionStats.sumAverage;
         if (avg > 11.8) {
-            return { prediction: 'X', confidence: Math.min(0.65 + (avg - 10.5) * 0.08, 0.85), reason: `Điểm Trung Bình Cao (${avg.toFixed(1)}) - Ép XỈU` };
+            return { prediction: 'X', confidence: Math.min(0.65 + (avg - 10.5) * 0.08, 0.85), reason: `Äiá»ƒm Trung BÃ¬nh Cao (${avg.toFixed(1)}) - Ã‰p Xá»ˆU` };
         } else if (avg < 9.2) {
-            return { prediction: 'T', confidence: Math.min(0.65 + (10.5 - avg) * 0.08, 0.85), reason: `Điểm Trung Bình Thấp (${avg.toFixed(1)}) - Ép TÀI` };
+            return { prediction: 'T', confidence: Math.min(0.65 + (10.5 - avg) * 0.08, 0.85), reason: `Äiá»ƒm Trung BÃ¬nh Tháº¥p (${avg.toFixed(1)}) - Ã‰p TÃ€I` };
         }
         return null;
     }
@@ -311,15 +326,15 @@ class Engine {
         const cCont = tr[`${last}to${last}`] || 0;
         const cBreak = tr[`${last}to${other}`] || 0;
         const tot = cCont + cBreak;
-        if (tot < 6) return null;
+        if (tot < 10) return null;
         const pCont = (cCont + 0.5) / (tot + 1);
-        if (Math.abs(pCont - 0.5) < 0.08) return null;
+        if (Math.abs(pCont - 0.5) < 0.12) return null;
         const pred = pCont > 0.5 ? last : other;
-        const conf = Math.min(0.55 + Math.abs(pCont - 0.5) * 1.2, 0.85);
-        return { prediction: pred, confidence: conf, reason: `Markov Bậc 1: P(${pred === 'T' ? 'TÀI' : 'XỈU'})=${(Math.max(pCont, 1 - pCont) * 100).toFixed(0)}% (${tot} mẫu)` };
+        const conf = Math.min(0.58 + Math.abs(pCont - 0.5) * 1.1, 0.82);
+        return { prediction: pred, confidence: conf, reason: `Markov Báº­c 1: P(${pred === 'T' ? 'TÃ€I' : 'Xá»ˆU'})=${(Math.max(pCont, 1 - pCont) * 100).toFixed(0)}% (${tot} máº«u)` };
     }
 
-    // Model 8: N-gram Markov bac bien (2..5) co trong so thoi gian — model manh nhat
+    // Model 8: N-gram Markov bac bien (2..5) co trong so thoi gian â€” model manh nhat
     model8() {
         if (this.history.length < 10) return null;
         const H = this.history;
@@ -349,19 +364,19 @@ class Engine {
         if (Math.abs(pT - 0.5) < 0.06) return null;
         const pred = pT > 0.5 ? 'T' : 'X';
         const conf = Math.min(0.55 + Math.abs(pT - 0.5) * 1.1, 0.9);
-        return { prediction: pred, confidence: conf, reason: `N-gram Markov Bậc ${bestOrder} (${bestSupport.toFixed(1)} mẫu có trọng số)` };
+        return { prediction: pred, confidence: conf, reason: `N-gram Markov Báº­c ${bestOrder} (${bestSupport.toFixed(1)} máº«u cÃ³ trá»ng sá»‘)` };
     }
 
     // Model 9: Regime adapter dua tren tu tuong quan (bet vs nhip)
     model9() {
         if (this.history.length < 15) return null;
         const ac = this.autocorr;
-        if (Math.abs(ac) < 0.18) return null;
+        if (Math.abs(ac) < 0.22) return null;
         const last = this.history[this.history.length - 1];
         if (ac > 0) {
-            return { prediction: last, confidence: Math.min(0.55 + ac * 0.8, 0.82), reason: `Regime Xu Hướng (autocorr=${ac.toFixed(2)}) → Theo Chuỗi` };
+            return { prediction: last, confidence: Math.min(0.55 + ac * 0.8, 0.82), reason: `Regime Xu HÆ°á»›ng (autocorr=${ac.toFixed(2)}) â†’ Theo Chuá»—i` };
         } else {
-            return { prediction: last === 'T' ? 'X' : 'T', confidence: Math.min(0.55 + (-ac) * 0.8, 0.82), reason: `Regime Nhịp (autocorr=${ac.toFixed(2)}) → Đảo Chiều` };
+            return { prediction: last === 'T' ? 'X' : 'T', confidence: Math.min(0.55 + (-ac) * 0.8, 0.82), reason: `Regime Nhá»‹p (autocorr=${ac.toFixed(2)}) â†’ Äáº£o Chiá»u` };
         }
     }
 
@@ -375,10 +390,10 @@ class Engine {
         if (Math.abs(pT - 0.5) < 0.12) return null;
         const pred = pT > 0.5 ? 'T' : 'X';
         const conf = Math.min(0.55 + Math.abs(pT - 0.5) * 1.3, 0.85);
-        return { prediction: pred, confidence: conf, reason: `Tỷ Lệ Thực Tế ${n} phiên: TÀI ${(pT * 100).toFixed(0)}%` };
+        return { prediction: pred, confidence: conf, reason: `Tá»· Lá»‡ Thá»±c Táº¿ ${n} phiÃªn: TÃ€I ${(pT * 100).toFixed(0)}%` };
     }
 
-    // ===== CHẾ ĐỘ TIẾP TỤC HUẤN LUYỆN (không ảnh hưởng giao diện) =====
+    // ===== CHáº¾ Äá»˜ TIáº¾P Tá»¤C HUáº¤N LUYá»†N (khÃ´ng áº£nh hÆ°á»Ÿng giao diá»‡n) =====
     saveState() {
         return {
             history: this.history,
@@ -392,6 +407,9 @@ class Engine {
             streakSurvival: this.streakSurvival,
             consecutiveLosses: this.consecutiveLosses,
             balancedLastPreds: this.balancedLastPreds || [],
+            consecutiveSamePreds: this.consecutiveSamePreds || [],
+            recentPredResults: this.recentPredResults || [],
+            lastEnsemblePred: this.lastEnsemblePred || null,
             ts: Date.now()
         };
     }
@@ -409,44 +427,51 @@ class Engine {
             if (s.streakSurvival) this.streakSurvival = s.streakSurvival;
             if (typeof s.consecutiveLosses === 'number') this.consecutiveLosses = s.consecutiveLosses;
             if (Array.isArray(s.balancedLastPreds)) this.balancedLastPreds = s.balancedLastPreds.slice(-20);
+            if (Array.isArray(s.consecutiveSamePreds)) this.consecutiveSamePreds = s.consecutiveSamePreds.slice(-10);
+            if (Array.isArray(s.recentPredResults)) this.recentPredResults = s.recentPredResults.slice(-12);
+            if (s.lastEnsemblePred) this.lastEnsemblePred = s.lastEnsemblePred;
             // dam bao cac model moi deu co trong so / EWMA mac dinh
             for (const k in this.models) {
                 if (!(k in this.weights)) {
-                    this.weights[k] = (k === 'model1') ? 0.25
-                        : (k === 'model_antiBreak' ? 1.55
-                        : (k === 'model19' ? 1.15
-                        : (k === 'model17' ? 0.85 : 1.0)));
+                    this.weights[k] = (k === 'model1') ? 0.12
+                        : (k === 'model_antiBreak' ? 1.75
+                        : (k === 'model20' ? 1.60
+                        : (k === 'model17' ? 0.50
+                        : (k === 'model14' ? 0.40 : 1.0))));
                 }
                 if (!(k in this.modelHits)) this.modelHits[k] = { win: 0, loss: 0, ewma: 0.5 };
             }
-            // Chống bias 1-1 từ state cũ: hạ model1, nâng antiBreak
-            if (this.weights['model1'] && this.weights['model1'] > 0.35) this.weights['model1'] = 0.25;
-            if (this.weights['model17'] && this.weights['model17'] > 1.0) this.weights['model17'] = 0.85;
-            if (this.models['model_antiBreak'] && (!this.weights['model_antiBreak'] || this.weights['model_antiBreak'] < 1.3))
-                this.weights['model_antiBreak'] = 1.55;
+            // === SIÃŠU Ká»¸: Ã©p trá»ng sá»‘ chuáº©n sau khi load state (chá»‘ng bias 1-1 tá»« state cÅ©) ===
+            if (this.weights['model1'] && this.weights['model1'] > 0.20) this.weights['model1'] = 0.12;
+            if (this.weights['model14'] && this.weights['model14'] > 0.60) this.weights['model14'] = 0.40;
+            if (this.weights['model17'] && this.weights['model17'] > 0.70) this.weights['model17'] = 0.50;
+            if (this.models['model_antiBreak'] && (!this.weights['model_antiBreak'] || this.weights['model_antiBreak'] < 1.5))
+                this.weights['model_antiBreak'] = 1.75;
+            if (this.models['model20'] && (!this.weights['model20'] || this.weights['model20'] < 1.4))
+                this.weights['model20'] = 1.60;
         } catch (e) { console.warn('loadState failed:', e); }
     }
 
-    // ===== MODEL 11-15: tích hợp từ thuattoan8.txt + thuattoan123/sun_algo =====
-    // Model 11: Bảng tra cứu 8-gram (4950 mẫu, majority vote trên 256 tổ hợp)
+    // ===== MODEL 11-15: tÃ­ch há»£p tá»« thuattoan8.txt + thuattoan123/sun_algo =====
+    // Model 11: Báº£ng tra cá»©u 8-gram (4950 máº«u, majority vote trÃªn 256 tá»• há»£p)
     model11() {
         if (this.history.length < 8) return null;
         const key = this.history.slice(-8).join('');
         if (!this._gram8) this._gram8 = {"TTTTTTTT":"T","TTTTTTTX":"X","TTTTTTXT":"X","TTTTTTXX":"X","TTTTTXTT":"X","TTTTTXTX":"T","TTTTTXXT":"T","TTTTTXXX":"X","TTTTXTTT":"T","TTTTXTTX":"X","TTTTXTXT":"T","TTTTXTXX":"T","TTTTXXTT":"T","TTTTXXTX":"X","TTTTXXXT":"X","TTTTXXXX":"X","TTTXTTTT":"X","TTTXTTTX":"X","TTTXTTXT":"X","TTTXTTXX":"X","TTTXTXTT":"X","TTTXTXTX":"T","TTTXTXXT":"X","TTTXTXXX":"X","TTTXXTTT":"T","TTTXXTTX":"T","TTTXXTXT":"T","TTTXXTXX":"X","TTTXXXTT":"X","TTTXXXTX":"X","TTTXXXXT":"T","TTTXXXXX":"X","TTXTTTTT":"X","TTXTTTTX":"X","TTXTTTXT":"T","TTXTTTXX":"T","TTXTTXTT":"T","TTXTTXTX":"T","TTXTTXXT":"X","TTXTTXXX":"T","TTXTXTTT":"T","TTXTXTTX":"T","TTXTXTXT":"X","TTXTXTXX":"X","TTXTXXTT":"T","TTXTXXTX":"T","TTXTXXXT":"X","TTXTXXXX":"T","TTXXTTTT":"T","TTXXTTTX":"X","TTXXTTXT":"X","TTXXTTXX":"T","TTXXTXTT":"T","TTXXTXTX":"T","TTXXTXXT":"X","TTXXTXXX":"T","TTXXXTTT":"X","TTXXXTTX":"T","TTXXXTXT":"T","TTXXXTXX":"X","TTXXXXTT":"X","TTXXXXTX":"X","TTXXXXXT":"X","TTXXXXXX":"T","TXTTTTTT":"X","TXTTTTTX":"X","TXTTTTXT":"X","TXTTTTXX":"X","TXTTTXTT":"T","TXTTTXTX":"X","TXTTTXXT":"X","TXTTTXXX":"X","TXTTXTTT":"T","TXTTXTTX":"X","TXTTXTXT":"X","TXTTXTXX":"T","TXTTXXTT":"T","TXTTXXTX":"T","TXTTXXXT":"X","TXTTXXXX":"T","TXTXTTTT":"T","TXTXTTTX":"T","TXTXTTXT":"T","TXTXTTXX":"T","TXTXTXTT":"X","TXTXTXTX":"X","TXTXTXXT":"X","TXTXTXXX":"T","TXTXXTTT":"X","TXTXXTTX":"X","TXTXXTXT":"T","TXTXXTXX":"T","TXTXXXTT":"X","TXTXXXTX":"T","TXTXXXXT":"X","TXTXXXXX":"X","TXXTTTTT":"T","TXXTTTTX":"X","TXXTTTXT":"T","TXXTTTXX":"T","TXXTTXTT":"X","TXXTTXTX":"T","TXXTTXXT":"X","TXXTTXXX":"X","TXXTXTTT":"T","TXXTXTTX":"X","TXXTXTXT":"X","TXXTXTXX":"T","TXXTXXTT":"T","TXXTXXTX":"X","TXXTXXXT":"X","TXXTXXXX":"X","TXXXTTTT":"T","TXXXTTTX":"X","TXXXTTXT":"T","TXXXTTXX":"T","TXXXTXTT":"X","TXXXTXTX":"T","TXXXTXXT":"X","TXXXTXXX":"T","TXXXXTTT":"T","TXXXXTTX":"X","TXXXXTXT":"T","TXXXXTXX":"T","TXXXXXTT":"X","TXXXXXTX":"X","TXXXXXXT":"T","TXXXXXXX":"T","XTTTTTTT":"T","XTTTTTTX":"T","XTTTTTXT":"T","XTTTTTXX":"X","XTTTTXTT":"T","XTTTTXTX":"T","XTTTTXXT":"X","XTTTTXXX":"X","XTTTXTTT":"X","XTTTXTTX":"T","XTTTXTXT":"T","XTTTXTXX":"X","XTTTXXTT":"T","XTTTXXTX":"T","XTTTXXXT":"T","XTTTXXXX":"X","XTTXTTTT":"T","XTTXTTTX":"T","XTTXTTXT":"X","XTTXTTXX":"T","XTTXTXTT":"X","XTTXTXTX":"X","XTTXTXXT":"T","XTTXTXXX":"X","XTTXXTTT":"T","XTTXXTTX":"T","XTTXXTXT":"X","XTTXXTXX":"X","XTTXXXTT":"X","XTTXXXTX":"T","XTTXXXXT":"X","XTTXXXXX":"T","XTXTTTTT":"T","XTXTTTTX":"T","XTXTTTXT":"X","XTXTTTXX":"T","XTXTTXTT":"T","XTXTTXTX":"T","XTXTTXXT":"X","XTXTTXXX":"X","XTXTXTTT":"T","XTXTXTTX":"T","XTXTXTXT":"T","XTXTXTXX":"X","XTXTXXTT":"T","XTXTXXTX":"X","XTXTXXXT":"T","XTXTXXXX":"T","XTXXTTTT":"X","XTXXTTTX":"T","XTXXTTXT":"T","XTXXTTXX":"T","XTXXTXTT":"X","XTXXTXTX":"T","XTXXTXXT":"T","XTXXTXXX":"T","XTXXXTTT":"T","XTXXXTTX":"X","XTXXXTXT":"X","XTXXXTXX":"T","XTXXXXTT":"T","XTXXXXTX":"T","XTXXXXXT":"X","XTXXXXXX":"T","XXTTTTTT":"X","XXTTTTTX":"T","XXTTTTXT":"T","XXTTTTXX":"X","XXTTTXTT":"T","XXTTTXTX":"X","XXTTTXXT":"X","XXTTTXXX":"T","XXTTXTTT":"X","XXTTXTTX":"X","XXTTXTXT":"X","XXTTXTXX":"T","XXTTXXTT":"T","XXTTXXTX":"T","XXTTXXXT":"T","XXTTXXXX":"X","XXTXTTTT":"T","XXTXTTTX":"X","XXTXTTXT":"T","XXTXTTXX":"T","XXTXTXTT":"T","XXTXTXTX":"X","XXTXTXXT":"T","XXTXTXXX":"T","XXTXXTTT":"T","XXTXXTTX":"X","XXTXXTXT":"X","XXTXXTXX":"X","XXTXXXTT":"T","XXTXXXTX":"X","XXTXXXXT":"X","XXTXXXXX":"T","XXXTTTTT":"T","XXXTTTTX":"X","XXXTTTXT":"T","XXXTTTXX":"T","XXXTTXTT":"T","XXXTTXTX":"X","XXXTTXXT":"X","XXXTTXXX":"X","XXXTXTTT":"X","XXXTXTTX":"X","XXXTXTXT":"T","XXXTXTXX":"X","XXXTXXTT":"T","XXXTXXTX":"X","XXXTXXXT":"T","XXXTXXXX":"T","XXXXTTTT":"T","XXXXTTTX":"T","XXXXTTXT":"T","XXXXTTXX":"T","XXXXTXTT":"T","XXXXTXTX":"T","XXXXTXXT":"T","XXXXTXXX":"T","XXXXXTTT":"T","XXXXXTTX":"T","XXXXXTXT":"T","XXXXXTXX":"X","XXXXXXTT":"X","XXXXXXTX":"T","XXXXXXXT":"T","XXXXXXXX":"X"};
         const pred = this._gram8[key];
         if (!pred) return null;
-        return { prediction: pred, confidence: 0.72, reason: `Bảng Tra Cứu 8-Gram: [${key}] → ${pred === 'T' ? 'TÀI' : 'XỈU'}` };
+        return { prediction: pred, confidence: 0.72, reason: `Báº£ng Tra Cá»©u 8-Gram: [${key}] â†’ ${pred === 'T' ? 'TÃ€I' : 'Xá»ˆU'}` };
     }
-    // Model 12: Cyclic-7 — 7 phiên cuối trùng hoàn toàn 7 phiên liền trước → theo chu kỳ
+    // Model 12: Cyclic-7 â€” 7 phiÃªn cuá»‘i trÃ¹ng hoÃ n toÃ n 7 phiÃªn liá»n trÆ°á»›c â†’ theo chu ká»³
     model12() {
         if (this.history.length < 14) return null;
         const a = this.history.slice(-7).join('');
         const b = this.history.slice(-14, -7).join('');
         if (a !== b) return null;
         const pred = this.history[this.history.length - 7];
-        return { prediction: pred, confidence: 0.75, reason: `Chu Kỳ 7 Phiên Lặp Lại → theo chu kỳ ${pred === 'T' ? 'TÀI' : 'XỈU'}` };
+        return { prediction: pred, confidence: 0.75, reason: `Chu Ká»³ 7 PhiÃªn Láº·p Láº¡i â†’ theo chu ká»³ ${pred === 'T' ? 'TÃ€I' : 'Xá»ˆU'}` };
     }
-    // Model 13: Momentum-break — 6 phiên lệch mạnh, 3 phiên cuối ngược chiều → quay lại momentum
+    // Model 13: Momentum-break â€” 6 phiÃªn lá»‡ch máº¡nh, 3 phiÃªn cuá»‘i ngÆ°á»£c chiá»u â†’ quay láº¡i momentum
     model13() {
         if (this.history.length < 9) return null;
         const first6 = this.history.slice(-9, -3);
@@ -456,28 +481,29 @@ class Engine {
         if (!(last3[0] === last3[1] && last3[1] === last3[2])) return null;
         const momSide = t6 > 3 ? 'T' : 'X';
         if (last3[0] === momSide) return null;
-        return { prediction: momSide, confidence: 0.71, reason: `Momentum Bị Phá Vỡ (3 phiên ngược) → Quay Lại ${momSide === 'T' ? 'TÀI' : 'XỈU'}` };
+        return { prediction: momSide, confidence: 0.71, reason: `Momentum Bá»‹ PhÃ¡ Vá»¡ (3 phiÃªn ngÆ°á»£c) â†’ Quay Láº¡i ${momSide === 'T' ? 'TÃ€I' : 'Xá»ˆU'}` };
     }
-    // Model 14: 5 phiên đan xen hoàn hảo → tiếp tục nhịp (đảo chiều)
+    // Model 14: 5 phiÃªn Ä‘an xen hoÃ n háº£o â†’ tiáº¿p tá»¥c nhá»‹p (Ä‘áº£o chiá»u)
     model14() {
-        if (this.history.length < 5) return null;
-        const last5 = this.history.slice(-5);
-        for (let i = 1; i < 5; i++) if (last5[i] === last5[i-1]) return null;
-        const pred = last5[4] === 'T' ? 'X' : 'T';
-        return { prediction: pred, confidence: 0.68, reason: '5 Phiên Đan Xen Hoàn Hảo → Tiếp Tục Nhịp (Đảo Chiều)' };
+        // === SIÃŠU Ká»¸: yÃªu cáº§u 6 phiÃªn Ä‘an xen hoÃ n háº£o, háº¡ Ä‘á»™ tin cáº­y ===
+        if (this.history.length < 6) return null;
+        const last6 = this.history.slice(-6);
+        for (let i = 1; i < 6; i++) if (last6[i] === last6[i-1]) return null;
+        const pred = last6[5] === 'T' ? 'X' : 'T';
+        return { prediction: pred, confidence: 0.58, reason: '6 PhiÃªn Äan Xen â†’ Ä‘áº£o nháº¹ (Ä‘á»™ tin tháº¥p)' };
     }
-    // Model 15: Mất cân bằng động — 6/8 hoặc 4/6 nghiêng một bên, phiên cuối là bên đó → hồi quy
+    // Model 15: Máº¥t cÃ¢n báº±ng Ä‘á»™ng â€” 6/8 hoáº·c 4/6 nghiÃªng má»™t bÃªn, phiÃªn cuá»‘i lÃ  bÃªn Ä‘Ã³ â†’ há»“i quy
     model15() {
         if (this.history.length < 8) return null;
         const last8 = this.history.slice(-8);
         const t8 = last8.filter(x => x === 'T').length;
         const last = last8[7];
-        if (t8 >= 6 && last === 'T') return { prediction: 'X', confidence: 0.78, reason: `Mất Cân Nặng Mạnh (${t8}/8 TÀI, cuối TÀI) → Hồi Quy XỈU` };
-        if ((8 - t8) >= 6 && last === 'X') return { prediction: 'T', confidence: 0.78, reason: `Mất Cân Nặng Mạnh (${8 - t8}/8 XỈU, cuối XỈU) → Hồi Quy TÀI` };
+        if (t8 >= 6 && last === 'T') return { prediction: 'X', confidence: 0.78, reason: `Máº¥t CÃ¢n Náº·ng Máº¡nh (${t8}/8 TÃ€I, cuá»‘i TÃ€I) â†’ Há»“i Quy Xá»ˆU` };
+        if ((8 - t8) >= 6 && last === 'X') return { prediction: 'T', confidence: 0.78, reason: `Máº¥t CÃ¢n Náº·ng Máº¡nh (${8 - t8}/8 Xá»ˆU, cuá»‘i Xá»ˆU) â†’ Há»“i Quy TÃ€I` };
         const last6 = last8.slice(-6);
         const t6 = last6.filter(x => x === 'T').length;
-        if (t6 >= 4 && last === 'T') return { prediction: 'X', confidence: 0.72, reason: `Mất Cân Nặng (${t6}/6 TÀI, cuối TÀI) → Hồi Quy XỈU` };
-        if ((6 - t6) >= 4 && last === 'X') return { prediction: 'T', confidence: 0.72, reason: `Mất Cân Nặng (${6 - t6}/6 XỈU, cuối XỈU) → Hồi Quy TÀI` };
+        if (t6 >= 4 && last === 'T') return { prediction: 'X', confidence: 0.72, reason: `Máº¥t CÃ¢n Náº·ng (${t6}/6 TÃ€I, cuá»‘i TÃ€I) â†’ Há»“i Quy Xá»ˆU` };
+        if ((6 - t6) >= 4 && last === 'X') return { prediction: 'T', confidence: 0.72, reason: `Máº¥t CÃ¢n Náº·ng (${6 - t6}/6 Xá»ˆU, cuá»‘i Xá»ˆU) â†’ Há»“i Quy TÃ€I` };
         return null;
     }
 
@@ -486,7 +512,8 @@ class Engine {
         for (const [modelName, modelFunc] of Object.entries(this.models)) {
             try {
                 const res = modelFunc();
-                if (res) {
+                // === SIÃŠU Ká»¸: lá»c bá» dá»± Ä‘oÃ¡n quÃ¡ tháº¥p tá»± tin (<0.58) ===
+                if (res && res.confidence >= 0.58) {
                     predictions[modelName] = res;
                     this.lastPredictions[modelName] = res;
                 }
@@ -497,11 +524,11 @@ class Engine {
         return predictions;
     }
 
-    // MODEL 16: Bảng pattern 8-ký tự (thuattoan8) — lookup chuỗi gần nhất
+    // MODEL 16: Báº£ng pattern 8-kÃ½ tá»± (thuattoan8) â€” lookup chuá»—i gáº§n nháº¥t
     model16() {
         if (this.history.length < 4) return null;
         const table = Engine.PATTERN8 || {};
-        // thử từ dài → ngắn
+        // thá»­ tá»« dÃ i â†’ ngáº¯n
         for (let len = 8; len >= 4; len--) {
             if (this.history.length < len) continue;
             const key = this.history.slice(-len).join('');
@@ -510,14 +537,14 @@ class Engine {
                 return {
                     prediction: pred,
                     confidence: len >= 8 ? 0.78 : (len >= 6 ? 0.68 : 0.58),
-                    reason: `Pattern-${len} khớp bảng cầu (${key} → ${pred === 'T' ? 'TÀI' : 'XỈU'})`
+                    reason: `Pattern-${len} khá»›p báº£ng cáº§u (${key} â†’ ${pred === 'T' ? 'TÃ€I' : 'Xá»ˆU'})`
                 };
             }
         }
         return null;
     }
 
-    // MODEL 17: RLE — đọc cầu thật (bệt / 2-2 / 3-3 / a-b), KHÔNG mặc định 1-1
+    // MODEL 17: RLE â€” Ä‘á»c cáº§u tháº­t (bá»‡t / 2-2 / 3-3 / a-b), KHÃ”NG máº·c Ä‘á»‹nh 1-1
     model17() {
         if (this.history.length < 6) return null;
         const rle = [];
@@ -532,102 +559,102 @@ class Engine {
         const prev = rle.length >= 2 ? rle[rle.length - 2] : null;
         const prev2 = rle.length >= 3 ? rle[rle.length - 3] : null;
 
-        // --- Bệt đang chạy (count >= 2): ưu tiên TIẾP tục, không vội đảo ---
+        // --- Bá»‡t Ä‘ang cháº¡y (count >= 2): Æ°u tiÃªn TIáº¾P tá»¥c, khÃ´ng vá»™i Ä‘áº£o ---
         if (last[1] >= 2) {
-            // nhịp a-b ổn định: prev.count == last.count và prev2 cùng pattern
-            if (prev && last[1] === prev[1] && last[1] >= 2) {
-                // vừa khép nhịp a-b (vd 2-2 vừa đủ) → đảo sang cửa kia bắt nhịp mới
+            // nhá»‹p a-b á»•n Ä‘á»‹nh: prev.count == last.count vÃ  prev2 cÃ¹ng pattern
+            if (prev && last[1] === prev[1] && last[1] >= 3) {
+                // === SIÃŠU Ká»¸: chá»‰ Ä‘áº£o khi nhá»‹p Ä‘á»§ 3-3 trá»Ÿ lÃªn (2-2 quÃ¡ dá»… áº£o) ===
                 const pred = last[0] === 'T' ? 'X' : 'T';
-                return { prediction: pred, confidence: 0.70, reason: `Nhịp ${prev[1]}-${last[1]} vừa khép → sang cửa kia` };
+                return { prediction: pred, confidence: 0.62, reason: `Nhá»‹p ${prev[1]}-${last[1]} Ä‘á»§ Ä‘á»u â†’ Ä‘áº£o nháº¹` };
             }
-            // đang trong bệt / nhịp chưa đủ so với nhịp trước → TIẾP
+            // Ä‘ang trong bá»‡t / nhá»‹p chÆ°a Ä‘á»§ so vá»›i nhá»‹p trÆ°á»›c â†’ TIáº¾P
             if (prev && last[1] < prev[1]) {
-                return { prediction: last[0], confidence: 0.68 + Math.min(0.1, last[1] * 0.02), reason: `Theo nhịp ${prev[1]}-${last[1]}: tiếp ${last[0] === 'T' ? 'TÀI' : 'XỈU'}` };
+                return { prediction: last[0], confidence: 0.68 + Math.min(0.1, last[1] * 0.02), reason: `Theo nhá»‹p ${prev[1]}-${last[1]}: tiáº¿p ${last[0] === 'T' ? 'TÃ€I' : 'Xá»ˆU'}` };
             }
-            // bệt thuần (không có prev hoặc prev ngắn)
+            // bá»‡t thuáº§n (khÃ´ng cÃ³ prev hoáº·c prev ngáº¯n)
             if (last[1] >= 3 && last[1] <= 6) {
-                return { prediction: last[0], confidence: 0.72 + Math.min(0.12, (last[1] - 3) * 0.03), reason: `Cầu bệt ${last[1]} → tiếp ${last[0] === 'T' ? 'TÀI' : 'XỈU'}` };
+                return { prediction: last[0], confidence: 0.72 + Math.min(0.12, (last[1] - 3) * 0.03), reason: `Cáº§u bá»‡t ${last[1]} â†’ tiáº¿p ${last[0] === 'T' ? 'TÃ€I' : 'Xá»ˆU'}` };
             }
-            // bệt quá dài (>=7) mới nghiêng gãy
+            // bá»‡t quÃ¡ dÃ i (>=7) má»›i nghiÃªng gÃ£y
             if (last[1] >= 7) {
                 const pred = last[0] === 'T' ? 'X' : 'T';
-                return { prediction: pred, confidence: Math.min(0.78, 0.55 + last[1] * 0.03), reason: `Bệt ${last[1]} dài → nghiêng gãy` };
+                return { prediction: pred, confidence: Math.min(0.78, 0.55 + last[1] * 0.03), reason: `Bá»‡t ${last[1]} dÃ i â†’ nghiÃªng gÃ£y` };
             }
-            // streak 2: tiếp nhẹ
-            return { prediction: last[0], confidence: 0.62, reason: `Streak 2 → nghiêng tiếp ${last[0] === 'T' ? 'TÀI' : 'XỈU'}` };
+            // streak 2: tiáº¿p (Æ°u tiÃªn theo bá»‡t, khÃ´ng vá»™i Ä‘áº£o)
+            return { prediction: last[0], confidence: 0.66, reason: `Streak 2 â†’ Æ°u tiÃªn tiáº¿p ${last[0] === 'T' ? 'TÃ€I' : 'Xá»ˆU'}` };
         }
 
-        // --- last count === 1: vừa flip ---
+        // --- last count === 1: vá»«a flip ---
         if (last[1] === 1 && prev) {
-            // Nếu trước đó là bệt dài (>=3) rồi mới 1 nhịp ngược → có thể gãy cầu, chưa chắc 1-1
-            // → dự đoán theo hướng "xác nhận gãy" (tiếp cửa mới) với conf thấp-trung
+            // Náº¿u trÆ°á»›c Ä‘Ã³ lÃ  bá»‡t dÃ i (>=3) rá»“i má»›i 1 nhá»‹p ngÆ°á»£c â†’ cÃ³ thá»ƒ gÃ£y cáº§u, chÆ°a cháº¯c 1-1
+            // â†’ dá»± Ä‘oÃ¡n theo hÆ°á»›ng "xÃ¡c nháº­n gÃ£y" (tiáº¿p cá»­a má»›i) vá»›i conf tháº¥p-trung
             if (prev[1] >= 3) {
-                return { prediction: last[0], confidence: 0.60, reason: `Bệt ${prev[1]} gãy 1 nhịp → xác nhận cửa ${last[0] === 'T' ? 'TÀI' : 'XỈU'}` };
+                return { prediction: last[0], confidence: 0.60, reason: `Bá»‡t ${prev[1]} gÃ£y 1 nhá»‹p â†’ xÃ¡c nháº­n cá»­a ${last[0] === 'T' ? 'TÃ€I' : 'Xá»ˆU'}` };
             }
-            // True 1-1: nhiều đoạn count=1 liên tiếp
+            // True 1-1: nhiá»u Ä‘oáº¡n count=1 liÃªn tiáº¿p
             const ones = [];
             for (let i = rle.length - 1; i >= 0 && rle[i][1] === 1; i--) ones.push(rle[i]);
             if (ones.length >= 4) {
                 const pred = last[0] === 'T' ? 'X' : 'T';
-                return { prediction: pred, confidence: 0.64, reason: `1-1 xác nhận (${ones.length} nhịp) → đảo` };
+                return { prediction: pred, confidence: 0.64, reason: `1-1 xÃ¡c nháº­n (${ones.length} nhá»‹p) â†’ Ä‘áº£o` };
             }
-            // 2-1 hoặc nhiễu: không ép 1-1 — theo cửa vừa ra (xác nhận)
+            // 2-1 hoáº·c nhiá»…u: khÃ´ng Ã©p 1-1 â€” theo cá»­a vá»«a ra (xÃ¡c nháº­n)
             if (prev[1] === 2) {
-                return { prediction: last[0], confidence: 0.58, reason: 'Nhịp 2-1: xác nhận cửa mới' };
+                return { prediction: last[0], confidence: 0.58, reason: 'Nhá»‹p 2-1: xÃ¡c nháº­n cá»­a má»›i' };
             }
-            // mặc định: không đoán 1-1 ảo
+            // máº·c Ä‘á»‹nh: khÃ´ng Ä‘oÃ¡n 1-1 áº£o
             return null;
         }
 
         return null;
     }
 
-    // MODEL 18: Dynamic patterns (từ UltraDice — mất cân / chu kỳ / momentum break)
+    // MODEL 18: Dynamic patterns (tá»« UltraDice â€” máº¥t cÃ¢n / chu ká»³ / momentum break)
     model18() {
         const h = this.history;
         if (h.length < 6) return null;
-        // 4T/6 cuối T → X
+        // 4T/6 cuá»‘i T â†’ X
         const last6 = h.slice(-6);
         if (last6.filter(x => x === 'T').length >= 4 && last6[5] === 'T') {
-            return { prediction: 'X', confidence: 0.72, reason: '4+T/6 phiên, cuối T → hồi XỈU' };
+            return { prediction: 'X', confidence: 0.72, reason: '4+T/6 phiÃªn, cuá»‘i T â†’ há»“i Xá»ˆU' };
         }
         if (last6.filter(x => x === 'X').length >= 4 && last6[5] === 'X') {
-            return { prediction: 'T', confidence: 0.72, reason: '4+X/6 phiên, cuối X → hồi TÀI' };
+            return { prediction: 'T', confidence: 0.72, reason: '4+X/6 phiÃªn, cuá»‘i X â†’ há»“i TÃ€I' };
         }
         if (h.length >= 8) {
             const last8 = h.slice(-8);
             const t8 = last8.filter(x => x === 'T').length;
-            if (t8 >= 6 && last8[7] === 'T') return { prediction: 'X', confidence: 0.78, reason: '6+T/8, cuối T → X mạnh' };
-            if ((8 - t8) >= 6 && last8[7] === 'X') return { prediction: 'T', confidence: 0.78, reason: '6+X/8, cuối X → T mạnh' };
+            if (t8 >= 6 && last8[7] === 'T') return { prediction: 'X', confidence: 0.78, reason: '6+T/8, cuá»‘i T â†’ X máº¡nh' };
+            if ((8 - t8) >= 6 && last8[7] === 'X') return { prediction: 'T', confidence: 0.78, reason: '6+X/8, cuá»‘i X â†’ T máº¡nh' };
         }
-        // 5 phiên đan xen
+        // 5 phiÃªn Ä‘an xen
         if (h.length >= 5) {
             const last5 = h.slice(-5);
             let alt = true;
             for (let i = 1; i < 5; i++) if (last5[i] === last5[i - 1]) { alt = false; break; }
             if (alt) {
                 const pred = last5[4] === 'T' ? 'X' : 'T';
-                return { prediction: pred, confidence: 0.68, reason: '5 phiên đan xen → đảo' };
+                return { prediction: pred, confidence: 0.68, reason: '5 phiÃªn Ä‘an xen â†’ Ä‘áº£o' };
             }
         }
-        // chu kỳ 7
+        // chu ká»³ 7
         if (h.length >= 14) {
             const a = h.slice(-14, -7).join('');
             const b = h.slice(-7).join('');
             if (a === b) {
-                return { prediction: h[h.length - 7], confidence: 0.75, reason: 'Chu kỳ 7 lặp → theo chu kỳ' };
+                return { prediction: h[h.length - 7], confidence: 0.75, reason: 'Chu ká»³ 7 láº·p â†’ theo chu ká»³' };
             }
         }
         return null;
     }
 
-    // MODEL 19: Balanced Predictor v3 — tỷ lệ cửa sổ + Markov + streak + random có kiểm soát
+    // MODEL 19: Balanced Predictor v3 â€” tá»· lá»‡ cá»­a sá»• + Markov + streak + random cÃ³ kiá»ƒm soÃ¡t
     model19() {
         const h = this.history;
         if (!h || h.length < 10) return null;
 
-        // history engine: cũ → mới; balanced gốc dùng mới → cũ → đảo
-        const results = h.slice().reverse(); // [0] = mới nhất
+        // history engine: cÅ© â†’ má»›i; balanced gá»‘c dÃ¹ng má»›i â†’ cÅ© â†’ Ä‘áº£o
+        const results = h.slice().reverse(); // [0] = má»›i nháº¥t
         const total = results.length;
         const totalT = results.filter(r => r === 'T').length;
         const totalRatio = totalT / total;
@@ -641,7 +668,7 @@ class Engine {
         const recent20 = winRatio(20);
         const recent50 = winRatio(50);
 
-        // streak từ phiên mới nhất
+        // streak tá»« phiÃªn má»›i nháº¥t
         let streak = 1;
         const currentSide = results[0];
         for (let i = 1; i < results.length; i++) {
@@ -649,8 +676,8 @@ class Engine {
             else break;
         }
 
-        // Markov bậc 1 (trên chuỗi mới→cũ vẫn đúng transition nếu duyệt i → i+1 theo hướng thời gian ngược... 
-        // Dùng chuỗi theo thời gian tăng: h
+        // Markov báº­c 1 (trÃªn chuá»—i má»›iâ†’cÅ© váº«n Ä‘Ãºng transition náº¿u duyá»‡t i â†’ i+1 theo hÆ°á»›ng thá»i gian ngÆ°á»£c... 
+        // DÃ¹ng chuá»—i theo thá»i gian tÄƒng: h
         let t2t = 0, t2x = 0, x2t = 0, x2x = 0;
         for (let i = 0; i < h.length - 1; i++) {
             const cur = h[i], next = h[i + 1];
@@ -661,7 +688,7 @@ class Engine {
         const pTfromT = totT > 0 ? t2t / totT : 0.5;
         const pTfromX = totX > 0 ? x2t / totX : 0.5;
         let markovT = (h[h.length - 1] === 'T' ? pTfromT : pTfromX);
-        markovT = markovT * 0.7 + 0.15; // làm mượt về 0.5
+        markovT = markovT * 0.7 + 0.15; // lÃ m mÆ°á»£t vá» 0.5
 
         // trend score
         const avgRatio = (totalRatio + recent10 + recent20 + recent50) / 4;
@@ -669,12 +696,12 @@ class Engine {
         const markovScore = (markovT - 0.5) * 2;
         trendScore = trendScore * 0.7 + markovScore * 0.3;
 
-        // streak ngắn-trung (2-5): CỘNG theo hướng bệt, không vội đảo
+        // streak ngáº¯n-trung (2-5): Cá»˜NG theo hÆ°á»›ng bá»‡t, khÃ´ng vá»™i Ä‘áº£o
         if (streak >= 2 && streak <= 5) {
             const direction = currentSide === 'T' ? 1 : -1;
             trendScore += direction * (0.08 + streak * 0.03);
         }
-        // chỉ khi bệt rất dài (>=6) mới nghiêng gãy nhẹ
+        // chá»‰ khi bá»‡t ráº¥t dÃ i (>=6) má»›i nghiÃªng gÃ£y nháº¹
         if (streak >= 6) {
             const direction = currentSide === 'T' ? 1 : -1;
             if (trendScore * direction > 0) {
@@ -682,18 +709,18 @@ class Engine {
             }
         }
 
-        // random có kiểm soát
+        // === SIÃŠU Ká»¸: bá» random, dÃ¹ng co giÃ£n theo entropy (nhiá»…u thá»‹ trÆ°á»ng) ===
         let finalScore;
+        const entM19 = (typeof this.entropy === 'number') ? this.entropy : 1.0;
+        const noiseGateM19 = Math.max(0.35, 1.1 - entM19); // entropy cao â†’ co máº¡nh vá» 0
         if (Math.abs(trendScore) < 0.15) {
             const base = (totalRatio - 0.5) * 2;
-            const noise = (Math.random() * 0.3) - 0.15;
-            finalScore = base * 0.5 + noise;
+            finalScore = base * 0.4 * noiseGateM19;
         } else {
-            const noise = (Math.random() * 0.2) - 0.1;
-            finalScore = Math.min(0.6, Math.max(-0.6, trendScore + noise));
+            finalScore = Math.min(0.55, Math.max(-0.55, trendScore * noiseGateM19));
         }
 
-        // chống bệt dự đoán model này
+        // chá»‘ng bá»‡t dá»± Ä‘oÃ¡n model nÃ y
         const recent = this.balancedLastPreds.slice(-3);
         if (recent.length === 3 && recent.every(p => p === recent[0])) {
             finalScore = -finalScore * 0.8;
@@ -705,15 +732,15 @@ class Engine {
 
         const confidence = Math.min(0.85, Math.max(0.5, 0.5 + Math.abs(finalScore) * 0.4));
         let reason;
-        if (streak >= 6) reason = `Balanced: bệt ${streak} ${currentSide === 'T' ? 'Tài' : 'Xỉu'} → nghiêng gãy`;
-        else if (streak >= 2) reason = `Balanced: theo bệt ${streak} ${currentSide === 'T' ? 'Tài' : 'Xỉu'}`;
-        else reason = `Balanced v3 · trend ${trendScore.toFixed(2)}`;
+        if (streak >= 6) reason = `Balanced: bá»‡t ${streak} ${currentSide === 'T' ? 'TÃ i' : 'Xá»‰u'} â†’ nghiÃªng gÃ£y`;
+        else if (streak >= 2) reason = `Balanced: theo bá»‡t ${streak} ${currentSide === 'T' ? 'TÃ i' : 'Xá»‰u'}`;
+        else reason = `Balanced v3 Â· trend ${trendScore.toFixed(2)}`;
 
         return { prediction, confidence, reason };
     }
 
 
-    // MODEL 20: VIP Pattern Reader — đọc cầu đa khung + majority + streak context
+    // MODEL 20: VIP Pattern Reader â€” Ä‘á»c cáº§u Ä‘a khung + majority + streak context
     model20() {
         const h = this.history;
         if (!h || h.length < 12) return null;
@@ -732,34 +759,34 @@ class Engine {
         }
         segs.push([c, n]);
 
-        // Cầu bệt rõ
+        // Cáº§u bá»‡t rÃµ
         if (streak >= 3 && streak <= 5) {
-            return { prediction: last, confidence: 0.74 + Math.min(0.1, streak * 0.02), reason: `VIP: bệt ${streak} → theo ${last === 'T' ? 'TÀI' : 'XỈU'}` };
+            return { prediction: last, confidence: 0.74 + Math.min(0.1, streak * 0.02), reason: `VIP: bá»‡t ${streak} â†’ theo ${last === 'T' ? 'TÃ€I' : 'Xá»ˆU'}` };
         }
         if (streak >= 6) {
             // hazard: long streak often breaks but not always
             const breakP = Math.min(0.55, 0.35 + (streak - 6) * 0.04);
             if (breakP > 0.48) {
-                return { prediction: last === 'T' ? 'X' : 'T', confidence: 0.62 + (streak - 6) * 0.02, reason: `VIP: bệt ${streak} dài → nghiêng gãy` };
+                return { prediction: last === 'T' ? 'X' : 'T', confidence: 0.62 + (streak - 6) * 0.02, reason: `VIP: bá»‡t ${streak} dÃ i â†’ nghiÃªng gÃ£y` };
             }
-            return { prediction: last, confidence: 0.6, reason: `VIP: bệt ${streak} còn giữ` };
+            return { prediction: last, confidence: 0.6, reason: `VIP: bá»‡t ${streak} cÃ²n giá»¯` };
         }
 
-        // Nhịp đều a-a (2-2, 3-3)
+        // Nhá»‹p Ä‘á»u a-a (2-2, 3-3)
         if (segs.length >= 4) {
             const a = segs[segs.length - 1], b = segs[segs.length - 2], c2 = segs[segs.length - 3];
             if (a[1] === b[1] && a[1] >= 2 && a[1] === c2[1]) {
-                // vừa đủ nhịp → đảo
+                // vá»«a Ä‘á»§ nhá»‹p â†’ Ä‘áº£o
                 if (a[1] === b[1]) {
-                    return { prediction: a[0] === 'T' ? 'X' : 'T', confidence: 0.71, reason: `VIP: nhịp ${a[1]}-${a[1]} đều → sang cửa` };
+                    return { prediction: a[0] === 'T' ? 'X' : 'T', confidence: 0.71, reason: `VIP: nhá»‹p ${a[1]}-${a[1]} Ä‘á»u â†’ sang cá»­a` };
                 }
             }
             if (b[1] >= 2 && a[1] < b[1] && a[1] >= 1) {
-                return { prediction: a[0], confidence: 0.66, reason: `VIP: theo nhịp ${b[1]} → tiếp` };
+                return { prediction: a[0], confidence: 0.66, reason: `VIP: theo nhá»‹p ${b[1]} â†’ tiáº¿p` };
             }
         }
 
-        // Majority cửa sổ 8/12/20 lệch rõ
+        // Majority cá»­a sá»• 8/12/20 lá»‡ch rÃµ
         const votes = { T: 0, X: 0 };
         [8, 12, 20].forEach(sz => {
             if (h.length < sz) return;
@@ -768,13 +795,13 @@ class Engine {
             if (tC / sz >= 0.62) votes.T++;
             else if (tC / sz <= 0.38) votes.X++;
         });
-        if (votes.T >= 2) return { prediction: 'T', confidence: 0.64, reason: 'VIP: đa khung nghiêng TÀI' };
-        if (votes.X >= 2) return { prediction: 'X', confidence: 0.64, reason: 'VIP: đa khung nghiêng XỈU' };
+        if (votes.T >= 2) return { prediction: 'T', confidence: 0.64, reason: 'VIP: Ä‘a khung nghiÃªng TÃ€I' };
+        if (votes.X >= 2) return { prediction: 'X', confidence: 0.64, reason: 'VIP: Ä‘a khung nghiÃªng Xá»ˆU' };
 
         // True 1-1 only
         const last6 = h.slice(-6).join('');
         if (last6 === 'TXTXTX' || last6 === 'XTXTXT') {
-            return { prediction: last === 'T' ? 'X' : 'T', confidence: 0.63, reason: 'VIP: 1-1 sạch 6 phiên' };
+            return { prediction: last === 'T' ? 'X' : 'T', confidence: 0.63, reason: 'VIP: 1-1 sáº¡ch 6 phiÃªn' };
         }
         return null;
     }
@@ -785,24 +812,29 @@ class Engine {
         let logOdds = 0;   // >0 ung voi TAI
         let totalWeight = 0;
         let activeCount = 0;
-        let topReason = 'Thuật Toán Engine @SunNetWin';
+        let topReason = 'Thuáº­t ToÃ¡n Engine @SunNetWin';
         let highestW = 0;
 
         const regime = (this.marketState && this.marketState.regime) || '';
-        const isBet = /Bệt|Chuỗi/.test(regime);
-        const isNhip = /Nhịp|1-1/.test(regime);
+        const isBet = /Bá»‡t|Chuá»—i/.test(regime);
+        const isNhip = /Nhá»‹p|1-1/.test(regime);
+
+        // === SIÃŠU Ká»¸: Ä‘áº¿m Ä‘á»“ng thuáº­n giá»¯a cÃ¡c model ===
+        let voteT = 0, voteX = 0;
 
         for (const [modelName, pred] of Object.entries(allPreds)) {
             if (!pred || !pred.prediction) continue;
             let baseW = (this.weights[modelName] !== undefined ? this.weights[modelName] : 1.0);
-            // Regime-aware: bệt → boost antiBreak/model20; 1-1 regime → modest model1
-            if (isBet && (modelName === 'model_antiBreak' || modelName === 'model20' || modelName === 'model17')) baseW *= 1.25;
-            if (isNhip && modelName === 'model1') baseW *= 1.1;
-            if (isBet && modelName === 'model1') baseW *= 0.5; // đừng bắt 1-1 khi đang bệt
+            // === SIÃŠU Ká»¸: regime-aware â€” bá»‡t boost model theo bá»‡t; háº¡n cháº¿ model1/14/17 ===
+            if (isBet && (modelName === 'model_antiBreak' || modelName === 'model20' || modelName === 'model2')) baseW *= 1.25;
+            if (isNhip && modelName === 'model1') baseW *= 0.9; // háº¡n cháº¿ model1 ngay cáº£ khi nhá»‹p
+            if (isBet && modelName === 'model1') baseW *= 0.4; // Ä‘á»«ng báº¯t 1-1 khi Ä‘ang bá»‡t
+            if (isBet && (modelName === 'model14' || modelName === 'model17')) baseW *= 0.6;
             const ewma = this.modelHits[modelName] ? this.modelHits[modelName].ewma : 0.5;
             const accMult = 0.5 + ewma;
             const w = baseW * accMult * pred.confidence;
             activeCount++;
+            if (pred.prediction === 'T') voteT++; else voteX++;
 
             const p = pred.prediction === 'T' ? pred.confidence : (1 - pred.confidence);
             const pc = Math.min(Math.max(p, 0.1), 0.9);
@@ -812,42 +844,59 @@ class Engine {
             if (w > highestW) { highestW = w; topReason = pred.reason; }
         }
 
+        // === SIÃŠU Ká»¸: Cá»•ng lá»c nhiá»…u â€” thá»‹ trÆ°á»ng há»—n loáº¡n thÃ¬ co máº¡nh vá» 50% ===
+        const entEns = (typeof this.entropy === 'number') ? this.entropy : 1.0;
+        const acAbs = Math.abs(this.autocorr || 0);
+        let noiseGate = 1.0;
+        if (entEns > 0.92 || acAbs < 0.07) noiseGate = 0.45;
+        else if (entEns > 0.85 || acAbs < 0.12) noiseGate = 0.7;
+
+        // === SIÃŠU Ká»¸: Äá»“ng thuáº­n â€” model quÃ¡ chia ráº½ thÃ¬ háº¡ tá»± tin ===
+        const consensusGap = Math.abs(voteT - voteX);
+        let consensusGate = 1.0;
+        if (activeCount >= 5 && consensusGap < 2) consensusGate = 0.5;
+        else if (activeCount >= 4 && consensusGap < 2) consensusGate = 0.65;
+
         if (totalWeight === 0) {
             // Fallback: dung ty le co so tu lich su gan nhat (khong random nhu ban cu)
             const recent = this.history.slice(-20);
             const tFreq = recent.length ? recent.filter(c => c === 'T').length / recent.length : 0.5;
             const pT = (tFreq * recent.length + 1) / (recent.length + 2);
             let taiProb = Math.round(pT * 100);
-            taiProb = Math.min(Math.max(taiProb, 35), 65);
+            taiProb = Math.min(Math.max(taiProb, 42), 58);
             const xiuProb = 100 - taiProb;
             const isTai = taiProb >= 50;
+            this.lastEnsemblePred = { prediction: isTai ? 'T' : 'X' };
             return {
-                predictedResult: isTai ? 'TÀI' : 'XỈU',
+                predictedResult: isTai ? 'TÃ€I' : 'Xá»ˆU',
                 confidence: isTai ? taiProb : xiuProb,
                 taiProb: taiProb,
                 xiuProb: xiuProb,
                 activeModels: 0,
-                topReason: 'Đang phân tích dữ liệu & khởi tạo Engine @SunNetWin...'
+                topReason: 'Äang phÃ¢n tÃ­ch dá»¯ liá»‡u & khá»Ÿi táº¡o Engine @SunNetWin...'
             };
         }
 
         // Shrink ve 0.5 khi tong trong so thap (it chung khoan)
-        const shrink = Math.min(1, totalWeight / 5);
+        const shrink = Math.min(1, totalWeight / 6);
         const aggLo = logOdds * shrink;
         let pT = 1 / (1 + Math.exp(-aggLo));
 
-        // Cooling: khi thua lien tiep, keo xac suat ve 50% (giam tu tin)
-        const cool = Math.max(0.5, 1 - this.consecutiveLosses * 0.12);
-        pT = 0.5 + (pT - 0.5) * cool;
+        // === SIÃŠU Ká»¸: Cooling tá»•ng há»£p â€” thua liÃªn tiáº¿p + nhiá»…u + thiáº¿u Ä‘á»“ng thuáº­n ===
+        const cool = Math.max(0.45, 1 - this.consecutiveLosses * 0.15);
+        const finalGate = Math.min(noiseGate, consensusGate, cool);
+        pT = 0.5 + (pT - 0.5) * finalGate;
 
         let taiProb = Math.round(pT * 100);
-        taiProb = Math.min(Math.max(taiProb, 22), 94);
+        taiProb = Math.min(Math.max(taiProb, 35), 85); // khÃ´ng cho xÃ¡c suáº¥t cá»±c trá»‹
         const xiuProb = 100 - taiProb;
-        const isTai = taiProb >= 50;
+        const isTai = taiProb >= 52; // ngÆ°á»¡ng quyáº¿t Ä‘á»‹nh cao hÆ¡n (trÃ¡nh vÃ¹ng 50/50)
         const finalConfidence = isTai ? taiProb : xiuProb;
 
+        this.lastEnsemblePred = { prediction: isTai ? 'T' : 'X' };
+
         return {
-            predictedResult: isTai ? 'TÀI' : 'XỈU',
+            predictedResult: isTai ? 'TÃ€I' : 'Xá»ˆU',
             confidence: finalConfidence,
             taiProb: taiProb,
             xiuProb: xiuProb,
@@ -906,14 +955,14 @@ class BaccaratEngine {
     if (b === p) return null;
     const dom = b > p ? 'B' : 'P'; const ratio = Math.max(b, p) / r5.length;
     if (ratio < 0.6) return null;
-    return { pred: dom, conf: this._clamp(52 + Math.round((ratio - .6) * 80), 52, 78), reason: `Gần: ${dom}${Math.max(b, p)}/${r5.length}`, type: 'trend', name: 'Xu hướng' };
+    return { pred: dom, conf: this._clamp(52 + Math.round((ratio - .6) * 80), 52, 78), reason: `Gáº§n: ${dom}${Math.max(b, p)}/${r5.length}`, type: 'trend', name: 'Xu hÆ°á»›ng' };
   }
   a_revert(arr) {
     const r8 = this._lastN(arr, 8).filter(c => c !== 'T'); if (r8.length < 5) return null;
     const b = r8.filter(c => c === 'B').length, p = r8.length - b;
     const ratio = Math.max(b, p) / r8.length; if (ratio < 0.75) return null;
     const dom = b > p ? 'B' : 'P', opp = b > p ? 'P' : 'B';
-    return { pred: opp, conf: this._clamp(54 + Math.round((ratio - .75) * 100), 54, 84), reason: `Quá lệch ${dom}${Math.round(ratio * 100)}%→đảo`, type: 'counter', name: 'Đảo chiều' };
+    return { pred: opp, conf: this._clamp(54 + Math.round((ratio - .75) * 100), 54, 84), reason: `QuÃ¡ lá»‡ch ${dom}${Math.round(ratio * 100)}%â†’Ä‘áº£o`, type: 'counter', name: 'Äáº£o chiá»u' };
   }
   a_markov1(arr) {
     if (arr.length < 6) return null;
@@ -924,7 +973,7 @@ class BaccaratEngine {
     const tot = row.B + row.P + row.T; if (tot < 3) return null;
     const pred = row.B >= row.P ? 'B' : 'P'; const mx = Math.max(row.B, row.P);
     const conf = this._wilson(mx, tot); if (conf < 54) return null;
-    return { pred, conf, reason: `${last}→${pred}: ${mx}/${tot}`, type: 'pattern', name: 'Markov-1' };
+    return { pred, conf, reason: `${last}â†’${pred}: ${mx}/${tot}`, type: 'pattern', name: 'Markov-1' };
   }
   a_markov2(arr) {
     if (arr.length < 8) return null;
@@ -934,7 +983,7 @@ class BaccaratEngine {
     const tot = row.B + row.P + row.T; if (tot < 3) return null;
     const pred = row.B >= row.P ? 'B' : 'P'; const mx = Math.max(row.B, row.P);
     const conf = this._wilson(mx, tot, 1.5); if (conf < 55) return null;
-    return { pred, conf, reason: `${last2}→${pred}: ${mx}/${tot}`, type: 'pattern', name: 'Markov-2' };
+    return { pred, conf, reason: `${last2}â†’${pred}: ${mx}/${tot}`, type: 'pattern', name: 'Markov-2' };
   }
   a_markov3(arr) {
     if (arr.length < 12) return null;
@@ -944,35 +993,35 @@ class BaccaratEngine {
     const tot = row.B + row.P + row.T; if (tot < 2) return null;
     const pred = row.B >= row.P ? 'B' : 'P'; const mx = Math.max(row.B, row.P);
     const conf = this._wilson(mx, tot, 1.3) + 2; if (conf < 56) return null;
-    return { pred, conf, reason: `${last3}→${pred}: ${mx}/${tot}`, type: 'pattern', name: 'Markov-3' };
+    return { pred, conf, reason: `${last3}â†’${pred}: ${mx}/${tot}`, type: 'pattern', name: 'Markov-3' };
   }
   a_stkFollow(arr) {
     const { val, len } = this._streak(arr); if (val === 'T' || len < 2 || len > 5) return null;
-    return { pred: val, conf: this._clamp(58 + len * 4, 58, 82), reason: `Bệt ${val}×${len}→theo`, type: 'trend', name: 'Streak+' };
+    return { pred: val, conf: this._clamp(58 + len * 4, 58, 82), reason: `Bá»‡t ${val}Ã—${len}â†’theo`, type: 'trend', name: 'Streak+' };
   }
   a_stkBreak(arr) {
     const { val, len } = this._streak(arr); if (val === 'T' || len < 4) return null;
-    return { pred: val === 'B' ? 'P' : 'B', conf: this._clamp(56 + len * 3, 56, 86), reason: `Bệt ${val}×${len}→bẻ`, type: 'counter', name: 'Streak-' };
+    return { pred: val === 'B' ? 'P' : 'B', conf: this._clamp(56 + len * 3, 56, 86), reason: `Bá»‡t ${val}Ã—${len}â†’báº»`, type: 'counter', name: 'Streak-' };
   }
   a_dragon(arr) {
     const { val, len } = this._streak(arr); if (val === 'T' || len < 7) return null;
-    return { pred: val === 'B' ? 'P' : 'B', conf: this._clamp(72 + len * 2, 72, 92), reason: `Dragon ${val}×${len}→đảo`, type: 'counter', name: 'Dragon' };
+    return { pred: val === 'B' ? 'P' : 'B', conf: this._clamp(72 + len * 2, 72, 92), reason: `Dragon ${val}Ã—${len}â†’Ä‘áº£o`, type: 'counter', name: 'Dragon' };
   }
   a_pingpong(arr) {
     const tail = this._lastN(arr.filter(c => c !== 'T'), 6); if (tail.length < 5) return null;
     let alt = 0; for (let i = 0; i < tail.length - 1; i++) if (tail[i] !== tail[i + 1]) alt++;
     if (alt < tail.length - 1) return null;
     const last = tail[tail.length - 1];
-    return { pred: last === 'B' ? 'P' : 'B', conf: this._clamp(58 + alt * 3, 58, 80), reason: `Ping-Pong ×${alt + 1}`, type: 'pattern', name: 'Ping-Pong' };
+    return { pred: last === 'B' ? 'P' : 'B', conf: this._clamp(58 + alt * 3, 58, 80), reason: `Ping-Pong Ã—${alt + 1}`, type: 'pattern', name: 'Ping-Pong' };
   }
   a_pattern46(arr) {
     const noT = arr.filter(c => c !== 'T'); if (noT.length < 5) return null;
     const n = noT, L = n.length;
     if (L >= 5 && n[L - 1] === n[L - 2] && n[L - 3] === n[L - 4] && n[L - 1] !== n[L - 3])
-      return { pred: n[L - 1], conf: 64, reason: 'AABB→tiếp đôi', type: 'pattern', name: 'AABB' };
+      return { pred: n[L - 1], conf: 64, reason: 'AABBâ†’tiáº¿p Ä‘Ã´i', type: 'pattern', name: 'AABB' };
     if (L >= 6) {
       let ok = true; for (let i = L - 5; i < L - 1; i++) if (n[i] === n[i + 1]) { ok = false; break; }
-      if (ok) return { pred: n[L - 1] === 'B' ? 'P' : 'B', conf: 68, reason: 'ABABAB→xen', type: 'pattern', name: 'ABAB' };
+      if (ok) return { pred: n[L - 1] === 'B' ? 'P' : 'B', conf: 68, reason: 'ABABABâ†’xen', type: 'pattern', name: 'ABAB' };
     }
     return null;
   }
@@ -983,7 +1032,7 @@ class BaccaratEngine {
     const pB = p5.filter(c => c === 'B').length, pP = p5.filter(c => c === 'P').length;
     const mB = rB - pB, mP = rP - pP; if (Math.abs(mB - mP) < 2) return null;
     const pred = mB > mP ? 'B' : 'P'; const str = Math.abs(mB - mP);
-    return { pred, conf: this._clamp(56 + str * 6, 56, 76), reason: `Đà ${pred} +${str}`, type: 'trend', name: 'Momentum' };
+    return { pred, conf: this._clamp(56 + str * 6, 56, 76), reason: `ÄÃ  ${pred} +${str}`, type: 'trend', name: 'Momentum' };
   }
   a_hotzone(arr) {
     if (arr.length < 12) return null;
@@ -991,10 +1040,10 @@ class BaccaratEngine {
     if (z1.length < 3 || z2.length < 3) return null;
     const b1 = z1.filter(c => c === 'B').length / z1.length, b2 = z2.filter(c => c === 'B').length / z2.length;
     const p1 = 1 - b1, p2 = 1 - b2;
-    if (b1 > b2 + .25 && b1 > .6) return { pred: 'B', conf: this._clamp(56 + Math.round((b1 - .6) * 80), 56, 78), reason: `Hot B↑${Math.round(b1 * 100)}%`, type: 'trend', name: 'Hot Zone' };
-    if (p1 > p2 + .25 && p1 > .6) return { pred: 'P', conf: this._clamp(56 + Math.round((p1 - .6) * 80), 56, 78), reason: `Hot P↑${Math.round(p1 * 100)}%`, type: 'trend', name: 'Hot Zone' };
-    if (b1 >= .9) return { pred: 'P', conf: this._clamp(60 + Math.round((b1 - .75) * 80), 60, 86), reason: `Cháy B→đảo`, type: 'counter', name: 'Hot Zone' };
-    if (p1 >= .9) return { pred: 'B', conf: this._clamp(60 + Math.round((p1 - .75) * 80), 60, 86), reason: `Cháy P→đảo`, type: 'counter', name: 'Hot Zone' };
+    if (b1 > b2 + .25 && b1 > .6) return { pred: 'B', conf: this._clamp(56 + Math.round((b1 - .6) * 80), 56, 78), reason: `Hot Bâ†‘${Math.round(b1 * 100)}%`, type: 'trend', name: 'Hot Zone' };
+    if (p1 > p2 + .25 && p1 > .6) return { pred: 'P', conf: this._clamp(56 + Math.round((p1 - .6) * 80), 56, 78), reason: `Hot Pâ†‘${Math.round(p1 * 100)}%`, type: 'trend', name: 'Hot Zone' };
+    if (b1 >= .9) return { pred: 'P', conf: this._clamp(60 + Math.round((b1 - .75) * 80), 60, 86), reason: `ChÃ¡y Bâ†’Ä‘áº£o`, type: 'counter', name: 'Hot Zone' };
+    if (p1 >= .9) return { pred: 'B', conf: this._clamp(60 + Math.round((p1 - .75) * 80), 60, 86), reason: `ChÃ¡y Pâ†’Ä‘áº£o`, type: 'counter', name: 'Hot Zone' };
     return null;
   }
   a_runlen(arr) {
@@ -1007,8 +1056,8 @@ class BaccaratEngine {
     runs.push({ v: cur, n: cnt }); if (runs.length < 3) return null;
     const avg = runs.slice(0, -1).reduce((a, r) => a + r.n, 0) / (runs.length - 1);
     const last = runs[runs.length - 1]; if (last.v === 'T') return null;
-    if (last.n >= avg * 2) return { pred: last.v === 'B' ? 'P' : 'B', conf: this._clamp(58 + Math.round((last.n / avg - 2) * 10), 58, 82), reason: `Run ${last.n}→bẻ`, type: 'counter', name: 'Run-Len' };
-    if (last.n <= 1 && avg > 2) return { pred: last.v, conf: 60, reason: `Run ngắn→tiếp`, type: 'trend', name: 'Run-Len' };
+    if (last.n >= avg * 2) return { pred: last.v === 'B' ? 'P' : 'B', conf: this._clamp(58 + Math.round((last.n / avg - 2) * 10), 58, 82), reason: `Run ${last.n}â†’báº»`, type: 'counter', name: 'Run-Len' };
+    if (last.n <= 1 && avg > 2) return { pred: last.v, conf: 60, reason: `Run ngáº¯nâ†’tiáº¿p`, type: 'trend', name: 'Run-Len' };
     return null;
   }
   a_bayesian(arr) {
@@ -1025,8 +1074,8 @@ class BaccaratEngine {
     if (arr.length < 5) {
       return {
         predictedResult: 'BANKER', confidence: 50, taiProb: 50, xiuProb: 50,
-        reason: 'Baccarat: chờ đủ dữ liệu', gameType: 'baccarat',
-        modelsUsed: 0, market: { regime: 'Chờ', trend: '—' }
+        reason: 'Baccarat: chá» Ä‘á»§ dá»¯ liá»‡u', gameType: 'baccarat',
+        modelsUsed: 0, market: { regime: 'Chá»', trend: 'â€”' }
       };
     }
     const fns = [
@@ -1040,9 +1089,9 @@ class BaccaratEngine {
     }
     if (goodRoad) {
       const l = goodRoad.toLowerCase(); let ap = null;
-      if ((l.includes('bệt') || l.includes('dính')) && l.includes('cái')) ap = 'B';
-      else if ((l.includes('bệt') || l.includes('dính')) && l.includes('con')) ap = 'P';
-      else if (l.includes('đảo') || l.includes('xen')) {
+      if ((l.includes('bá»‡t') || l.includes('dÃ­nh')) && l.includes('cÃ¡i')) ap = 'B';
+      else if ((l.includes('bá»‡t') || l.includes('dÃ­nh')) && l.includes('con')) ap = 'P';
+      else if (l.includes('Ä‘áº£o') || l.includes('xen')) {
         const la = arr[arr.length - 1]; if (la === 'B') ap = 'P'; else if (la === 'P') ap = 'B';
       }
       if (ap) hits.push({ pred: ap, conf: 62, reason: goodRoad, type: 'api', name: 'API-Road' });
@@ -1082,7 +1131,7 @@ class BaccaratEngine {
       confidence: conf,
       taiProb: bankerProb,
       xiuProb: 100 - bankerProb,
-      reason: `Baccarat · ${topName} (${win.cnt}/${hits.length} vote)`,
+      reason: `Baccarat Â· ${topName} (${win.cnt}/${hits.length} vote)`,
       gameType: 'baccarat',
       modelsUsed: hits.length,
       market: { regime: win.cnt >= 4 && conf >= 74 ? 'Super' : 'Normal', trend: cls === 'B' ? 'BANKER' : 'PLAYER' },
@@ -1117,43 +1166,43 @@ function startTelegramBot(options) {
   const send = (chat_id, text, extra = {}) => tg('sendMessage', { chat_id, text, parse_mode: 'HTML', disable_web_page_preview: false, ...extra });
   const sendPhoto = (chat_id, photo, extra = {}) => tg('sendPhoto', { chat_id, photo, parse_mode: 'HTML', ...extra });
   const isAdmin = id => adminIds.has(String(id));
-  const displayName = from => [from?.first_name, from?.last_name].filter(Boolean).join(' ') || from?.username || 'Bạn';
+  const displayName = from => [from?.first_name, from?.last_name].filter(Boolean).join(' ') || from?.username || 'Báº¡n';
   const plans = () => (options.getConfig().plans || []).filter(p => p.active !== false && Number(p.price) > 0 && Number(p.durationHours) > 0);
   const idShort = () => crypto.randomBytes(5).toString('hex').toUpperCase();
   const esc = s => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const fmt = n => Number(n || 0).toLocaleString('vi-VN');
 
-  // ─── USER MENU (command only, no buttons) ───────────────
+  // â”€â”€â”€ USER MENU (command only, no buttons) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   async function showStart(chatId, name) {
-    await send(chatId, '⚡ <b>TOOL TƯNG TỬNG</b> · VIP\n' + '────────────────────\n' + 'Xin chào <b>' + esc(name) + '</b>\n\n' + '🎁 <b>KEY FREE</b>\n' + '├ /getkey — nhiệm vụ nhóm\n' + '└ /free — giống getkey\n' + '\n' + '💎 <b>MUA KEY</b>\n' + '├ /buy — chọn gói + QR\n' + '└ /muakeytx — alias mua\n' + '\n' + '🔧 <b>KEY</b>\n' + '├ /resetkey — reset máy auto\n' + '└ /status — yêu cầu chờ duyệt\n' + '\n' + '🔎 <b>INFO</b>\n' + '├ /tiktok @user\n' + '└ /fb user|link\n' + '\n' + '────────────────────\n' + '🔑 KYT-... · 3 thiết bị\n' + '💬 @SunNetWin · /help\n');
+    await send(chatId, 'âš¡ <b>TOOL TÆ¯NG Tá»¬NG</b> Â· VIP\n' + 'â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€\n' + 'Xin chÃ o <b>' + esc(name) + '</b>\n\n' + 'ðŸŽ <b>KEY FREE</b>\n' + 'â”œ /getkey â€” nhiá»‡m vá»¥ nhÃ³m\n' + 'â”” /free â€” giá»‘ng getkey\n' + '\n' + 'ðŸ’Ž <b>MUA KEY</b>\n' + 'â”œ /buy â€” chá»n gÃ³i + QR\n' + 'â”” /muakeytx â€” alias mua\n' + '\n' + 'ðŸ”§ <b>KEY</b>\n' + 'â”œ /resetkey â€” reset mÃ¡y auto\n' + 'â”” /status â€” yÃªu cáº§u chá» duyá»‡t\n' + '\n' + 'ðŸ”Ž <b>INFO</b>\n' + 'â”œ /tiktok @user\n' + 'â”” /fb user|link\n' + '\n' + 'â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€\n' + 'ðŸ”‘ KYT-... Â· 3 thiáº¿t bá»‹\n' + 'ðŸ’¬ @SunNetWin Â· /help\n');
   }
 
   async function showAdminHelp(chatId) {
     await send(chatId,
-`🛠 <b>ADMIN</b>
-────────────────
-🔑 <b>Key</b>
-/keys — danh sách
-/key &lt;id|mã&gt; — chi tiết
-/createkey [giờ] [TB] [nhãn]
-/resetdevice &lt;id|mã&gt;
-/revoke &lt;id|mã&gt;
+`ðŸ›  <b>ADMIN</b>
+â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+ðŸ”‘ <b>Key</b>
+/keys â€” danh sÃ¡ch
+/key &lt;id|mÃ£&gt; â€” chi tiáº¿t
+/createkey [giá»] [TB] [nhÃ£n]
+/resetdevice &lt;id|mÃ£&gt;
+/revoke &lt;id|mÃ£&gt;
 
-📩 <b>Yêu cầu</b>
+ðŸ“© <b>YÃªu cáº§u</b>
 /pending
 /approve &lt;id&gt;
 /reject &lt;id&gt;
 
-⚙️ <b>Cấu hình</b>
-/settask &lt;hướng dẫn nhiệm vụ&gt;
-/setpromo &lt;câu copy quảng cáo&gt;
-/settaskphotos &lt;số ảnh&gt;
-/settasktime &lt;giây&gt;
-/setmaint on|off [nội dung]
-/lockgame &lt;id&gt; · /unlockgame &lt;id&gt;
-/lockcmd &lt;lệnh&gt; · /unlockcmd &lt;lệnh&gt;
-/setbank &lt;NH&gt; &lt;STK&gt; &lt;chủ&gt;
-/addplan &lt;id&gt; &lt;nhãn&gt; &lt;giá&gt; &lt;giờ&gt;
+âš™ï¸ <b>Cáº¥u hÃ¬nh</b>
+/settask &lt;hÆ°á»›ng dáº«n nhiá»‡m vá»¥&gt;
+/setpromo &lt;cÃ¢u copy quáº£ng cÃ¡o&gt;
+/settaskphotos &lt;sá»‘ áº£nh&gt;
+/settasktime &lt;giÃ¢y&gt;
+/setmaint on|off [ná»™i dung]
+/lockgame &lt;id&gt; Â· /unlockgame &lt;id&gt;
+/lockcmd &lt;lá»‡nh&gt; Â· /unlockcmd &lt;lá»‡nh&gt;
+/setbank &lt;NH&gt; &lt;STK&gt; &lt;chá»§&gt;
+/addplan &lt;id&gt; &lt;nhÃ£n&gt; &lt;giÃ¡&gt; &lt;giá»&gt;
 /delplan &lt;id&gt;
 /plans
 /settg &lt;user&gt;
@@ -1165,17 +1214,17 @@ VD: <code>/createkey 24 3 VIP 1N</code>`);
   async function notifyAdmins(request, proofFileId) {
     if (!adminIds.size) return;
     const planText = request.type === 'payment'
-      ? `💎 ${request.planLabel} · ${fmt(request.price)}đ · ${request.durationHours}h`
-      : request.type === 'reset' ? '🔄 Xin reset thiết bị' : '🎯 Key free';
+      ? `ðŸ’Ž ${request.planLabel} Â· ${fmt(request.price)}Ä‘ Â· ${request.durationHours}h`
+      : request.type === 'reset' ? 'ðŸ”„ Xin reset thiáº¿t bá»‹' : 'ðŸŽ¯ Key free';
     const caption =
-`📩 <b>#${request.id}</b> · ${request.type === 'payment' ? '💳' : request.type === 'reset' ? '🔄' : '🎯'}
-👤 ${esc(request.userName)} (@${esc(request.username || '—')})
-🆔 <code>${request.telegramId}</code>
-${request.groupLink ? `🔗 ${esc(request.groupLink)}\n` : ''}${request.resetKeyHint ? `🔑 Key: <code>${esc(request.resetKeyHint)}</code>\n` : ''}${planText}
-🕐 ${new Date(request.createdAt).toLocaleString('vi-VN')}
+`ðŸ“© <b>#${request.id}</b> Â· ${request.type === 'payment' ? 'ðŸ’³' : request.type === 'reset' ? 'ðŸ”„' : 'ðŸŽ¯'}
+ðŸ‘¤ ${esc(request.userName)} (@${esc(request.username || 'â€”')})
+ðŸ†” <code>${request.telegramId}</code>
+${request.groupLink ? `ðŸ”— ${esc(request.groupLink)}\n` : ''}${request.resetKeyHint ? `ðŸ”‘ Key: <code>${esc(request.resetKeyHint)}</code>\n` : ''}${planText}
+ðŸ• ${new Date(request.createdAt).toLocaleString('vi-VN')}
 
-✅ /approve ${request.id}
-❌ /reject ${request.id}`;
+âœ… /approve ${request.id}
+âŒ /reject ${request.id}`;
     for (const adminId of adminIds) {
       try {
         if (proofFileId) await sendPhoto(adminId, proofFileId, { caption });
@@ -1192,37 +1241,37 @@ ${request.groupLink ? `🔗 ${esc(request.groupLink)}\n` : ''}${request.resetKey
     if (req.type === 'reset') {
       try {
         await send(req.telegramId,
-`✅ <b>RESET THÀNH CÔNG</b>
-────────────────
-🔑 Key đã được xóa hết thiết bị cũ.
-📱 Giờ đăng nhập lại tối đa <b>3 máy</b>.`);
+`âœ… <b>RESET THÃ€NH CÃ”NG</b>
+â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+ðŸ”‘ Key Ä‘Ã£ Ä‘Æ°á»£c xÃ³a háº¿t thiáº¿t bá»‹ cÅ©.
+ðŸ“± Giá» Ä‘Äƒng nháº­p láº¡i tá»‘i Ä‘a <b>3 mÃ¡y</b>.`);
         if (options.markDelivered) options.markDelivered(req.id);
       } catch (e) {
-        if (chatIdForReview) await send(chatIdForReview, `Đã reset nhưng chưa gửi được tin cho user: ${e.message}`).catch(() => null);
+        if (chatIdForReview) await send(chatIdForReview, `ÄÃ£ reset nhÆ°ng chÆ°a gá»­i Ä‘Æ°á»£c tin cho user: ${e.message}`).catch(() => null);
       }
       return;
     }
     if (!result.key) return;
     const expiresText = req.durationHours > 0
       ? new Date(Date.now() + req.durationHours * 3600000).toLocaleString('vi-VN')
-      : 'Không hết hạn';
-    const text = '<b>✅ KEY SẴN SÀNG</b>\n'
-      + '────────────────────\n'
-      + '🔑 <code>' + result.key + '</code>\n\n'
-      + '📦 ' + esc(req.planLabel || 'Key free') + '\n'
-      + '⏱ ' + (req.durationHours > 0 ? req.durationHours + 'h' : 'Vĩnh viễn') + '\n'
-      + '📅 ' + expiresText + '\n'
-      + '📱 3 thiết bị\n\n'
-      + '────────────────────\n'
-      + '🌐 Dán key vào web\n'
-      + '🔄 /resetkey khi full máy\n'
-      + '💬 @SunNetWin';
+      : 'KhÃ´ng háº¿t háº¡n';
+    const text = '<b>âœ… KEY Sáº´N SÃ€NG</b>\n'
+      + 'â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€\n'
+      + 'ðŸ”‘ <code>' + result.key + '</code>\n\n'
+      + 'ðŸ“¦ ' + esc(req.planLabel || 'Key free') + '\n'
+      + 'â± ' + (req.durationHours > 0 ? req.durationHours + 'h' : 'VÄ©nh viá»…n') + '\n'
+      + 'ðŸ“… ' + expiresText + '\n'
+      + 'ðŸ“± 3 thiáº¿t bá»‹\n\n'
+      + 'â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€\n'
+      + 'ðŸŒ DÃ¡n key vÃ o web\n'
+      + 'ðŸ”„ /resetkey khi full mÃ¡y\n'
+      + 'ðŸ’¬ @SunNetWin';
     try {
       await send(req.telegramId, text);
       if (options.markDelivered) options.markDelivered(req.id);
     } catch (e) {
       console.warn('[telegram] deliver key fail', req.telegramId, e.message);
-      if (chatIdForReview) await send(chatIdForReview, `Duyệt OK nhưng chưa gửi key: ${e.message}`).catch(() => null);
+      if (chatIdForReview) await send(chatIdForReview, `Duyá»‡t OK nhÆ°ng chÆ°a gá»­i key: ${e.message}`).catch(() => null);
     }
   }
 
@@ -1232,7 +1281,7 @@ ${request.groupLink ? `🔗 ${esc(request.groupLink)}\n` : ''}${request.resetKey
     const sessions = options.getSessions();
     const session = sessions[userId];
     if (!session || session.type !== mode) {
-      await send(message.chat.id, '⚠️ Gõ /getkey hoặc /free hoặc /buy trước khi gửi ảnh.');
+      await send(message.chat.id, 'âš ï¸ GÃµ /getkey hoáº·c /free hoáº·c /buy trÆ°á»›c khi gá»­i áº£nh.');
       return;
     }
     const photos = message.photo || [];
@@ -1246,7 +1295,7 @@ ${request.groupLink ? `🔗 ${esc(request.groupLink)}\n` : ''}${request.resetKey
     // Timeout check for group task
     if (mode === 'group' && session.startedAt && (Date.now() - session.startedAt) > timeoutSec * 1000) {
       delete sessions[userId]; options.saveSessions(sessions);
-      await send(message.chat.id, `⏰ Hết ${timeoutSec} giây. Gõ /getkey để làm lại nhiệm vụ.`);
+      await send(message.chat.id, `â° Háº¿t ${timeoutSec} giÃ¢y. GÃµ /getkey Ä‘á»ƒ lÃ m láº¡i nhiá»‡m vá»¥.`);
       return;
     }
 
@@ -1257,12 +1306,12 @@ ${request.groupLink ? `🔗 ${esc(request.groupLink)}\n` : ''}${request.resetKey
       const have = session.proofs.length;
       if (have < need) {
         await send(message.chat.id,
-`📷 Ảnh <b>${have}/${need}</b>
-⏳ Còn <b>${need - have}</b> ảnh
-⌛️ ~${Math.max(0, Math.ceil((timeoutSec * 1000 - (Date.now() - session.startedAt)) / 1000))}s`);
+`ðŸ“· áº¢nh <b>${have}/${need}</b>
+â³ CÃ²n <b>${need - have}</b> áº£nh
+âŒ›ï¸ ~${Math.max(0, Math.ceil((timeoutSec * 1000 - (Date.now() - session.startedAt)) / 1000))}s`);
         return;
       }
-      // đủ ảnh
+      // Ä‘á»§ áº£nh
       const request = {
         id: idShort(), type: 'group', status: 'pending',
         telegramId: userId, username: from.username || '', userName: displayName(from),
@@ -1276,10 +1325,10 @@ ${request.groupLink ? `🔗 ${esc(request.groupLink)}\n` : ''}${request.resetKey
       options.addRequest(request);
       delete sessions[userId]; options.saveSessions(sessions);
       await send(message.chat.id,
-`✅ Đã nộp đủ <b>${need} ảnh</b>
-🎫 Mã: <b>#${request.id}</b>
-⏳ Chờ admin duyệt → nhận key
-📱 3 thiết bị · @SunNetWin`);
+`âœ… ÄÃ£ ná»™p Ä‘á»§ <b>${need} áº£nh</b>
+ðŸŽ« MÃ£: <b>#${request.id}</b>
+â³ Chá» admin duyá»‡t â†’ nháº­n key
+ðŸ“± 3 thiáº¿t bá»‹ Â· @SunNetWin`);
       // notify admins with all photos
       await notifyAdmins(request, request.proofFileId);
       for (let i = 1; i < (request.proofFileIds || []).length; i++) {
@@ -1288,11 +1337,11 @@ ${request.groupLink ? `🔗 ${esc(request.groupLink)}\n` : ''}${request.resetKey
       return;
     }
 
-    // payment mode — 1 ảnh
+    // payment mode â€” 1 áº£nh
     let plan = plans().find(p => p.id === session.planId);
     if (!plan) {
       delete sessions[userId]; options.saveSessions(sessions);
-      await send(message.chat.id, '⚠️ Gói hết hạn. Gõ /buy chọn lại.');
+      await send(message.chat.id, 'âš ï¸ GÃ³i háº¿t háº¡n. GÃµ /buy chá»n láº¡i.');
       return;
     }
     const request = {
@@ -1305,7 +1354,7 @@ ${request.groupLink ? `🔗 ${esc(request.groupLink)}\n` : ''}${request.resetKey
     };
     options.addRequest(request);
     delete sessions[userId]; options.saveSessions(sessions);
-    await send(message.chat.id, `✅ Bill đã gửi · <b>#${request.id}</b>\n⏳ Admin duyệt → nhận key VIP`);
+    await send(message.chat.id, `âœ… Bill Ä‘Ã£ gá»­i Â· <b>#${request.id}</b>\nâ³ Admin duyá»‡t â†’ nháº­n key VIP`);
     await notifyAdmins(request, request.proofFileId);
   }
 
@@ -1314,19 +1363,19 @@ ${request.groupLink ? `🔗 ${esc(request.groupLink)}\n` : ''}${request.resetKey
     const sessions = options.getSessions();
     const timeoutSec = Number(cfg.groupTaskTimeoutSec) || 300;
     const need = Number(cfg.groupTaskPhotos) || 3;
-    const task = String(cfg.groupTaskText || 'Làm nhiệm vụ theo yêu cầu admin.');
+    const task = String(cfg.groupTaskText || 'LÃ m nhiá»‡m vá»¥ theo yÃªu cáº§u admin.');
     const promo = String(cfg.groupPromoText || '');
     sessions[fromId] = { type: 'group', startedAt: Date.now(), proofs: [] };
     options.saveSessions(sessions);
     return send(chatId,
-`📸 <b>Nhiệm vụ quảng cáo bot:</b>
+`ðŸ“¸ <b>Nhiá»‡m vá»¥ quáº£ng cÃ¡o bot:</b>
 
 ${esc(task)}
 
-${promo ? `📌 <b>Câu cần sao chép:</b>\n<code>${esc(promo)}</code>\n` : ''}
-📷 Gửi đủ <b>${need} ảnh</b> chứng minh vào đây
-⌛️ Bạn có <b>${timeoutSec} giây</b> để gửi ảnh.
-📱 Key free = <b>3 thiết bị</b>`);
+${promo ? `ðŸ“Œ <b>CÃ¢u cáº§n sao chÃ©p:</b>\n<code>${esc(promo)}</code>\n` : ''}
+ðŸ“· Gá»­i Ä‘á»§ <b>${need} áº£nh</b> chá»©ng minh vÃ o Ä‘Ã¢y
+âŒ›ï¸ Báº¡n cÃ³ <b>${timeoutSec} giÃ¢y</b> Ä‘á»ƒ gá»­i áº£nh.
+ðŸ“± Key free = <b>3 thiáº¿t bá»‹</b>`);
   }
 
   function resolveKey(query) {
@@ -1339,13 +1388,13 @@ ${promo ? `📌 <b>Câu cần sao chép:</b>\n<code>${esc(promo)}</code>\n` : ''
     return null;
   }
 
-  // ─── TikTok / Facebook lookup ───────────────────────────
+  // â”€â”€â”€ TikTok / Facebook lookup â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   async function lookupTikTok(input) {
     let username = String(input || '').trim();
     const urlMatch = username.match(/tiktok\.com\/@([A-Za-z0-9._]+)/i);
     if (urlMatch) username = urlMatch[1];
     username = username.replace(/^@/, '').split(/[/?#\s]/)[0];
-    if (!username || username.length < 2) throw new Error('Username/link không hợp lệ.');
+    if (!username || username.length < 2) throw new Error('Username/link khÃ´ng há»£p lá»‡.');
     const profileUrl = `https://www.tiktok.com/@${username}`;
     const headers = {
       'user-agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
@@ -1355,7 +1404,7 @@ ${promo ? `📌 <b>Câu cần sao chép:</b>\n<code>${esc(promo)}</code>\n` : ''
       username, nickname: username, avatar: '', bio: '', verified: false, private: false,
       followers: null, following: null, likes: null, videos: null, createTime: null, profileUrl
     };
-    // 1) oEmbed — nickname + thumb
+    // 1) oEmbed â€” nickname + thumb
     try {
       const oembedUrl = `https://www.tiktok.com/oembed?url=${encodeURIComponent(profileUrl)}`;
       const r = await fetch(oembedUrl, { signal: AbortSignal.timeout(8000), headers });
@@ -1366,7 +1415,7 @@ ${promo ? `📌 <b>Câu cần sao chép:</b>\n<code>${esc(promo)}</code>\n` : ''
         info.bio = (d.title || '').slice(0, 200);
       }
     } catch {}
-    // 2) HTML page — SIGI_STATE / universal data for stats
+    // 2) HTML page â€” SIGI_STATE / universal data for stats
     try {
       const page = await fetch(profileUrl, { signal: AbortSignal.timeout(12000), headers });
       if (page.ok) {
@@ -1404,7 +1453,7 @@ ${promo ? `📌 <b>Câu cần sao chép:</b>\n<code>${esc(promo)}</code>\n` : ''
         }
       }
     } catch {}
-    if (!info.nickname && !info.avatar) throw new Error('Không lấy được info (user ẩn / không tồn tại).');
+    if (!info.nickname && !info.avatar) throw new Error('KhÃ´ng láº¥y Ä‘Æ°á»£c info (user áº©n / khÃ´ng tá»“n táº¡i).');
     return info;
   }
 
@@ -1452,22 +1501,22 @@ ${promo ? `📌 <b>Câu cần sao chép:</b>\n<code>${esc(promo)}</code>\n` : ''
         if (!info.bio) info.bio = (og('og:description') || (nameMeta && nameMeta[1]) || '').slice(0, 220);
         info.type = og('og:type') || info.type;
         // try follower-ish numbers from description
-        const nums = String(info.bio).match(/([\d.,]+)\s*(followers|người theo dõi|likes|lượt thích)/i);
+        const nums = String(info.bio).match(/([\d.,]+)\s*(followers|ngÆ°á»i theo dÃµi|likes|lÆ°á»£t thÃ­ch)/i);
         if (nums) {
           const n = parseFloat(nums[1].replace(/\./g, '').replace(',', '.'));
-          if (/follow|theo dõi/i.test(nums[2])) info.followers = n;
+          if (/follow|theo dÃµi/i.test(nums[2])) info.followers = n;
           else info.likes = n;
         }
       }
     } catch {}
     if (!info.author) {
       info.author = raw.replace(/^https?:\/\/(www\.)?facebook\.com\//i, '').split(/[/?#]/)[0] || 'Facebook';
-      info.bio = info.bio || 'Không lấy đủ chi tiết (profile private / cần đăng nhập).';
+      info.bio = info.bio || 'KhÃ´ng láº¥y Ä‘á»§ chi tiáº¿t (profile private / cáº§n Ä‘Äƒng nháº­p).';
     }
     return info;
   }
 
-  // ─── Admin commands ─────────────────────────────────────
+  // â”€â”€â”€ Admin commands â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   async function handleAdminCommand(message, text) {
     const chatId = message.chat.id;
     const parts = text.split(/\s+/);
@@ -1481,32 +1530,32 @@ ${promo ? `📌 <b>Câu cần sao chép:</b>\n<code>${esc(promo)}</code>\n` : ''
       const keys = options.getKeys ? options.getKeys() : [];
       const active = keys.filter(k => k.status === 'active' && !(options.isExpired?.(k))).length;
       const pending = (options.getRequests ? options.getRequests() : []).filter(r => r.status === 'pending').length;
-      return send(chatId, `📊 <b>STATS</b>\n🔑 Key: ${keys.length} · ✅ Active: ${active}\n⏳ Pending: ${pending}`);
+      return send(chatId, `ðŸ“Š <b>STATS</b>\nðŸ”‘ Key: ${keys.length} Â· âœ… Active: ${active}\nâ³ Pending: ${pending}`);
     }
 
     if (cmd === 'keys') {
       const keys = (options.getKeys ? options.getKeys() : []).slice().sort((a, b) => (b.created || 0) - (a.created || 0)).slice(0, 12);
-      if (!keys.length) return send(chatId, '📭 Chưa có key.');
+      if (!keys.length) return send(chatId, 'ðŸ“­ ChÆ°a cÃ³ key.');
       const lines = keys.map(k => {
         const d = (k.deviceHashes || []).length;
         const lim = k.deviceLimit || 3;
-        const st = k.status === 'revoked' ? '🚫' : (options.isExpired?.(k) ? '⏰' : '✅');
-        return `${st} <code>${k.id}</code> · ${esc(k.label)} · 📱${d}/${lim}`;
+        const st = k.status === 'revoked' ? 'ðŸš«' : (options.isExpired?.(k) ? 'â°' : 'âœ…');
+        return `${st} <code>${k.id}</code> Â· ${esc(k.label)} Â· ðŸ“±${d}/${lim}`;
       });
-      return send(chatId, `🔑 <b>KEYS</b>\n` + lines.join('\n'));
+      return send(chatId, `ðŸ”‘ <b>KEYS</b>\n` + lines.join('\n'));
     }
 
     if (cmd === 'key') {
-      if (!args[0]) return send(chatId, '📌 <code>/key &lt;id|mã&gt;</code>');
+      if (!args[0]) return send(chatId, 'ðŸ“Œ <code>/key &lt;id|mÃ£&gt;</code>');
       const k = resolveKey(args[0]);
-      if (!k) return send(chatId, '❌ Không tìm thấy.');
+      if (!k) return send(chatId, 'âŒ KhÃ´ng tÃ¬m tháº¥y.');
       const d = (k.deviceHashes || []).length;
       return send(chatId,
-`🔑 <b>${esc(k.label)}</b>
-🆔 <code>${k.id}</code>
-📊 ${k.status} · 📱 ${d}/${k.deviceLimit || 3}
-⏱ ${k.expiresAt ? new Date(k.expiresAt).toLocaleString('vi-VN') : '∞'}
-📡 ${k.source || '—'} · TG ${k.telegramId || '—'}`);
+`ðŸ”‘ <b>${esc(k.label)}</b>
+ðŸ†” <code>${k.id}</code>
+ðŸ“Š ${k.status} Â· ðŸ“± ${d}/${k.deviceLimit || 3}
+â± ${k.expiresAt ? new Date(k.expiresAt).toLocaleString('vi-VN') : 'âˆž'}
+ðŸ“¡ ${k.source || 'â€”'} Â· TG ${k.telegramId || 'â€”'}`);
     }
 
     if (cmd === 'createkey') {
@@ -1516,45 +1565,45 @@ ${promo ? `📌 <b>Câu cần sao chép:</b>\n<code>${esc(promo)}</code>\n` : ''
       try {
         const issued = options.createKey({ label, durationHours: hours, deviceLimit: devices, source: 'telegram-admin' });
         return send(chatId,
-`✅ <b>TẠO KEY</b>
-🔑 <code>${issued.plainKey}</code>
-🆔 <code>${issued.record.id}</code>
-⏱ ${hours || '∞'}h · 📱 ${devices} TB`);
+`âœ… <b>Táº O KEY</b>
+ðŸ”‘ <code>${issued.plainKey}</code>
+ðŸ†” <code>${issued.record.id}</code>
+â± ${hours || 'âˆž'}h Â· ðŸ“± ${devices} TB`);
       } catch (e) {
-        return send(chatId, `❌ ${e.message}`);
+        return send(chatId, `âŒ ${e.message}`);
       }
     }
 
     if (cmd === 'resetdevice' || cmd === 'resetdevices') {
-      if (!args[0]) return send(chatId, '📌 <code>/resetdevice &lt;id|mã&gt;</code>');
+      if (!args[0]) return send(chatId, 'ðŸ“Œ <code>/resetdevice &lt;id|mÃ£&gt;</code>');
       const k = resolveKey(args[0]);
-      if (!k) return send(chatId, '❌ Không tìm thấy.');
+      if (!k) return send(chatId, 'âŒ KhÃ´ng tÃ¬m tháº¥y.');
       k.deviceHashes = [];
       if (options.saveKeys) options.saveKeys();
-      return send(chatId, `🔄 Đã reset 📱 key <code>${k.id}</code>\nGiới hạn: ${k.deviceLimit || 3} TB`);
+      return send(chatId, `ðŸ”„ ÄÃ£ reset ðŸ“± key <code>${k.id}</code>\nGiá»›i háº¡n: ${k.deviceLimit || 3} TB`);
     }
 
     if (cmd === 'revoke') {
-      if (!args[0]) return send(chatId, '📌 <code>/revoke &lt;id|mã&gt;</code>');
+      if (!args[0]) return send(chatId, 'ðŸ“Œ <code>/revoke &lt;id|mÃ£&gt;</code>');
       const k = resolveKey(args[0]);
-      if (!k) return send(chatId, '❌ Không tìm thấy.');
+      if (!k) return send(chatId, 'âŒ KhÃ´ng tÃ¬m tháº¥y.');
       k.status = 'revoked';
       if (options.saveKeys) options.saveKeys();
-      return send(chatId, `🚫 Đã thu hồi <code>${k.id}</code>`);
+      return send(chatId, `ðŸš« ÄÃ£ thu há»“i <code>${k.id}</code>`);
     }
 
     if (cmd === 'pending') {
       const list = (options.getRequests ? options.getRequests() : []).filter(r => r.status === 'pending').slice(0, 15);
-      if (!list.length) return send(chatId, '✅ Không có pending.');
+      if (!list.length) return send(chatId, 'âœ… KhÃ´ng cÃ³ pending.');
       const lines = list.map(r => {
-        const icon = r.type === 'payment' ? '💳' : r.type === 'reset' ? '🔄' : '🎯';
-        return `${icon} <code>${r.id}</code> · ${esc(r.userName)} · ${new Date(r.createdAt).toLocaleString('vi-VN')}`;
+        const icon = r.type === 'payment' ? 'ðŸ’³' : r.type === 'reset' ? 'ðŸ”„' : 'ðŸŽ¯';
+        return `${icon} <code>${r.id}</code> Â· ${esc(r.userName)} Â· ${new Date(r.createdAt).toLocaleString('vi-VN')}`;
       });
-      return send(chatId, `⏳ <b>PENDING</b>\n` + lines.join('\n') + `\n\n✅ /approve ID\n❌ /reject ID`);
+      return send(chatId, `â³ <b>PENDING</b>\n` + lines.join('\n') + `\n\nâœ… /approve ID\nâŒ /reject ID`);
     }
 
     if (cmd === 'approve' || cmd === 'reject') {
-      if (!args[0]) return send(chatId, `📌 <code>/${cmd} &lt;id&gt;</code>`);
+      if (!args[0]) return send(chatId, `ðŸ“Œ <code>/${cmd} &lt;id&gt;</code>`);
       const approved = cmd === 'approve';
       // special handling for reset type
       const req = (options.getRequests ? options.getRequests() : []).find(r => r.id === args[0]);
@@ -1567,7 +1616,7 @@ ${promo ? `📌 <b>Câu cần sao chép:</b>\n<code>${esc(promo)}</code>\n` : ''
             byId.deviceHashes = [];
             if (options.saveKeys) options.saveKeys();
           } else {
-            return send(chatId, '❌ Không tìm thấy key để reset.');
+            return send(chatId, 'âŒ KhÃ´ng tÃ¬m tháº¥y key Ä‘á»ƒ reset.');
           }
         } else {
           k.deviceHashes = [];
@@ -1575,84 +1624,84 @@ ${promo ? `📌 <b>Câu cần sao chép:</b>\n<code>${esc(promo)}</code>\n` : ''
         }
       }
       const result = options.reviewRequest(args[0], approved, `telegram-cmd:${message.from.id}`);
-      if (!result.ok) return send(chatId, `❌ ${result.error || 'Lỗi'}`);
+      if (!result.ok) return send(chatId, `âŒ ${result.error || 'Lá»—i'}`);
       if (approved) await deliverReviewedKey(result, chatId);
-      else await send(result.request.telegramId, `❌ Yêu cầu #${result.request.id} bị từ chối.`).catch(() => null);
-      return send(chatId, approved ? `✅ #${args[0]}` : `🚫 #${args[0]}`);
+      else await send(result.request.telegramId, `âŒ YÃªu cáº§u #${result.request.id} bá»‹ tá»« chá»‘i.`).catch(() => null);
+      return send(chatId, approved ? `âœ… #${args[0]}` : `ðŸš« #${args[0]}`);
     }
 
     if (cmd === 'settask') {
-      if (!argText) return send(chatId, '📌 <code>/settask &lt;nội dung hướng dẫn&gt;</code>');
+      if (!argText) return send(chatId, 'ðŸ“Œ <code>/settask &lt;ná»™i dung hÆ°á»›ng dáº«n&gt;</code>');
       const cfg = options.getConfig();
       cfg.groupTaskText = argText.slice(0, 2000);
       if (options.saveConfig) options.saveConfig(cfg);
-      return send(chatId, `✅ Nhiệm vụ nhóm:\n${esc(cfg.groupTaskText)}`);
+      return send(chatId, `âœ… Nhiá»‡m vá»¥ nhÃ³m:\n${esc(cfg.groupTaskText)}`);
     }
     if (cmd === 'setpromo') {
-      if (!argText) return send(chatId, '📌 <code>/setpromo câu quảng cáo cần copy</code>');
+      if (!argText) return send(chatId, 'ðŸ“Œ <code>/setpromo cÃ¢u quáº£ng cÃ¡o cáº§n copy</code>');
       const cfg = options.getConfig();
       cfg.groupPromoText = argText.slice(0, 500);
       if (options.saveConfig) options.saveConfig(cfg);
-      return send(chatId, `✅ Câu promo:\n<code>${esc(cfg.groupPromoText)}</code>`);
+      return send(chatId, `âœ… CÃ¢u promo:\n<code>${esc(cfg.groupPromoText)}</code>`);
     }
     if (cmd === 'settaskphotos') {
       const n = parseInt(args[0], 10);
-      if (!(n >= 1 && n <= 10)) return send(chatId, '📌 <code>/settaskphotos 3</code> (1-10)');
+      if (!(n >= 1 && n <= 10)) return send(chatId, 'ðŸ“Œ <code>/settaskphotos 3</code> (1-10)');
       const cfg = options.getConfig();
       cfg.groupTaskPhotos = n;
       if (options.saveConfig) options.saveConfig(cfg);
-      return send(chatId, `✅ Cần ${n} ảnh để nhận key free`);
+      return send(chatId, `âœ… Cáº§n ${n} áº£nh Ä‘á»ƒ nháº­n key free`);
     }
     if (cmd === 'settasktime') {
       const n = parseInt(args[0], 10);
-      if (!(n >= 60 && n <= 3600)) return send(chatId, '📌 <code>/settasktime 300</code> (60-3600s)');
+      if (!(n >= 60 && n <= 3600)) return send(chatId, 'ðŸ“Œ <code>/settasktime 300</code> (60-3600s)');
       const cfg = options.getConfig();
       cfg.groupTaskTimeoutSec = n;
       if (options.saveConfig) options.saveConfig(cfg);
-      return send(chatId, `✅ Thời gian nhiệm vụ: ${n}s`);
+      return send(chatId, `âœ… Thá»i gian nhiá»‡m vá»¥: ${n}s`);
     }
     if (cmd === 'setmaint') {
       const cfg = options.getConfig();
       const on = ['1','on','true','yes','bat'].includes(String(args[0]||'').toLowerCase());
       const off = ['0','off','false','no','tat'].includes(String(args[0]||'').toLowerCase());
-      if (!on && !off) return send(chatId, '📌 <code>/setmaint on|off [nội dung]</code>\n<code>/lockgame id</code> <code>/unlockgame id</code>\n<code>/lockcmd getkey</code> <code>/unlockcmd getkey</code>');
+      if (!on && !off) return send(chatId, 'ðŸ“Œ <code>/setmaint on|off [ná»™i dung]</code>\n<code>/lockgame id</code> <code>/unlockgame id</code>\n<code>/lockcmd getkey</code> <code>/unlockcmd getkey</code>');
       cfg.maintenance = cfg.maintenance || { enabled:false, message:'', lockedGames:[], lockedCommands:[] };
       cfg.maintenance.enabled = on;
       if (argText.replace(/^\S+\s*/, '').trim()) cfg.maintenance.message = argText.replace(/^\S+\s*/, '').trim().slice(0,500);
       if (options.saveConfig) options.saveConfig(cfg);
-      return send(chatId, (on?'🛠 Bật bảo trì':'✅ Tắt bảo trì') + (cfg.maintenance.message ? '\n'+cfg.maintenance.message : ''));
+      return send(chatId, (on?'ðŸ›  Báº­t báº£o trÃ¬':'âœ… Táº¯t báº£o trÃ¬') + (cfg.maintenance.message ? '\n'+cfg.maintenance.message : ''));
     }
     if (cmd === 'lockgame' || cmd === 'unlockgame') {
       const id = String(args[0]||'').toLowerCase();
-      if (!id) return send(chatId, '📌 <code>/lockgame sunwin</code>');
+      if (!id) return send(chatId, 'ðŸ“Œ <code>/lockgame sunwin</code>');
       const cfg = options.getConfig();
       cfg.maintenance = cfg.maintenance || { enabled:false, message:'', lockedGames:[], lockedCommands:[] };
       const list = new Set(cfg.maintenance.lockedGames || []);
       if (cmd === 'lockgame') list.add(id); else list.delete(id);
       cfg.maintenance.lockedGames = [...list];
       if (options.saveConfig) options.saveConfig(cfg);
-      return send(chatId, `🎮 lockedGames: <code>${cfg.maintenance.lockedGames.join(', ')||'—'}</code>`);
+      return send(chatId, `ðŸŽ® lockedGames: <code>${cfg.maintenance.lockedGames.join(', ')||'â€”'}</code>`);
     }
     if (cmd === 'lockcmd' || cmd === 'unlockcmd') {
       const id = String(args[0]||'').toLowerCase().replace(/^\//,'');
-      if (!id) return send(chatId, '📌 <code>/lockcmd getkey</code>');
+      if (!id) return send(chatId, 'ðŸ“Œ <code>/lockcmd getkey</code>');
       const cfg = options.getConfig();
       cfg.maintenance = cfg.maintenance || { enabled:false, message:'', lockedGames:[], lockedCommands:[] };
       const list = new Set(cfg.maintenance.lockedCommands || []);
       if (cmd === 'lockcmd') list.add(id); else list.delete(id);
       cfg.maintenance.lockedCommands = [...list];
       if (options.saveConfig) options.saveConfig(cfg);
-      return send(chatId, `⌨️ lockedCommands: <code>${cfg.maintenance.lockedCommands.join(', ')||'—'}</code>`);
+      return send(chatId, `âŒ¨ï¸ lockedCommands: <code>${cfg.maintenance.lockedCommands.join(', ')||'â€”'}</code>`);
     }
 
     if (cmd === 'setbank') {
-      if (args.length < 3) return send(chatId, '📌 <code>/setbank &lt;NH&gt; &lt;STK&gt; &lt;chủ&gt;</code>');
+      if (args.length < 3) return send(chatId, 'ðŸ“Œ <code>/setbank &lt;NH&gt; &lt;STK&gt; &lt;chá»§&gt;</code>');
       const cfg = options.getConfig();
       cfg.bankCode = args[0];
       cfg.bankAccount = args[1];
       cfg.bankAccountName = args.slice(2).join(' ');
       if (options.saveConfig) options.saveConfig(cfg);
-      return send(chatId, `✅ 🏦 ${esc(cfg.bankCode)} · <code>${esc(cfg.bankAccount)}</code>\n👤 ${esc(cfg.bankAccountName)}`);
+      return send(chatId, `âœ… ðŸ¦ ${esc(cfg.bankCode)} Â· <code>${esc(cfg.bankAccount)}</code>\nðŸ‘¤ ${esc(cfg.bankAccountName)}`);
     }
 
     if (cmd === 'settg') {
@@ -1660,95 +1709,95 @@ ${promo ? `📌 <b>Câu cần sao chép:</b>\n<code>${esc(promo)}</code>\n` : ''
       const cfg = options.getConfig();
       cfg.telegramUsername = u;
       if (options.saveConfig) options.saveConfig(cfg);
-      return send(chatId, `✅ Bot: @${esc(u) || '—'}`);
+      return send(chatId, `âœ… Bot: @${esc(u) || 'â€”'}`);
     }
 
     if (cmd === 'addplan') {
-      if (args.length < 4) return send(chatId, '📌 <code>/addplan id nhãn giá giờ</code>');
+      if (args.length < 4) return send(chatId, 'ðŸ“Œ <code>/addplan id nhÃ£n giÃ¡ giá»</code>');
       const id = args[0].toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 24);
       const price = parseInt(args[args.length - 2], 10);
       const hours = parseInt(args[args.length - 1], 10);
       const label = args.slice(1, -2).join(' ').replace(/^["']|["']$/g, '');
-      if (!id || !label || !price || !hours) return send(chatId, '❌ Thiếu thông tin.');
+      if (!id || !label || !price || !hours) return send(chatId, 'âŒ Thiáº¿u thÃ´ng tin.');
       const cfg = options.getConfig();
       cfg.plans = cfg.plans || [];
-      if (cfg.plans.some(p => p.id === id)) return send(chatId, '❌ ID trùng.');
+      if (cfg.plans.some(p => p.id === id)) return send(chatId, 'âŒ ID trÃ¹ng.');
       cfg.plans.push({ id, label, price, durationHours: hours, active: true });
       if (options.saveConfig) options.saveConfig(cfg);
-      return send(chatId, `✅ 💎 ${esc(label)} · ${fmt(price)}đ · ${hours}h`);
+      return send(chatId, `âœ… ðŸ’Ž ${esc(label)} Â· ${fmt(price)}Ä‘ Â· ${hours}h`);
     }
 
     if (cmd === 'delplan') {
-      if (!args[0]) return send(chatId, '📌 <code>/delplan &lt;id&gt;</code>');
+      if (!args[0]) return send(chatId, 'ðŸ“Œ <code>/delplan &lt;id&gt;</code>');
       const cfg = options.getConfig();
       const before = (cfg.plans || []).length;
       cfg.plans = (cfg.plans || []).filter(p => p.id !== args[0].toLowerCase());
       if (options.saveConfig) options.saveConfig(cfg);
-      return send(chatId, cfg.plans.length < before ? `✅ Xóa ${args[0]}` : '❌ Không thấy.');
+      return send(chatId, cfg.plans.length < before ? `âœ… XÃ³a ${args[0]}` : 'âŒ KhÃ´ng tháº¥y.');
     }
 
     if (cmd === 'plans') {
       const list = plans();
-      if (!list.length) return send(chatId, '📭 Chưa có gói.');
-      return send(chatId, `💎 <b>GÓI</b>\n` + list.map(p => `• <code>${p.id}</code> ${esc(p.label)} · ${fmt(p.price)}đ · ${p.durationHours}h`).join('\n'));
+      if (!list.length) return send(chatId, 'ðŸ“­ ChÆ°a cÃ³ gÃ³i.');
+      return send(chatId, `ðŸ’Ž <b>GÃ“I</b>\n` + list.map(p => `â€¢ <code>${p.id}</code> ${esc(p.label)} Â· ${fmt(p.price)}Ä‘ Â· ${p.durationHours}h`).join('\n'));
     }
 
-    return send(chatId, '❓ Gõ /admin');
+    return send(chatId, 'â“ GÃµ /admin');
   }
 
-  // ─── Message router ─────────────────────────────────────
+  // â”€â”€â”€ Message router â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   async function showBuyMenu(chatId) {
     const available = plans();
-    if (!available.length) return send(chatId, '📭 Tạm hết gói.\n/getkey nhận free · @SunNetWin');
+    if (!available.length) return send(chatId, 'ðŸ“­ Táº¡m háº¿t gÃ³i.\n/getkey nháº­n free Â· @SunNetWin');
     const lines = available.map((p, i) => {
-      const days = p.durationHours >= 24 ? (Math.round(p.durationHours / 24) + ' ngày') : (p.durationHours + 'h');
-      return '<b>' + (i + 1) + '. ' + esc(p.label) + '</b>\n    💰 ' + fmt(p.price) + 'đ  ·  ⏱ ' + days;
+      const days = p.durationHours >= 24 ? (Math.round(p.durationHours / 24) + ' ngÃ y') : (p.durationHours + 'h');
+      return '<b>' + (i + 1) + '. ' + esc(p.label) + '</b>\n    ðŸ’° ' + fmt(p.price) + 'Ä‘  Â·  â± ' + days;
     }).join('\n\n');
     const keyboard = {
       inline_keyboard: available.map(p => {
-        const days = p.durationHours >= 24 ? (Math.round(p.durationHours / 24) + ' ngày') : (p.durationHours + 'h');
-        return [{ text: p.label + ' · ' + fmt(p.price) + 'đ · ' + days, callback_data: 'pay:' + p.id }];
+        const days = p.durationHours >= 24 ? (Math.round(p.durationHours / 24) + ' ngÃ y') : (p.durationHours + 'h');
+        return [{ text: p.label + ' Â· ' + fmt(p.price) + 'Ä‘ Â· ' + days, callback_data: 'pay:' + p.id }];
       })
     };
     await send(chatId,
-      '💳 <b>MUA KEY VIP</b>\n' + 
-      '────────────────────\n' + 
-      'Chọn gói 👇\n' + 
+      'ðŸ’³ <b>MUA KEY VIP</b>\n' + 
+      'â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€\n' + 
+      'Chá»n gÃ³i ðŸ‘‡\n' + 
       '\n' + lines + '\n\n' +
-      '────────────────────\n' + 
-      '✅ 3 thiết bị · Reset free\n' + 
-      '⚡ TX realtime · @SunNetWin\n',
+      'â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€\n' + 
+      'âœ… 3 thiáº¿t bá»‹ Â· Reset free\n' + 
+      'âš¡ TX realtime Â· @SunNetWin\n',
       { reply_markup: keyboard }
     );
   }
 
   async function startPayment(chatId, fromId, planId) {
     const plan = plans().find(p => p.id === String(planId || '').toLowerCase());
-    if (!plan) return send(chatId, '❌ Gói không tồn tại. Gõ /buy để chọn lại.');
+    if (!plan) return send(chatId, 'âŒ GÃ³i khÃ´ng tá»“n táº¡i. GÃµ /buy Ä‘á»ƒ chá»n láº¡i.');
     const config = options.getConfig();
     if (!config.bankCode || !config.bankAccount || !config.bankAccountName) {
-      return send(chatId, '⚠️ Admin chưa cấu hình ngân hàng VietQR.\nLiên hệ @SunNetWin');
+      return send(chatId, 'âš ï¸ Admin chÆ°a cáº¥u hÃ¬nh ngÃ¢n hÃ ng VietQR.\nLiÃªn há»‡ @SunNetWin');
     }
     const addInfo = `KEYVIP ${fromId}`;
     const qr = `https://img.vietqr.io/image/${encodeURIComponent(config.bankCode)}-${encodeURIComponent(config.bankAccount)}-compact2.jpg?amount=${encodeURIComponent(String(plan.price))}&addInfo=${encodeURIComponent(addInfo)}&accountName=${encodeURIComponent(config.bankAccountName)}`;
     const sessions = options.getSessions();
     sessions[fromId] = { type: 'payment', planId: plan.id, startedAt: Date.now() };
     options.saveSessions(sessions);
-    const days = plan.durationHours >= 24 ? `${Math.round(plan.durationHours / 24)} ngày` : `${plan.durationHours}h`;
+    const days = plan.durationHours >= 24 ? `${Math.round(plan.durationHours / 24)} ngÃ y` : `${plan.durationHours}h`;
     await sendPhoto(chatId, qr, {
-      caption: '<b>💳 THANH TOÁN</b>\n'
-        + '────────────────────\n'
-        + '📦 <b>' + esc(plan.label) + '</b>\n'
-        + '💰 <b>' + fmt(plan.price) + 'đ</b> · ⏱ ' + days + '\n\n'
-        + '🏦 <b>' + esc(config.bankCode) + '</b>\n'
-        + '💳 <code>' + esc(config.bankAccount) + '</code>\n'
-        + '👤 ' + esc(config.bankAccountName) + '\n\n'
-        + '📝 CK: <code>' + addInfo + '</code>\n\n'
-        + '────────────────────\n'
-        + '📷 Gửi <b>ảnh bill</b> sau khi CK\n'
-        + '⏳ Duyệt xong → nhận key\n'
-        + '💬 @SunNetWin'
+      caption: '<b>ðŸ’³ THANH TOÃN</b>\n'
+        + 'â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€\n'
+        + 'ðŸ“¦ <b>' + esc(plan.label) + '</b>\n'
+        + 'ðŸ’° <b>' + fmt(plan.price) + 'Ä‘</b> Â· â± ' + days + '\n\n'
+        + 'ðŸ¦ <b>' + esc(config.bankCode) + '</b>\n'
+        + 'ðŸ’³ <code>' + esc(config.bankAccount) + '</code>\n'
+        + 'ðŸ‘¤ ' + esc(config.bankAccountName) + '\n\n'
+        + 'ðŸ“ CK: <code>' + addInfo + '</code>\n\n'
+        + 'â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€\n'
+        + 'ðŸ“· Gá»­i <b>áº£nh bill</b> sau khi CK\n'
+        + 'â³ Duyá»‡t xong â†’ nháº­n key\n'
+        + 'ðŸ’¬ @SunNetWin'
     });
   }
 
@@ -1778,7 +1827,7 @@ ${promo ? `📌 <b>Câu cần sao chép:</b>\n<code>${esc(promo)}</code>\n` : ''
       const session = sessions[fromId];
       if (session?.type === 'group') return createProofRequest(message, 'group');
       if (session?.type === 'payment') return createProofRequest(message, 'payment');
-      return send(chatId, '⚠️ Gõ /free hoặc /buy trước.');
+      return send(chatId, 'âš ï¸ GÃµ /free hoáº·c /buy trÆ°á»›c.');
     }
 
     if (!text) return;
@@ -1795,14 +1844,14 @@ ${promo ? `📌 <b>Câu cần sao chép:</b>\n<code>${esc(promo)}</code>\n` : ''
     const args = parts.slice(1);
     const argText = text.replace(/^\/\S+\s*/, '').trim();
 
-    // Bảo trì / khóa lệnh (admin vẫn dùng được)
+    // Báº£o trÃ¬ / khÃ³a lá»‡nh (admin váº«n dÃ¹ng Ä‘Æ°á»£c)
     if (!isAdmin(fromId)) {
       const mt = (options.getConfig && options.getConfig().maintenance) || {};
       if (mt.enabled && Array.isArray(mt.lockedCommands) && mt.lockedCommands.includes(cmd)) {
-        return send(chatId, '🛠 ' + (mt.message || 'Lệnh đang bảo trì.'));
+        return send(chatId, 'ðŸ›  ' + (mt.message || 'Lá»‡nh Ä‘ang báº£o trÃ¬.'));
       }
       if (mt.enabled && Array.isArray(mt.lockedCommands) && mt.lockedCommands.includes('*')) {
-        return send(chatId, '🛠 ' + (mt.message || 'Bot đang bảo trì.'));
+        return send(chatId, 'ðŸ›  ' + (mt.message || 'Bot Ä‘ang báº£o trÃ¬.'));
       }
     }
 
@@ -1810,8 +1859,8 @@ ${promo ? `📌 <b>Câu cần sao chép:</b>\n<code>${esc(promo)}</code>\n` : ''
 
     if (cmd === 'status') {
       const pending = (options.getRequests ? options.getRequests() : []).filter(r => r.telegramId === fromId && r.status === 'pending');
-      if (!pending.length) return send(chatId, '✅ Không có yêu cầu chờ.');
-      return send(chatId, `⏳ <b>${pending.length} yêu cầu</b>\n` + pending.map(r => `• #${r.id} ${r.type === 'payment' ? '💳' : r.type === 'reset' ? '🔄' : '🎯'}`).join('\n'));
+      if (!pending.length) return send(chatId, 'âœ… KhÃ´ng cÃ³ yÃªu cáº§u chá».');
+      return send(chatId, `â³ <b>${pending.length} yÃªu cáº§u</b>\n` + pending.map(r => `â€¢ #${r.id} ${r.type === 'payment' ? 'ðŸ’³' : r.type === 'reset' ? 'ðŸ”„' : 'ðŸŽ¯'}`).join('\n'));
     }
 
     if (cmd === 'free' || cmd === 'getkey') {
@@ -1836,71 +1885,71 @@ ${promo ? `📌 <b>Câu cần sao chép:</b>\n<code>${esc(promo)}</code>\n` : ''
         sessions[fromId] = { type: 'await_reset_key', startedAt: Date.now() };
         options.saveSessions(sessions);
         return send(chatId,
-`🔄 <b>RESET THIẾT BỊ</b>
-────────────────
-Gửi <b>mã key</b> cần reset.
-⚡ Tự động · không cần admin
-⏱ Thời hạn key <b>không đổi</b>`);
+`ðŸ”„ <b>RESET THIáº¾T Bá»Š</b>
+â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+Gá»­i <b>mÃ£ key</b> cáº§n reset.
+âš¡ Tá»± Ä‘á»™ng Â· khÃ´ng cáº§n admin
+â± Thá»i háº¡n key <b>khÃ´ng Ä‘á»•i</b>`);
       }
       const plain = argText.trim();
       const k = options.findKey ? options.findKey(plain) : null;
-      if (!k) return send(chatId, '❌ Key không hợp lệ.');
-      if (k.status === 'revoked') return send(chatId, '🚫 Key đã bị thu hồi.');
-      if (options.isExpired?.(k)) return send(chatId, '⏰ Key đã hết hạn.');
+      if (!k) return send(chatId, 'âŒ Key khÃ´ng há»£p lá»‡.');
+      if (k.status === 'revoked') return send(chatId, 'ðŸš« Key Ä‘Ã£ bá»‹ thu há»“i.');
+      if (options.isExpired?.(k)) return send(chatId, 'â° Key Ä‘Ã£ háº¿t háº¡n.');
       k.deviceHashes = [];
       if (options.saveKeys) options.saveKeys();
       delete sessions[fromId]; options.saveSessions(sessions);
-      const exp = k.expiresAt ? new Date(k.expiresAt).toLocaleString('vi-VN') : 'Không hết hạn';
+      const exp = k.expiresAt ? new Date(k.expiresAt).toLocaleString('vi-VN') : 'KhÃ´ng háº¿t háº¡n';
       return send(chatId,
-`✅ <b>RESET XONG</b>
-────────────────
-🔑 <code>${esc(k.id)}</code>
-📱 Đã xóa hết thiết bị cũ
-⏱ Hạn key: <b>${exp}</b> (không đổi)
-👉 Đăng nhập lại trên web (tối đa ${k.deviceLimit || 3} máy)`);
+`âœ… <b>RESET XONG</b>
+â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+ðŸ”‘ <code>${esc(k.id)}</code>
+ðŸ“± ÄÃ£ xÃ³a háº¿t thiáº¿t bá»‹ cÅ©
+â± Háº¡n key: <b>${exp}</b> (khÃ´ng Ä‘á»•i)
+ðŸ‘‰ ÄÄƒng nháº­p láº¡i trÃªn web (tá»‘i Ä‘a ${k.deviceLimit || 3} mÃ¡y)`);
     }
 
-    // waiting for reset key text — auto reset, no admin
+    // waiting for reset key text â€” auto reset, no admin
     if (sessions[fromId]?.type === 'await_reset_key' && !text.startsWith('/')) {
       const plain = text.trim();
       const k = options.findKey ? options.findKey(plain) : null;
-      if (!k) return send(chatId, '❌ Key không hợp lệ. Gửi lại hoặc /resetkey');
-      if (k.status === 'revoked') return send(chatId, '🚫 Key đã bị thu hồi.');
-      if (options.isExpired?.(k)) return send(chatId, '⏰ Key đã hết hạn.');
+      if (!k) return send(chatId, 'âŒ Key khÃ´ng há»£p lá»‡. Gá»­i láº¡i hoáº·c /resetkey');
+      if (k.status === 'revoked') return send(chatId, 'ðŸš« Key Ä‘Ã£ bá»‹ thu há»“i.');
+      if (options.isExpired?.(k)) return send(chatId, 'â° Key Ä‘Ã£ háº¿t háº¡n.');
       k.deviceHashes = [];
       if (options.saveKeys) options.saveKeys();
       delete sessions[fromId]; options.saveSessions(sessions);
-      const exp = k.expiresAt ? new Date(k.expiresAt).toLocaleString('vi-VN') : 'Không hết hạn';
+      const exp = k.expiresAt ? new Date(k.expiresAt).toLocaleString('vi-VN') : 'KhÃ´ng háº¿t háº¡n';
       return send(chatId,
-`✅ <b>RESET XONG</b>
-────────────────
-🔑 <code>${esc(k.id)}</code>
-📱 Đã xóa hết thiết bị cũ
-⏱ Hạn key: <b>${exp}</b> (không đổi)
-👉 Đăng nhập lại trên web (tối đa ${k.deviceLimit || 3} máy)`);
+`âœ… <b>RESET XONG</b>
+â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+ðŸ”‘ <code>${esc(k.id)}</code>
+ðŸ“± ÄÃ£ xÃ³a háº¿t thiáº¿t bá»‹ cÅ©
+â± Háº¡n key: <b>${exp}</b> (khÃ´ng Ä‘á»•i)
+ðŸ‘‰ ÄÄƒng nháº­p láº¡i trÃªn web (tá»‘i Ä‘a ${k.deviceLimit || 3} mÃ¡y)`);
     }
 
     if (cmd === 'tiktok') {
-      if (!argText) return send(chatId, '📌 <code>/tiktok @user</code>\nhoặc link profile');
-      await send(chatId, '⏳ Đang lấy info TikTok...');
+      if (!argText) return send(chatId, 'ðŸ“Œ <code>/tiktok @user</code>\nhoáº·c link profile');
+      await send(chatId, 'â³ Äang láº¥y info TikTok...');
       try {
         const info = await lookupTikTok(argText);
-        const fmtN = n => n == null ? '—' : Number(n).toLocaleString('vi-VN');
-        const created = info.createTime ? new Date(info.createTime).toLocaleString('vi-VN') : '—';
+        const fmtN = n => n == null ? 'â€”' : Number(n).toLocaleString('vi-VN');
+        const created = info.createTime ? new Date(info.createTime).toLocaleString('vi-VN') : 'â€”';
         const text =
-`📱 <b>TIKTOK INFO</b>
-────────────────
-👤 <b>${esc(info.nickname)}</b> ${info.verified ? '✅' : ''}
-🆔 @${esc(info.username)}
-${info.private ? '🔒 Private' : '🌐 Public'}
-📝 ${esc((info.bio || '—').slice(0, 160))}
+`ðŸ“± <b>TIKTOK INFO</b>
+â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+ðŸ‘¤ <b>${esc(info.nickname)}</b> ${info.verified ? 'âœ…' : ''}
+ðŸ†” @${esc(info.username)}
+${info.private ? 'ðŸ”’ Private' : 'ðŸŒ Public'}
+ðŸ“ ${esc((info.bio || 'â€”').slice(0, 160))}
 
-👥 Followers: <b>${fmtN(info.followers)}</b>
-➡️ Following: <b>${fmtN(info.following)}</b>
-❤️ Likes: <b>${fmtN(info.likes)}</b>
-🎬 Videos: <b>${fmtN(info.videos)}</b>
-📅 Tạo: ${created}
-🔗 ${info.profileUrl}`;
+ðŸ‘¥ Followers: <b>${fmtN(info.followers)}</b>
+âž¡ï¸ Following: <b>${fmtN(info.following)}</b>
+â¤ï¸ Likes: <b>${fmtN(info.likes)}</b>
+ðŸŽ¬ Videos: <b>${fmtN(info.videos)}</b>
+ðŸ“… Táº¡o: ${created}
+ðŸ”— ${info.profileUrl}`;
         if (info.avatar) {
           try {
             await sendPhoto(chatId, info.avatar, { caption: text });
@@ -1909,23 +1958,23 @@ ${info.private ? '🔒 Private' : '🌐 Public'}
         }
         return send(chatId, text);
       } catch (e) {
-        return send(chatId, `❌ ${e.message}`);
+        return send(chatId, `âŒ ${e.message}`);
       }
     }
 
     if (cmd === 'fb' || cmd === 'facebook') {
-      if (!argText) return send(chatId, '📌 <code>/fb username</code>\nhoặc link profile');
-      await send(chatId, '⏳ Đang lấy info Facebook...');
+      if (!argText) return send(chatId, 'ðŸ“Œ <code>/fb username</code>\nhoáº·c link profile');
+      await send(chatId, 'â³ Äang láº¥y info Facebook...');
       try {
         const info = await lookupFacebook(argText);
-        const fmtN = n => n == null ? '—' : Number(n).toLocaleString('vi-VN');
+        const fmtN = n => n == null ? 'â€”' : Number(n).toLocaleString('vi-VN');
         const text =
-`📘 <b>FACEBOOK INFO</b>
-────────────────
-👤 <b>${esc(info.author)}</b>
-📝 ${esc((info.bio || '—').slice(0, 180))}
-👥 Followers/Likes: <b>${fmtN(info.followers ?? info.likes)}</b>
-🔗 ${esc(info.url)}`;
+`ðŸ“˜ <b>FACEBOOK INFO</b>
+â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+ðŸ‘¤ <b>${esc(info.author)}</b>
+ðŸ“ ${esc((info.bio || 'â€”').slice(0, 180))}
+ðŸ‘¥ Followers/Likes: <b>${fmtN(info.followers ?? info.likes)}</b>
+ðŸ”— ${esc(info.url)}`;
         if (info.avatar) {
           try {
             await sendPhoto(chatId, info.avatar, { caption: text });
@@ -1934,12 +1983,12 @@ ${info.private ? '🔒 Private' : '🌐 Public'}
         }
         return send(chatId, text);
       } catch (e) {
-        return send(chatId, `❌ ${e.message}`);
+        return send(chatId, `âŒ ${e.message}`);
       }
     }
 
     if (text.startsWith('/')) {
-      return send(chatId, '❓ Gõ /start xem lệnh.');
+      return send(chatId, 'â“ GÃµ /start xem lá»‡nh.');
     }
   }
 
@@ -1948,7 +1997,7 @@ ${info.private ? '🔒 Private' : '🌐 Public'}
   options.reviewRequest = function (id, approved, reviewer) {
     const req = (options.getRequests ? options.getRequests() : []).find(r => r.id === id);
     if (req && req.type === 'reset') {
-      if (!req || req.status !== 'pending') return { ok: false, error: 'Yêu cầu đã xử lý hoặc không tồn tại.' };
+      if (!req || req.status !== 'pending') return { ok: false, error: 'YÃªu cáº§u Ä‘Ã£ xá»­ lÃ½ hoáº·c khÃ´ng tá»“n táº¡i.' };
       req.status = approved ? 'approved' : 'rejected';
       req.reviewedAt = Date.now();
       req.reviewer = String(reviewer || 'admin');
@@ -1992,10 +2041,10 @@ ${info.private ? '🔒 Private' : '🌐 Public'}
 
   const bot = {
     sendKeyToUser: async (telegramId, key, meta = {}) => send(telegramId,
-`✅ <b>KEY VIP</b>
-🔑 <code>${key}</code>
-📦 ${esc(meta.label || 'VIP')} · ⏱ ${meta.durationHours || 5}h
-📱 3 thiết bị`),
+`âœ… <b>KEY VIP</b>
+ðŸ”‘ <code>${key}</code>
+ðŸ“¦ ${esc(meta.label || 'VIP')} Â· â± ${meta.durationHours || 5}h
+ðŸ“± 3 thiáº¿t bá»‹`),
     sendTextToUser: async (telegramId, text) => send(telegramId, text),
     notifyAdmins,
     stop: () => { stopped = true; }
@@ -2079,13 +2128,13 @@ function publicKeyInfo(k) {
 function createKey({ key: requestedKey = '', label = 'Key VIP', durationHours = 0, expiresAt = null, deviceLimit = 3, source = 'admin', telegramId = null } = {}) {
   let plain = String(requestedKey || '').trim();
   if (!plain) plain = newPlainKey();
-  if (plain.length < 5 || plain.length > 120) throw new Error('Key phải có độ dài từ 5 đến 120 ký tự.');
-  if (findKey(plain)) throw new Error('Key đã tồn tại.');
+  if (plain.length < 5 || plain.length > 120) throw new Error('Key pháº£i cÃ³ Ä‘á»™ dÃ i tá»« 5 Ä‘áº¿n 120 kÃ½ tá»±.');
+  if (findKey(plain)) throw new Error('Key Ä‘Ã£ tá»“n táº¡i.');
   const hours = Math.max(0, Number(durationHours || 0));
   let expiry = null;
   if (expiresAt !== null && expiresAt !== undefined && expiresAt !== '') {
     const parsed = typeof expiresAt === 'number' ? expiresAt : new Date(expiresAt).getTime();
-    if (!Number.isFinite(parsed) || parsed <= Date.now()) throw new Error('Ngày hết hạn không hợp lệ hoặc đã ở quá khứ.');
+    if (!Number.isFinite(parsed) || parsed <= Date.now()) throw new Error('NgÃ y háº¿t háº¡n khÃ´ng há»£p lá»‡ hoáº·c Ä‘Ã£ á»Ÿ quÃ¡ khá»©.');
     expiry = parsed;
   } else if (hours > 0) expiry = Date.now() + hours * 60 * 60 * 1000;
   const limit = Math.max(1, Math.min(100, Math.floor(Number(deviceLimit || 1))));
@@ -2134,28 +2183,28 @@ function bearerToken(req) {
 }
 function requireUser(req, res, next) {
   const payload = verifyToken(bearerToken(req));
-  if (!payload || payload.type !== 'user') return res.status(401).json({ error: 'Phiên đăng nhập không hợp lệ hoặc đã hết hạn.' });
+  if (!payload || payload.type !== 'user') return res.status(401).json({ error: 'PhiÃªn Ä‘Äƒng nháº­p khÃ´ng há»£p lá»‡ hoáº·c Ä‘Ã£ háº¿t háº¡n.' });
   const k = keys.find(item => item.id === payload.keyId);
-  if (!k || k.status === 'revoked' || isExpired(k)) return res.status(401).json({ error: 'Key đã hết hạn hoặc bị thu hồi.' });
-  if (payload.deviceHash && !(k.deviceHashes || []).includes(payload.deviceHash)) return res.status(401).json({ error: 'Thiết bị không còn được cấp quyền sử dụng key.' });
+  if (!k || k.status === 'revoked' || isExpired(k)) return res.status(401).json({ error: 'Key Ä‘Ã£ háº¿t háº¡n hoáº·c bá»‹ thu há»“i.' });
+  if (payload.deviceHash && !(k.deviceHashes || []).includes(payload.deviceHash)) return res.status(401).json({ error: 'Thiáº¿t bá»‹ khÃ´ng cÃ²n Ä‘Æ°á»£c cáº¥p quyá»n sá»­ dá»¥ng key.' });
   req.user = payload; req.userKey = k; next();
 }
 function requireAdmin(req, res, next) {
   const payload = verifyToken(bearerToken(req));
-  if (!payload || payload.type !== 'admin') return res.status(401).json({ error: 'Yêu cầu quyền admin.' });
+  if (!payload || payload.type !== 'admin') return res.status(401).json({ error: 'YÃªu cáº§u quyá»n admin.' });
   next();
 }
 
 // ---------- configurable game feeds ----------
 const DEFAULT_GAMES = [
   { id: 'sunwin', label: 'Sunwin', url: 'https://apisunwin-cocalhahaha.onrender.com/api/sunwin', parser: 'sunwin', enabled: true },
-  { id: 'lc79_hu', label: 'LC79 · Hũ', url: 'https://wtx.tele68.com/v1/tx/sessions', parser: 'lc79', enabled: true },
-  { id: 'lc79_md5', label: 'LC79 · MD5', url: 'https://wtxmd52.tele68.com/v1/txmd5/sessions', parser: 'lc79', enabled: true },
+  { id: 'lc79_hu', label: 'LC79 Â· HÅ©', url: 'https://wtx.tele68.com/v1/tx/sessions', parser: 'lc79', enabled: true },
+  { id: 'lc79_md5', label: 'LC79 Â· MD5', url: 'https://wtxmd52.tele68.com/v1/txmd5/sessions', parser: 'lc79', enabled: true },
   { id: 'baccarat', label: 'Baccarat', url: 'https://bcrsexy.onrender.com/api/baccarat', parser: 'baccarat', enabled: true, table: '' }
 ];
 let gameConfigs = loadJSON(GAMES_FILE, null);
 if (!Array.isArray(gameConfigs)) gameConfigs = DEFAULT_GAMES.map(g => ({ ...g }));
-// đảm bảo có game baccarat nếu bản cũ chưa có
+// Ä‘áº£m báº£o cÃ³ game baccarat náº¿u báº£n cÅ© chÆ°a cÃ³
 if (!gameConfigs.some(g => g.parser === 'baccarat' || g.id === 'baccarat')) {
   const bac = DEFAULT_GAMES.find(g => g.id === 'baccarat');
   if (bac) gameConfigs.push({ ...bac });
@@ -2215,7 +2264,7 @@ function parseFeedData(feed, data) {
 }
 
 function parseBaccarat(data, tableFilter) {
-  // API thật: { success:true, data:[ { table:"7", result:"PPBBB...", shoeId, round } ] }
+  // API tháº­t: { success:true, data:[ { table:"7", result:"PPBBB...", shoeId, round } ] }
   let rows = [];
   if (Array.isArray(data)) rows = data;
   else if (Array.isArray(data?.data)) rows = data.data;
@@ -2234,7 +2283,7 @@ function parseBaccarat(data, tableFilter) {
     });
   }
   if (!row) {
-    // bàn có chuỗi kết quả dài nhất (đủ data để đoán)
+    // bÃ n cÃ³ chuá»—i káº¿t quáº£ dÃ i nháº¥t (Ä‘á»§ data Ä‘á»ƒ Ä‘oÃ¡n)
     row = rows.slice().sort((a, b) => resultStr(b).length - resultStr(a).length)[0];
   }
   if (!row) return [];
@@ -2246,7 +2295,7 @@ function parseBaccarat(data, tableFilter) {
   const tableName = tableId(row) || 'Baccarat';
   const shoe = String(row.shoeId || row.shoe || '');
 
-  // mỗi ký tự = 1 phiên; session ổn định theo table + index + shoe
+  // má»—i kÃ½ tá»± = 1 phiÃªn; session á»•n Ä‘á»‹nh theo table + index + shoe
   const list = [];
   for (let i = 0; i < results.length; i++) {
     list.push({
@@ -2257,7 +2306,7 @@ function parseBaccarat(data, tableFilter) {
       table: tableName
     });
   }
-  // mới nhất ở đầu
+  // má»›i nháº¥t á»Ÿ Ä‘áº§u
   return list.reverse();
 }
 function nextSessionNumber(session) {
@@ -2295,7 +2344,7 @@ async function pollFeed(id) {
     if (!response.ok) throw new Error('HTTP ' + response.status);
     const data = await response.json();
     const list = parseFeedData(f, data);
-    if (!list.length) throw new Error('API không trả về danh sách phiên phù hợp');
+    if (!list.length) throw new Error('API khÃ´ng tráº£ vá» danh sÃ¡ch phiÃªn phÃ¹ há»£p');
     const latest = list[0];
     if (sessionEquals(f.lastSession, latest.session)) { f.lastError = null; return; }
     const seen = new Set((f._seen || []).map(String));
@@ -2335,8 +2384,8 @@ async function pollFeed(id) {
     f.lastEnsemble = ensemble;
     const pr = String(ensemble.predictedResult || '').toUpperCase();
     let predicted = 'X';
-    if (pr === 'TÀI' || pr === 'TAI' || pr === 'T') predicted = 'T';
-    else if (pr === 'XỈU' || pr === 'XIU' || pr === 'X') predicted = 'X';
+    if (pr === 'TÃ€I' || pr === 'TAI' || pr === 'T') predicted = 'T';
+    else if (pr === 'Xá»ˆU' || pr === 'XIU' || pr === 'X') predicted = 'X';
     else if (pr === 'BANKER' || pr === 'B' || pr === 'CAI') predicted = 'B';
     else if (pr === 'PLAYER' || pr === 'P' || pr === 'CON') predicted = 'P';
     else if (f.parser === 'baccarat') predicted = 'B';
@@ -2361,16 +2410,16 @@ function saveState() {
 // ---------- bot settings and moderation queue ----------
 let botSettings = loadJSON(SETTINGS_FILE, null) || {
   telegramUsername: '',
-  groupTaskText: 'Cần rải quảng cáo vào 3 nhóm bất kì.\n\n📌 Cách làm:\n1) Sao chép câu promo admin cung cấp\n2) Vào 3 nhóm bất kì và gửi tin nhắn\n3) Chụp màn hình 3 tin nhắn vừa gửi\n4) Gửi 3 ảnh vào đây cho Bot duyệt\n\n⚠️ Lưu ý:\n- Ảnh rõ, thể hiện đã gửi thành công\n- Phải đủ 3 ảnh từ 3 nhóm khác nhau',
-  groupPromoText: '@SunNetWin tool dự đoán TX VIP — getkey miễn phí, hỗ trợ 24/7',
+  groupTaskText: 'Cáº§n ráº£i quáº£ng cÃ¡o vÃ o 3 nhÃ³m báº¥t kÃ¬.\n\nðŸ“Œ CÃ¡ch lÃ m:\n1) Sao chÃ©p cÃ¢u promo admin cung cáº¥p\n2) VÃ o 3 nhÃ³m báº¥t kÃ¬ vÃ  gá»­i tin nháº¯n\n3) Chá»¥p mÃ n hÃ¬nh 3 tin nháº¯n vá»«a gá»­i\n4) Gá»­i 3 áº£nh vÃ o Ä‘Ã¢y cho Bot duyá»‡t\n\nâš ï¸ LÆ°u Ã½:\n- áº¢nh rÃµ, thá»ƒ hiá»‡n Ä‘Ã£ gá»­i thÃ nh cÃ´ng\n- Pháº£i Ä‘á»§ 3 áº£nh tá»« 3 nhÃ³m khÃ¡c nhau',
+  groupPromoText: '@SunNetWin tool dá»± Ä‘oÃ¡n TX VIP â€” getkey miá»…n phÃ­, há»— trá»£ 24/7',
   groupTaskPhotos: 3,
   groupTaskTimeoutSec: 300,
   supportUrl: 'https://t.me/SunNetWin',
-  watermarkText: 'SunWin · MD5 · HitClub · Tool tưng tửng',
-  siteTitle: 'Tool tưng tửng',
+  watermarkText: 'SunWin Â· MD5 Â· HitClub Â· Tool tÆ°ng tá»­ng',
+  siteTitle: 'Tool tÆ°ng tá»­ng',
   maintenance: {
     enabled: false,
-    message: 'Hệ thống đang bảo trì, vui lòng quay lại sau.',
+    message: 'Há»‡ thá»‘ng Ä‘ang báº£o trÃ¬, vui lÃ²ng quay láº¡i sau.',
     lockedGames: [],
     lockedCommands: []
   },
@@ -2387,16 +2436,16 @@ function normalizeSettings(value) {
   })).filter(p => p.id && p.label && p.price > 0 && p.durationHours > 0) : [];
   if (!plans.length) {
     plans = [
-      { id: '1d', label: '1 ngày', price: 3000, durationHours: 24, active: true },
-      { id: '3d', label: '3 ngày', price: 7000, durationHours: 72, active: true },
-      { id: '1w', label: '1 tuần', price: 15000, durationHours: 168, active: true },
-      { id: '1m', label: '1 tháng', price: 40000, durationHours: 720, active: true },
-      { id: '2m', label: '2 tháng', price: 70000, durationHours: 1440, active: true },
-      { id: 'lifetime', label: 'Vĩnh viễn', price: 100000, durationHours: 87600, active: true }
+      { id: '1d', label: '1 ngÃ y', price: 3000, durationHours: 24, active: true },
+      { id: '3d', label: '3 ngÃ y', price: 7000, durationHours: 72, active: true },
+      { id: '1w', label: '1 tuáº§n', price: 15000, durationHours: 168, active: true },
+      { id: '1m', label: '1 thÃ¡ng', price: 40000, durationHours: 720, active: true },
+      { id: '2m', label: '2 thÃ¡ng', price: 70000, durationHours: 1440, active: true },
+      { id: 'lifetime', label: 'VÄ©nh viá»…n', price: 100000, durationHours: 87600, active: true }
     ];
   }
   const ids = new Set();
-  for (const plan of plans) { if (ids.has(plan.id)) throw new Error('Mã gói bị trùng: ' + plan.id); ids.add(plan.id); }
+  for (const plan of plans) { if (ids.has(plan.id)) throw new Error('MÃ£ gÃ³i bá»‹ trÃ¹ng: ' + plan.id); ids.add(plan.id); }
   return {
     telegramUsername: String(v.telegramUsername || '').trim().replace(/^@/, '').replace(/[^a-zA-Z0-9_]/g, '').slice(0, 64),
     groupTaskText: String(v.groupTaskText || '').slice(0, 2000),
@@ -2404,11 +2453,11 @@ function normalizeSettings(value) {
     groupTaskPhotos: Math.min(10, Math.max(1, Number(v.groupTaskPhotos) || 3)),
     groupTaskTimeoutSec: Math.min(3600, Math.max(60, Number(v.groupTaskTimeoutSec) || 300)),
     supportUrl: String(v.supportUrl || 'https://t.me/SunNetWin').trim().slice(0, 200),
-    watermarkText: String(v.watermarkText || 'SunWin · MD5 · HitClub · Tool tưng tửng').trim().slice(0, 300),
-    siteTitle: String(v.siteTitle || 'Tool tưng tửng').trim().slice(0, 80),
+    watermarkText: String(v.watermarkText || 'SunWin Â· MD5 Â· HitClub Â· Tool tÆ°ng tá»­ng').trim().slice(0, 300),
+    siteTitle: String(v.siteTitle || 'Tool tÆ°ng tá»­ng').trim().slice(0, 80),
     maintenance: {
       enabled: !!(v.maintenance && v.maintenance.enabled),
-      message: String((v.maintenance && v.maintenance.message) || 'Hệ thống đang bảo trì, vui lòng quay lại sau.').slice(0, 500),
+      message: String((v.maintenance && v.maintenance.message) || 'Há»‡ thá»‘ng Ä‘ang báº£o trÃ¬, vui lÃ²ng quay láº¡i sau.').slice(0, 500),
       lockedGames: Array.isArray(v.maintenance && v.maintenance.lockedGames)
         ? v.maintenance.lockedGames.map(x => String(x).trim().toLowerCase()).filter(Boolean).slice(0, 50)
         : [],
@@ -2442,8 +2491,8 @@ function markDelivered(id) {
 }
 function reviewRequest(id, approved, reviewer) {
   const request = botRequests.find(r => r.id === id);
-  if (!request) return { ok: false, error: 'Không tìm thấy yêu cầu.' };
-  if (request.status !== 'pending') return { ok: false, error: 'Yêu cầu này đã được xử lý.' };
+  if (!request) return { ok: false, error: 'KhÃ´ng tÃ¬m tháº¥y yÃªu cáº§u.' };
+  if (request.status !== 'pending') return { ok: false, error: 'YÃªu cáº§u nÃ y Ä‘Ã£ Ä‘Æ°á»£c xá»­ lÃ½.' };
   request.status = approved ? 'approved' : 'rejected'; request.reviewedAt = Date.now(); request.reviewer = String(reviewer || 'admin');
   let issued = null;
   if (approved && request.type === 'reset') {
@@ -2451,7 +2500,7 @@ function reviewRequest(id, approved, reviewer) {
     if (k) { k.deviceHashes = []; saveKeys(); }
   } else if (approved) {
     const hours = Math.max(1, Number(request.durationHours || 5));
-    issued = createKey({ label: `${request.planLabel || 'Key free'} · TG ${request.telegramId}`, durationHours: hours, deviceLimit: 3,
+    issued = createKey({ label: `${request.planLabel || 'Key free'} Â· TG ${request.telegramId}`, durationHours: hours, deviceLimit: 3,
       source: request.type === 'payment' ? 'telegram-payment' : 'telegram-group', telegramId: request.telegramId });
     request.issuedKey = issued.plainKey;
     request.issuedKeyExpiresAt = issued.record.expiresAt;
@@ -2464,10 +2513,10 @@ function reviewRequest(id, approved, reviewer) {
 app.get('/api/health', (req, res) => res.json({ ok: true, time: Date.now(), games: Object.keys(FEEDS) }));
 app.get('/api/public/config', (req, res) => {
   const games = (Array.isArray(gameConfigs) ? gameConfigs : []).map(g => g.label || g.id).filter(Boolean);
-  const wm = botSettings.watermarkText || (games.length ? games.join(' · ') + ' · Tool tưng tửng' : 'Tool tưng tửng');
+  const wm = botSettings.watermarkText || (games.length ? games.join(' Â· ') + ' Â· Tool tÆ°ng tá»­ng' : 'Tool tÆ°ng tá»­ng');
   res.json({
     brand: BRAND,
-    siteTitle: botSettings.siteTitle || 'Tool tưng tửng',
+    siteTitle: botSettings.siteTitle || 'Tool tÆ°ng tá»­ng',
     telegramUsername: botSettings.telegramUsername || '',
     telegramUrl: botSettings.telegramUsername ? `https://t.me/${botSettings.telegramUsername}` : '',
     supportUrl: botSettings.supportUrl || 'https://t.me/SunNetWin',
@@ -2484,17 +2533,17 @@ app.get('/api/public/config', (req, res) => {
   });
 });
 app.post('/api/auth', (req, res) => {
-  if (!rateLimit(req.ip)) return res.status(429).json({ error: 'Bạn thử quá nhiều lần. Vui lòng đợi 1 phút.' });
+  if (!rateLimit(req.ip)) return res.status(429).json({ error: 'Báº¡n thá»­ quÃ¡ nhiá»u láº§n. Vui lÃ²ng Ä‘á»£i 1 phÃºt.' });
   const plain = String(req.body?.key || '').trim();
-  if (!plain) return res.status(400).json({ error: 'Vui lòng nhập key VIP.' });
+  if (!plain) return res.status(400).json({ error: 'Vui lÃ²ng nháº­p key VIP.' });
   const found = findKey(plain);
-  if (!found || found.status === 'revoked') return res.status(401).json({ error: 'Key không hợp lệ hoặc đã bị thu hồi.' });
-  if (isExpired(found)) return res.status(401).json({ error: 'Key đã hết hạn. Hãy nhận hoặc mua key mới trên Telegram.' });
+  if (!found || found.status === 'revoked') return res.status(401).json({ error: 'Key khÃ´ng há»£p lá»‡ hoáº·c Ä‘Ã£ bá»‹ thu há»“i.' });
+  if (isExpired(found)) return res.status(401).json({ error: 'Key Ä‘Ã£ háº¿t háº¡n. HÃ£y nháº­n hoáº·c mua key má»›i trÃªn Telegram.' });
   const deviceId = String(req.body?.deviceId || '').trim();
-  if (!deviceId || deviceId.length > 200) return res.status(400).json({ error: 'Không xác định được thiết bị. Hãy tải lại trang và thử lại.' });
+  if (!deviceId || deviceId.length > 200) return res.status(400).json({ error: 'KhÃ´ng xÃ¡c Ä‘á»‹nh Ä‘Æ°á»£c thiáº¿t bá»‹. HÃ£y táº£i láº¡i trang vÃ  thá»­ láº¡i.' });
   const deviceHash = sha256(deviceId);
   if (!found.deviceHashes.includes(deviceHash)) {
-    if (found.deviceHashes.length >= Math.max(1, Number(found.deviceLimit || 1))) return res.status(403).json({ error: `Key đã đạt giới hạn ${found.deviceLimit || 1} thiết bị.` });
+    if (found.deviceHashes.length >= Math.max(1, Number(found.deviceLimit || 1))) return res.status(403).json({ error: `Key Ä‘Ã£ Ä‘áº¡t giá»›i háº¡n ${found.deviceLimit || 1} thiáº¿t bá»‹.` });
     found.deviceHashes.push(deviceHash);
   }
   found.lastUsed = Date.now(); found.uses = Number(found.uses || 0) + 1; saveKeys();
@@ -2505,9 +2554,9 @@ app.post('/api/auth', (req, res) => {
   res.json({ token, expiresIn: exp - Date.now(), label: found.label, expiresAt: found.expiresAt || null, deviceLimit: found.deviceLimit || 1 });
 });
 app.post('/api/admin/login', (req, res) => {
-  if (!rateLimit(req.ip)) return res.status(429).json({ error: 'Bạn thử quá nhiều lần. Vui lòng đợi 1 phút.' });
+  if (!rateLimit(req.ip)) return res.status(429).json({ error: 'Báº¡n thá»­ quÃ¡ nhiá»u láº§n. Vui lÃ²ng Ä‘á»£i 1 phÃºt.' });
   const password = String(req.body?.password || '');
-  if (!secureEqual(password, ADMIN_PASSWORD)) return res.status(401).json({ error: 'Mật khẩu admin không đúng.' });
+  if (!secureEqual(password, ADMIN_PASSWORD)) return res.status(401).json({ error: 'Máº­t kháº©u admin khÃ´ng Ä‘Ãºng.' });
   const token = sign({ type: 'admin', exp: Date.now() + TOKEN_TTL_MS });
   logLine('admin login ok');
   res.json({ token, expiresIn: TOKEN_TTL_MS });
@@ -2518,11 +2567,11 @@ app.get('/api/games', requireUser, (req, res) => res.json({ games: gameConfigs.f
 app.get('/api/me', requireUser, (req, res) => res.json({ label: req.userKey.label, expiresAt: req.userKey.expiresAt || null, deviceLimit: req.userKey.deviceLimit || 1 }));
 app.get('/api/predict', requireUser, (req, res) => {
   const f = FEEDS[req.query.game];
-  if (!f || !f.enabled) return res.status(400).json({ error: 'Game không tồn tại hoặc đang tắt.' });
+  if (!f || !f.enabled) return res.status(400).json({ error: 'Game khÃ´ng tá»“n táº¡i hoáº·c Ä‘ang táº¯t.' });
   const mt = botSettings.maintenance || {};
   const gid = String(req.query.game || '').toLowerCase();
   if (mt.enabled && Array.isArray(mt.lockedGames) && mt.lockedGames.map(String).map(s=>s.toLowerCase()).includes(gid)) {
-    return res.status(503).json({ error: mt.message || 'Game đang bảo trì.', maintenance: true });
+    return res.status(503).json({ error: mt.message || 'Game Ä‘ang báº£o trÃ¬.', maintenance: true });
   }
   const ensemble = f.engine.getEnsemblePrediction();
   const ms = f.engine.marketState || ensemble.market || {};
@@ -2547,11 +2596,11 @@ app.get('/api/predict', requireUser, (req, res) => {
   });
 });
 app.get('/api/live', requireUser, (req, res) => {
-  const f = FEEDS[req.query.game]; if (!f || !f.enabled) return res.status(400).json({ error: 'Game không tồn tại hoặc đang tắt.' });
+  const f = FEEDS[req.query.game]; if (!f || !f.enabled) return res.status(400).json({ error: 'Game khÃ´ng tá»“n táº¡i hoáº·c Ä‘ang táº¯t.' });
   res.json({ live: f.lastLive || null, nextSession: f.lastLive && Number.isFinite(Number(f.lastLive.session)) ? Number(f.lastLive.session) + 1 : null });
 });
 app.get('/api/history', requireUser, (req, res) => {
-  const f = FEEDS[req.query.game]; if (!f || !f.enabled) return res.status(400).json({ error: 'Game không tồn tại hoặc đang tắt.' });
+  const f = FEEDS[req.query.game]; if (!f || !f.enabled) return res.status(400).json({ error: 'Game khÃ´ng tá»“n táº¡i hoáº·c Ä‘ang táº¯t.' });
   const limit = Math.min(5000, Math.max(1, parseInt(req.query.limit, 10) || 50));
   const accLimit = Math.min(100, Math.max(1, parseInt(req.query.accLimit, 10) || 30));
   res.json({
@@ -2569,11 +2618,11 @@ app.post('/api/admin/keys', requireAdmin, (req, res) => {
     const result = createKey({ key: req.body?.key || '', label: req.body?.label || 'Key VIP', durationHours: req.body?.durationHours || 0,
       expiresAt: req.body?.expiresAt ?? null, deviceLimit: req.body?.deviceLimit || 3, source: 'admin' });
     res.json({ ok: true, key: result.plainKey, keyInfo: publicKeyInfo(result.record) });
-  } catch (e) { res.status(400).json({ error: e.message || 'Không tạo được key.' }); }
+  } catch (e) { res.status(400).json({ error: e.message || 'KhÃ´ng táº¡o Ä‘Æ°á»£c key.' }); }
 });
 app.patch('/api/admin/keys/:id', requireAdmin, (req, res) => {
   const key = keys.find(k => k.id === req.params.id);
-  if (!key) return res.status(404).json({ error: 'Không tìm thấy key.' });
+  if (!key) return res.status(404).json({ error: 'KhÃ´ng tÃ¬m tháº¥y key.' });
   try {
     if (req.body?.label !== undefined) key.label = String(req.body.label || 'Key VIP').slice(0, 120);
     if (req.body?.deviceLimit !== undefined) key.deviceLimit = Math.max(1, Math.min(100, Math.floor(Number(req.body.deviceLimit || 1))));
@@ -2584,7 +2633,7 @@ app.patch('/api/admin/keys/:id', requireAdmin, (req, res) => {
       if (req.body.expiresAt === null || req.body.expiresAt === '') key.expiresAt = null;
       else {
         const date = typeof req.body.expiresAt === 'number' ? req.body.expiresAt : new Date(req.body.expiresAt).getTime();
-        if (!Number.isFinite(date) || date <= Date.now()) throw new Error('Ngày hết hạn phải ở tương lai.');
+        if (!Number.isFinite(date) || date <= Date.now()) throw new Error('NgÃ y háº¿t háº¡n pháº£i á»Ÿ tÆ°Æ¡ng lai.');
         key.expiresAt = date;
       }
     }
@@ -2594,12 +2643,12 @@ app.patch('/api/admin/keys/:id', requireAdmin, (req, res) => {
 });
 app.post('/api/admin/keys/:id/reset-devices', requireAdmin, (req, res) => {
   const key = keys.find(k => k.id === req.params.id);
-  if (!key) return res.status(404).json({ error: 'Không tìm thấy key.' });
+  if (!key) return res.status(404).json({ error: 'KhÃ´ng tÃ¬m tháº¥y key.' });
   key.deviceHashes = []; saveKeys(); logLine('reset devices for key ' + key.id); res.json({ ok: true });
 });
 app.delete('/api/admin/keys/:id', requireAdmin, (req, res) => {
   const key = keys.find(k => k.id === req.params.id);
-  if (!key) return res.status(404).json({ error: 'Không tìm thấy key.' });
+  if (!key) return res.status(404).json({ error: 'KhÃ´ng tÃ¬m tháº¥y key.' });
   key.status = 'revoked'; saveKeys(); logLine(`key revoked: ${key.label}`); res.json({ ok: true });
 });
 
@@ -2610,21 +2659,21 @@ app.post('/api/admin/games', requireAdmin, (req, res) => {
   const label = String(req.body?.label || '').trim();
   const url = String(req.body?.url || '').trim();
   const parser = ['sunwin','baccarat'].includes(req.body?.parser) ? req.body.parser : 'lc79';
-  if (!/^[a-z0-9_-]{2,32}$/.test(id)) return res.status(400).json({ error: 'Mã game chỉ gồm chữ thường, số, _ hoặc - (2–32 ký tự).' });
-  if (gameConfigs.some(g => g.id === id)) return res.status(409).json({ error: 'Mã game đã tồn tại.' });
-  if (!label) return res.status(400).json({ error: 'Hãy nhập tên game.' });
-  if (!validHttpUrl(url)) return res.status(400).json({ error: 'API phải là URL HTTP hoặc HTTPS hợp lệ.' });
+  if (!/^[a-z0-9_-]{2,32}$/.test(id)) return res.status(400).json({ error: 'MÃ£ game chá»‰ gá»“m chá»¯ thÆ°á»ng, sá»‘, _ hoáº·c - (2â€“32 kÃ½ tá»±).' });
+  if (gameConfigs.some(g => g.id === id)) return res.status(409).json({ error: 'MÃ£ game Ä‘Ã£ tá»“n táº¡i.' });
+  if (!label) return res.status(400).json({ error: 'HÃ£y nháº­p tÃªn game.' });
+  if (!validHttpUrl(url)) return res.status(400).json({ error: 'API pháº£i lÃ  URL HTTP hoáº·c HTTPS há»£p lá»‡.' });
   const config = { id, label: label.slice(0, 80), url, parser, table: String(req.body?.table || '').slice(0, 80), enabled: req.body?.enabled !== false };
   gameConfigs.push(config); saveGameConfigs(); FEEDS[id] = createFeed(config); logLine(`game added: ${id}`);
   res.json({ ok: true, game: config });
 });
 app.patch('/api/admin/games/:id', requireAdmin, (req, res) => {
   const config = gameConfigs.find(g => g.id === req.params.id);
-  if (!config) return res.status(404).json({ error: 'Không tìm thấy game.' });
+  if (!config) return res.status(404).json({ error: 'KhÃ´ng tÃ¬m tháº¥y game.' });
   const label = req.body?.label === undefined ? config.label : String(req.body.label || '').trim();
   const url = req.body?.url === undefined ? config.url : String(req.body.url || '').trim();
-  if (!label) return res.status(400).json({ error: 'Tên game không được để trống.' });
-  if (!validHttpUrl(url)) return res.status(400).json({ error: 'API phải là URL HTTP hoặc HTTPS hợp lệ.' });
+  if (!label) return res.status(400).json({ error: 'TÃªn game khÃ´ng Ä‘Æ°á»£c Ä‘á»ƒ trá»‘ng.' });
+  if (!validHttpUrl(url)) return res.status(400).json({ error: 'API pháº£i lÃ  URL HTTP hoáº·c HTTPS há»£p lá»‡.' });
   config.label = label.slice(0, 80); config.url = url;
   if (req.body?.parser !== undefined) config.parser = ['sunwin','baccarat'].includes(req.body.parser) ? req.body.parser : 'lc79';
   if (req.body?.table !== undefined) config.table = String(req.body.table || '').slice(0, 80);
@@ -2634,7 +2683,7 @@ app.patch('/api/admin/games/:id', requireAdmin, (req, res) => {
 });
 app.delete('/api/admin/games/:id', requireAdmin, (req, res) => {
   const i = gameConfigs.findIndex(g => g.id === req.params.id);
-  if (i < 0) return res.status(404).json({ error: 'Không tìm thấy game.' });
+  if (i < 0) return res.status(404).json({ error: 'KhÃ´ng tÃ¬m tháº¥y game.' });
   const [removed] = gameConfigs.splice(i, 1); delete FEEDS[removed.id]; saveGameConfigs(); saveState(); logLine(`game removed: ${removed.id}`); res.json({ ok: true });
 });
 
@@ -2651,19 +2700,19 @@ app.get('/api/admin/stats', requireAdmin, (req, res) => {
   res.json({ games, totalKeys: keys.filter(k => k.status !== 'revoked' && !isExpired(k)).length, totalKeysAll: keys.length, pendingRequests: botRequests.filter(r => r.status === 'pending').length });
 });
 app.get('/api/admin/history', requireAdmin, (req, res) => {
-  const f = FEEDS[req.query.game]; if (!f) return res.status(400).json({ error: 'Game không hợp lệ.' });
+  const f = FEEDS[req.query.game]; if (!f) return res.status(400).json({ error: 'Game khÃ´ng há»£p lá»‡.' });
   const limit = Math.min(5000, Math.max(1, parseInt(req.query.limit, 10) || 500));
   res.json({ game: req.query.game, history: f.history.slice(0, limit) });
 });
 app.get('/api/admin/accuracy', requireAdmin, (req, res) => {
-  const f = FEEDS[req.query.game]; if (!f) return res.status(400).json({ error: 'Game không hợp lệ.' });
+  const f = FEEDS[req.query.game]; if (!f) return res.status(400).json({ error: 'Game khÃ´ng há»£p lá»‡.' });
   const limit = Math.min(10000, Math.max(1, parseInt(req.query.limit, 10) || 10000));
   res.json({ game: req.query.game, history: f.accuracyHistory.slice(0, limit), correct: f.correct, total: f.total, accuracy: f.total ? +(f.correct / f.total * 100).toFixed(1) : null });
 });
 app.post('/api/admin/reset', requireAdmin, (req, res) => {
   const id = req.body?.game;
   const ids = id === 'all' ? Object.keys(FEEDS) : [id];
-  if (!ids.length || ids.some(k => !FEEDS[k])) return res.status(400).json({ error: 'Game không hợp lệ.' });
+  if (!ids.length || ids.some(k => !FEEDS[k])) return res.status(400).json({ error: 'Game khÃ´ng há»£p lá»‡.' });
   for (const gameId of ids) {
     const f = FEEDS[gameId]; f.engine = (f.parser === 'baccarat') ? new BaccaratEngine() : new Engine(); f.history = []; f.accuracyHistory = []; f.lastSession = null;
     f.pendingPred = null; f.lastLive = null; f.correct = 0; f.total = 0; f._seen = [];
@@ -2679,7 +2728,7 @@ app.get('/api/admin/logs', requireAdmin, (req, res) => {
 app.get('/api/admin/settings', requireAdmin, (req, res) => res.json({ settings: botSettings, telegramConfigured: !!process.env.TELEGRAM_BOT_TOKEN, adminsConfigured: !!String(process.env.TELEGRAM_ADMIN_IDS || '').trim() }));
 app.put('/api/admin/settings', requireAdmin, (req, res) => {
   try { botSettings = normalizeSettings({ ...botSettings, ...(req.body || {}) }); saveBotSettings(); logLine('bot settings updated'); res.json({ ok: true, settings: botSettings }); }
-  catch (e) { res.status(400).json({ error: e.message || 'Không lưu được cài đặt.' }); }
+  catch (e) { res.status(400).json({ error: e.message || 'KhÃ´ng lÆ°u Ä‘Æ°á»£c cÃ i Ä‘áº·t.' }); }
 });
 app.get('/api/admin/requests', requireAdmin, (req, res) => {
   const status = String(req.query.status || 'all');
@@ -2691,14 +2740,14 @@ app.post('/api/admin/requests/:id/review', requireAdmin, async (req, res) => {
   const result = reviewRequest(req.params.id, approved, 'web-admin');
   if (!result.ok) return res.status(400).json({ error: result.error });
   if (approved && result.key) {
-    if (!telegramBot) return res.status(503).json({ error: 'Bot Telegram chưa được khởi động; key đã tạo nhưng chưa gửi được.' });
+    if (!telegramBot) return res.status(503).json({ error: 'Bot Telegram chÆ°a Ä‘Æ°á»£c khá»Ÿi Ä‘á»™ng; key Ä‘Ã£ táº¡o nhÆ°ng chÆ°a gá»­i Ä‘Æ°á»£c.' });
     try {
       await telegramBot.sendKeyToUser(result.request.telegramId, result.key, result.meta || {});
       markDelivered(result.request.id);
-    } catch (e) { return res.status(502).json({ error: 'Đã duyệt nhưng không gửi được key qua Telegram: ' + e.message }); }
+    } catch (e) { return res.status(502).json({ error: 'ÄÃ£ duyá»‡t nhÆ°ng khÃ´ng gá»­i Ä‘Æ°á»£c key qua Telegram: ' + e.message }); }
   }
   if (!approved && telegramBot) {
-    try { await telegramBot.sendTextToUser(result.request.telegramId, `❌ Yêu cầu #${result.request.id} đã bị từ chối. Vui lòng kiểm tra lại chứng từ hoặc liên hệ admin.`); } catch {}
+    try { await telegramBot.sendTextToUser(result.request.telegramId, `âŒ YÃªu cáº§u #${result.request.id} Ä‘Ã£ bá»‹ tá»« chá»‘i. Vui lÃ²ng kiá»ƒm tra láº¡i chá»©ng tá»« hoáº·c liÃªn há»‡ admin.`); } catch {}
   }
   res.json({ ok: true, request: publicRequest(result.request) });
 });
@@ -2727,7 +2776,3 @@ if (process.env.TELEGRAM_BOT_TOKEN) {
 setInterval(() => { Promise.all(Object.keys(FEEDS).map(id => pollFeed(id))); }, POLL_MS);
 setInterval(saveState, 60000);
 Promise.all(Object.keys(FEEDS).map(id => pollFeed(id)));
-
-app.listen(PORT, () => {
-  logLine(`SERVER listening on port ${PORT}; admin password configured=${!!process.env.ADMIN_PASSWORD}; games=${Object.keys(FEEDS).length}`);
-});
