@@ -1158,10 +1158,11 @@ function startTelegramBot(options) {
   const idShort = () => crypto.randomBytes(5).toString('hex').toUpperCase();
   const esc = s => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const fmt = n => Number(n || 0).toLocaleString('vi-VN');
+  const ensureHttps = u => { let s = String(u || '').trim(); if (!s) return ''; if (!/^https?:\/\//i.test(s)) s = 'https://' + s; return s.replace(/\/+$/, ''); };
 
   // ─── USER MENU (command only, no buttons) ───────────────
   async function showStart(chatId, name, from) {
-    const base = String(process.env.PUBLIC_URL || process.env.WEB_URL || '').replace(/\/+$/, '');
+    const base = ensureHttps(process.env.PUBLIC_URL || process.env.WEB_URL || '');
     const admin = isAdmin(from && from.id);
     let text = '';
     text += '⚡ <b>TOOL TƯNG TỬNG</b>\n';
@@ -2195,8 +2196,8 @@ app.disable('x-powered-by');
 
 // The front-end can be hosted statically on Netlify. This server also serves it for local testing.
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
-app.get('/admin', (req, res) => res.sendFile(path.join(__dirname, 'public', 'admin.html')));
-app.get('/admin.html', (req, res) => res.sendFile(path.join(__dirname, 'public', 'admin.html')));
+app.get('/admin', (req, res) => { const f = path.join(__dirname, 'public', 'admin.html'); if (fs.existsSync(f)) res.sendFile(f); else res.send('Admin page not found. Upload public/admin.html.'); });
+app.get('/admin.html', (req, res) => { const f = path.join(__dirname, 'public', 'admin.html'); if (fs.existsSync(f)) res.sendFile(f); else res.send('Admin page not found.'); });
 
 const KEYS_FILE = path.join(DATA_DIR, 'keys.json');
 const STATE_FILE = path.join(DATA_DIR, 'state.json');
@@ -2860,7 +2861,10 @@ app.get('/api/health', (req, res) => res.json({ ok: true, time: Date.now(), game
 
 // ---------- Telegram Mini App helpers ----------
 function getPublicBase() {
-  return String(process.env.PUBLIC_URL || process.env.WEB_URL || '').replace(/\/+$/, '') || '';
+  let s = String(process.env.PUBLIC_URL || process.env.WEB_URL || '').trim();
+  if (!s) return '';
+  if (!/^https?:\/\//i.test(s)) s = 'https://' + s;
+  return s.replace(/\/+$/, '');
 }
 function isTelegramAdmin(tgId) {
   const ids = String(process.env.TELEGRAM_ADMIN_IDS || '').split(/[,\s]+/).map(s => s.trim()).filter(Boolean);
