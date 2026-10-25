@@ -1182,7 +1182,8 @@ function startTelegramBot(options) {
     text += '💬 Hỗ trợ @SunNetWin · /menu';
     const rows = [];
     if (base) {
-      const url = admin ? (base + '/admin') : (base + '/');
+      const adminBase = String(process.env.PUBLIC_ADMIN_URL || '').replace(/\/+$/, '') || (base + '/admin.html');
+      const url = admin ? adminBase : (base.endsWith('.html') ? base : base + '/');
       rows.push([{ text: admin ? '🛠 Mở Admin (Mini App)' : '🚀 Mở Tool (Mini App)', web_app: { url: url } }]);
     }
     if (admin) {
@@ -3267,6 +3268,133 @@ if (process.env.TELEGRAM_BOT_TOKEN) {
 setInterval(() => { Promise.all(Object.keys(FEEDS).map(id => pollFeed(id))); }, POLL_MS);
 setInterval(saveState, 60000);
 Promise.all(Object.keys(FEEDS).map(id => pollFeed(id)));
+
+
+// ---------- AUTO PAYMENT: VietQR orders + webhook (SePay/Casso/PayOS) ----------
+const ORDERS_FILE = path.join(DATA_DIR, 'orders.json');
+let orders = loadJSON(ORDERS_FILE, []);
+if (!Array.isArray(orders)) orders = [];
+const saveOrders = () => saveJSON(ORDERS_FILE, orders);
+
+function genOrderId() { return 'TT' + crypto.randomBytes(3).toString('hex').toUpperCase(); }
+
+function buildVietQr(amount, addInfo) {
+  const cfg = botSettings || {};
+  if (!cfg.bankCode || !cfg.bankAccount) return null;
+  return 'https://img.vietqr.io/image/' + encodeURIComponent(cfg.bankCode) + '-' + encodeURIComponent(cfg.bankAccount) + '-compact2.jpg?amount=' + encodeURIComponent(String(Math.round(Number(amount)||0))) + '&addInfo=' + encodeURIComponent(addInfo) + '&accountName=' + encodeURIComponent(cfg.bankAccountName || '');
+}
+
+async function tgSendMessage(chatId, text, extra) {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token || !chatId) return false;
+  try {
+    const r = await fetch('https://api.telegram.org/bot' + token + '/sendMessage', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(Object.assign({ chat_id: chatId, text: text, parse_mode: 'HTML', disable_web_page_preview: true }, extra || {}))
+    });
+    return r.ok;
+  } catch(e) { return false; }
+}
+
+async function fulfillOrder(order, transactionRef) {
+  if (order.status === 'paid') return order;
+  order.status = 'paid'; order.paidAt = Date.now(); order.transactionRef = transactionRef || '';
+  const plan = (botSettings.plans || []).find(p => p.id === order.planId);
+  const hours = Math.max(1, Number(plan && plan.durationHours || order.durationHours || 24));
+  const devices = Math.max(1, Number(plan && plan.deviceLimit || 3));
+  const issued = createKey({ label: (plan && plan.label || 'Key') + ' · Auto ' + order.id, durationHours: hours, deviceLimit: devices, source: 'auto-payment', telegramId: order.telegramId || null });
+  order.issuedKey = issued.plainKey; order.issuedKeyExpiresAt = issued.record.expiresAt;
+  saveOrders(); saveKeys();
+  if (order.telegramId) {
+    const days = hours >= 24 ? Math.round(hours/24) + ' ngày' : hours + ' giờ';
+    await tgSendMessage(order.telegramId,
+      '✅ <b>THANH TOÁN THÀNH CÔNG</b>\n────────────────────\n📦 <b>' + (plan && plan.label || 'Key VIP') + '</b> · ⏱ ' + days + '\n🔑 Mã của bạn:\n<code>' + issued.plainKey + '</code>\n\n🎮 Mở tool: ' + (getPublicBase() || '') + '\n💬 @SunNetWin');
+  }
+  return order;
+}
+
+// Tạo đơn hàng từ Mini App → trả VietQR + nội dung CK
+app.post('/api/shop/order', (req, res) => {
+  const planId = String(req.body && req.body.planId || '').toLowerCase();
+  const telegramId = req.body && req.body.telegramId ? String(req.body.telegramId) : null;
+  const plan = (botSettings.plans || []).find(p => p.id === planId && p.active !== false);
+  if (!plan) return res.status(400).json({ error: 'Gói không tồn tại.' });
+  if (!botSettings.bankCode || !botSettings.bankAccount) return res.status(503).json({ error: 'Admin chưa cấu hình ngân hàng VietQR. Dùng /setbank trên bot.' });
+  const orderId = genOrderId();
+  const order = { id: orderId, planId: planId, planLabel: plan.label, price: Number(plan.price), durationHours: Number(plan.durationHours), deviceLimit: Number(plan.deviceLimit || 3), telegramId: telegramId, status: 'pending', createdAt: Date.now(), content: orderId };
+  orders.push(order); if (orders.length > 500) orders.splice(0, orders.length - 500); saveOrders();
+  res.json({ ok: true, orderId: orderId, content: orderId, amount: order.price, planLabel: plan.label, durationHours: order.durationHours, deviceLimit: order.deviceLimit,
+    qrUrl: buildVietQr(order.price, orderId),
+    bank: { code: botSettings.bankCode, account: botSettings.bankAccount, name: botSettings.bankAccountName } });
+});
+
+// Kiểm tra trạng thái đơn (Mini App polling)
+app.get('/api/shop/order/:id', (req, res) => {
+  const o = orders.find(x => x.id === String(req.params.id).toUpperCase());
+  if (!o) return res.status(404).json({ error: 'Không tìm thấy đơn.' });
+  res.json({ ok: true, orderId: o.id, status: o.status, price: o.price, planLabel: o.planLabel, issuedKey: o.status === 'paid' ? o.issuedKey : null, expiresAt: o.issuedKeyExpiresAt || null, paidAt: o.paidAt || null });
+});
+
+// Webhook nhận giao dịch từ SePay / Casso / PayOS → auto phát key
+app.post('/api/payment/webhook', async (req, res) => {
+  try {
+    const body = req.body || {};
+    const rawContent = String(body.content || body.description || body.orderCode || body.addInfo || '').toUpperCase();
+    const amount = Number(body.transferAmount || body.amount || body.transfer_amount || 0);
+    const ref = String(body.referenceCode || body.id || body.reference || '');
+    if (!rawContent || !amount) return res.json({ ok: false, error: 'Thieu noi dung/so tien' });
+    const cleanContent = rawContent.replace(/[^A-Z0-9]/g, '');
+    let matched = false;
+    // 1) Đơn Mini App: TT + 6 ký tự hex
+    const orderMatch = cleanContent.match(/TT([0-9A-F]{6})/);
+    if (orderMatch) {
+      const oid = 'TT' + orderMatch[1];
+      const order = orders.find(x => x.id === oid && x.status === 'pending');
+      if (order && Math.abs(amount - order.price) < 1000) { await fulfillOrder(order, ref); matched = true; }
+    }
+    // 2) Luồng bot cũ: KEYVIP + telegramId → auto duyệt payment request
+    if (!matched) {
+      const kvMatch = cleanContent.match(/KEYVIP(\d+)/);
+      if (kvMatch) {
+        const tgId = kvMatch[1];
+        const reqPay = botRequests.find(r => r.type === 'payment' && r.status === 'pending' && String(r.telegramId) === tgId);
+        if (reqPay && Math.abs(amount - Number(reqPay.price || 0)) < 1000) {
+          const result = reviewRequest(reqPay.id, true, 'auto-webhook');
+          if (result.ok && result.key) {
+            await tgSendMessage(tgId, '✅ <b>THANH TOÁN THÀNH CÔNG</b>\n🔑 Mã của bạn:\n<code>' + result.key + '</code>\n\n🎮 Mở tool ngay trong Telegram');
+            matched = true;
+          }
+        }
+      }
+    }
+    res.json({ ok: true, matched: matched });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+
+// Auto-fetch key theo Telegram ID (admin duyệt thủ công → Mini App tự nhận key)
+app.get('/api/shop/my-key', (req, res) => {
+  const tgId = String(req.query.telegramId || '');
+  if (!tgId) return res.status(400).json({ ok:false, error:'Thieu telegramId' });
+  const approved = botRequests.filter(function(r){ return String(r.telegramId||'')===tgId && r.status==='approved' && r.issuedKey; })
+    .sort(function(a,b){ return (b.reviewedAt||0)-(a.reviewedAt||0); });
+  if (approved.length) {
+    const r = approved[0];
+    if (r.issuedKeyExpiresAt && Number(r.issuedKeyExpiresAt) <= Date.now()) {
+      return res.json({ ok:true, hasKey:false, reason:'expired' });
+    }
+    return res.json({ ok:true, hasKey:true, key:r.issuedKey, label:r.planLabel || 'Key VIP', expiresAt:r.issuedKeyExpiresAt || null });
+  }
+  const pending = botRequests.some(function(r){ return String(r.telegramId||'')===tgId && r.status==='pending'; });
+  res.json({ ok:true, hasKey:false, pending:pending });
+});
+
+
+// Lấy danh sách gói key (admin chỉnh trên bot → cửa hàng tự cập nhật)
+app.get('/api/shop/plans', (req, res) => {
+  const plans = (botSettings.plans || []).filter(function(p){ return p.active !== false && Number(p.price) > 0 && Number(p.durationHours) > 0; });
+  res.json({ ok: true, plans: plans.map(function(p){ return { id: String(p.id), label: String(p.label), price: Number(p.price), durationHours: Number(p.durationHours), deviceLimit: Number(p.deviceLimit || 3) }; }) });
+});
 
 app.listen(PORT, () => {
   logLine(`SERVER listening on port ${PORT}; admin password configured=${!!process.env.ADMIN_PASSWORD}; games=${Object.keys(FEEDS).length}`);
