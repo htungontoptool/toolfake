@@ -1175,9 +1175,9 @@ function startTelegramBot(options) {
       text += '• Lệnh: /admin /pending /keys /approveall\n\n';
     } else {
       text += '🎮 Mở tool ngay trong Telegram\n';
-      text += '🎁 Key free: /getkey\n';
-      text += '💎 Mua key: /buy\n';
-      text += '🔄 Reset máy: /resetkey\n\n';
+      text += '🎁 Key free: /getkeyv1\n';
+      text += '💎 Mua key: /muakeytx\n';
+      text += '🔄 Reset máy: /resetkeytx\n\n';
     }
     text += '────────────────────\n';
     text += '💬 Hỗ trợ @SunNetWin · /menu';
@@ -1185,7 +1185,7 @@ function startTelegramBot(options) {
     if (base) {
       const adminBase = String(process.env.PUBLIC_ADMIN_URL || '').replace(/\/+$/, '') || (base + '/admin.html');
       const url = admin ? adminBase : (base.endsWith('.html') ? base : base + '/');
-      rows.push([{ text: admin ? '🛠 Mở Admin (Mini App)' : '🚀 Mở Tool (Mini App)', web_app: { url: url } }]);
+      rows.push([{ text: admin ? '🛠 Mở Admin (Mini App)' : 'ToolTungTung', web_app: { url: url } }]);
     }
     if (admin) {
       rows.push([
@@ -1196,17 +1196,14 @@ function startTelegramBot(options) {
         { text: '🔑 Keys', callback_data: 'adm:keys' },
         { text: '📖 Lệnh admin', callback_data: 'adm:help' }
       ]);
-    } else {
-      rows.push([
-        { text: '💳 Mua key', callback_data: 'buy_menu' },
-        { text: '🎁 Key free', callback_data: 'cmd:getkey' }
-      ]);
-      rows.push([
-        { text: '🔄 Reset key', callback_data: 'cmd:resetkey' },
-        { text: '⏳ Trạng thái', callback_data: 'cmd:status' }
-      ]);
     }
-    rows.push([{ text: '📋 Menu lệnh', callback_data: 'cmd:menu' }]);
+    // User thường: chỉ 1 nút duy nhất mở Mini App
+    if (!admin) {
+      // chỉ giữ nút web_app ở trên, không thêm nút nào khác
+    }
+    if (admin) {
+      rows.push([{ text: '📋 Menu lệnh', callback_data: 'cmd:menu' }]);
+    }
     const extra = { reply_markup: { inline_keyboard: rows } };
     if (!base) {
       text += '\n\n⚠️ Chưa set <code>PUBLIC_URL</code> — Mini App chưa gắn domain HTTPS.';
@@ -1219,11 +1216,11 @@ function startTelegramBot(options) {
       '📋 <b>MENU NHANH</b>\n' +
       '────────────────────\n' +
       '🚀 Mini App — mở tool\n' +
-      '🎁 /getkey — key free (nhiệm vụ)\n' +
-      '💎 /buy — mua key + QR\n' +
-      '🔄 /resetkey — reset thiết bị\n' +
+      '🎁 /getkeyv1 — key free\n' +
+      '💎 /muakeytx — mua key\n' +
+      '🔄 /resetkeytx — reset key\n' +
       '⏳ /status — yêu cầu đang chờ\n' +
-      '🔎 /tiktok @user · /fb link\n' +
+      '🔎 /infotik @user · /infofb link\n' +
       '────────────────────\n' +
       '💬 @SunNetWin',
       { reply_markup: { inline_keyboard: [
@@ -1329,7 +1326,7 @@ Bấm nút hoặc gõ lệnh:`;
       + '📱 3 thiết bị\n\n'
       + '────────────────────\n'
       + '🌐 Dán key vào web\n'
-      + '🔄 /resetkey khi full máy\n'
+      + '🔄 /resetkeytx khi full máy\n'
       + '💬 @SunNetWin';
     try {
       await send(req.telegramId, text);
@@ -1346,7 +1343,7 @@ Bấm nút hoặc gõ lệnh:`;
     const sessions = options.getSessions();
     const session = sessions[userId];
     if (!session || session.type !== mode) {
-      await send(message.chat.id, '⚠️ Gõ /getkey hoặc /free hoặc /buy trước khi gửi ảnh.');
+      await send(message.chat.id, '⚠️ Gõ /getkeyv1 hoặc /muakeytx trước khi gửi ảnh.');
       return;
     }
     const photos = message.photo || [];
@@ -1360,7 +1357,7 @@ Bấm nút hoặc gõ lệnh:`;
     // Timeout check for group task
     if (mode === 'group' && session.startedAt && (Date.now() - session.startedAt) > timeoutSec * 1000) {
       delete sessions[userId]; options.saveSessions(sessions);
-      await send(message.chat.id, `⏰ Hết ${timeoutSec} giây. Gõ /getkey để làm lại nhiệm vụ.`);
+      await send(message.chat.id, `⏰ Hết ${timeoutSec} giây. Gõ /getkeyv1 để làm lại.`);
       return;
     }
 
@@ -1406,7 +1403,7 @@ Bấm nút hoặc gõ lệnh:`;
     let plan = plans().find(p => p.id === session.planId);
     if (!plan) {
       delete sessions[userId]; options.saveSessions(sessions);
-      await send(message.chat.id, '⚠️ Gói hết hạn. Gõ /buy chọn lại.');
+      await send(message.chat.id, '⚠️ Gói hết hạn. Gõ /muakeytx chọn lại.');
       return;
     }
     const request = {
@@ -1828,7 +1825,7 @@ ${promo ? `📌 <b>Câu cần sao chép:</b>\n<code>${esc(promo)}</code>\n` : ''
 
   async function showBuyMenu(chatId) {
     const available = plans();
-    if (!available.length) return send(chatId, '📭 Tạm hết gói.\n/getkey nhận free · @SunNetWin');
+    if (!available.length) return send(chatId, '📭 Tạm hết gói.\n/getkeyv1 nhận free · @SunNetWin');
     const lines = available.map((p, i) => {
       const days = p.durationHours >= 24 ? (Math.round(p.durationHours / 24) + ' ngày') : (p.durationHours + 'h');
       return '<b>' + (i + 1) + '. ' + esc(p.label) + '</b>\n    💰 ' + fmt(p.price) + 'đ  ·  ⏱ ' + days;
@@ -1853,7 +1850,7 @@ ${promo ? `📌 <b>Câu cần sao chép:</b>\n<code>${esc(promo)}</code>\n` : ''
 
   async function startPayment(chatId, fromId, planId) {
     const plan = plans().find(p => p.id === String(planId || '').toLowerCase());
-    if (!plan) return send(chatId, '❌ Gói không tồn tại. Gõ /buy để chọn lại.');
+    if (!plan) return send(chatId, '❌ Gói không tồn tại. Gõ /muakeytx để chọn lại.');
     const config = options.getConfig();
     if (!config.bankCode || !config.bankAccount || !config.bankAccountName) {
       return send(chatId, '⚠️ Admin chưa cấu hình ngân hàng VietQR.\nLiên hệ @SunNetWin');
@@ -1949,7 +1946,7 @@ ${promo ? `📌 <b>Câu cần sao chép:</b>\n<code>${esc(promo)}</code>\n` : ''
       const session = sessions[fromId];
       if (session?.type === 'group') return createProofRequest(message, 'group');
       if (session?.type === 'payment') return createProofRequest(message, 'payment');
-      return send(chatId, '⚠️ Gõ /free hoặc /buy trước.');
+      return send(chatId, '⚠️ Gõ /getkeyv1 hoặc /muakeytx trước.');
     }
 
     if (!text) return;
@@ -1986,11 +1983,11 @@ ${promo ? `📌 <b>Câu cần sao chép:</b>\n<code>${esc(promo)}</code>\n` : ''
       return send(chatId, `⏳ <b>${pending.length} yêu cầu</b>\n` + pending.map(r => `• #${r.id} ${r.type === 'payment' ? '💳' : r.type === 'reset' ? '🔄' : '🎯'}`).join('\n'));
     }
 
-    if (cmd === 'free' || cmd === 'getkey') {
+    if (cmd === 'getkeyv1') {
       return startGroupKeyTask(chatId, fromId, from);
     }
 
-    if (cmd === 'buy' || cmd === 'muakeytx' || cmd === 'muakey') {
+    if (cmd === 'muakeytx') {
       return showBuyMenu(chatId);
     }
 
@@ -2003,7 +2000,7 @@ ${promo ? `📌 <b>Câu cần sao chép:</b>\n<code>${esc(promo)}</code>\n` : ''
       return showStart(chatId, displayName(from), from);
     }
 
-    if (cmd === 'resetkey') {
+    if (cmd === 'resetkeytx') {
       if (!argText) {
         sessions[fromId] = { type: 'await_reset_key', startedAt: Date.now() };
         options.saveSessions(sessions);
@@ -2036,7 +2033,7 @@ Gửi <b>mã key</b> cần reset.
     if (sessions[fromId]?.type === 'await_reset_key' && !text.startsWith('/')) {
       const plain = text.trim();
       const k = options.findKey ? options.findKey(plain) : null;
-      if (!k) return send(chatId, '❌ Key không hợp lệ. Gửi lại hoặc /resetkey');
+      if (!k) return send(chatId, '❌ Key không hợp lệ. Gửi lại hoặc /resetkeytx');
       if (k.status === 'revoked') return send(chatId, '🚫 Key đã bị thu hồi.');
       if (options.isExpired?.(k)) return send(chatId, '⏰ Key đã hết hạn.');
       k.deviceHashes = [];
@@ -2052,8 +2049,8 @@ Gửi <b>mã key</b> cần reset.
 👉 Đăng nhập lại trên web (tối đa ${k.deviceLimit || 3} máy)`);
     }
 
-    if (cmd === 'tiktok') {
-      if (!argText) return send(chatId, '📌 <code>/tiktok @user</code>\nhoặc link profile');
+    if (cmd === 'infotik') {
+      if (!argText) return send(chatId, '📌 <code>/infotik @user</code>\nhoặc link profile');
       await send(chatId, '⏳ Đang lấy info TikTok...');
       try {
         const info = await lookupTikTok(argText);
@@ -2085,7 +2082,7 @@ ${info.private ? '🔒 Private' : '🌐 Public'}
       }
     }
 
-    if (cmd === 'fb' || cmd === 'facebook') {
+    if (cmd === 'infofb') {
       if (!argText) return send(chatId, '📌 <code>/fb username</code>\nhoặc link profile');
       await send(chatId, '⏳ Đang lấy info Facebook...');
       try {
