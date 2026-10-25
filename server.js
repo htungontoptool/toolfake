@@ -1165,22 +1165,24 @@ function startTelegramBot(options) {
     const base = ensureHttps(process.env.PUBLIC_URL || process.env.WEB_URL || '');
     const admin = isAdmin(from && from.id);
     let text = '';
-    text += '⚡ <b>TOOL TƯNG TỬNG</b>\n';
-    text += '────────────────────\n';
-    text += 'Xin chào <b>' + esc(name) + '</b>\n\n';
+    text += '╔══════════════════════════╗\n';
+    text += '║   ⚡ <b>TOOL TƯNG TỬNG</b> ⚡   ║\n';
+    text += '║      👑 <b>VIP PREMIUM</b> 👑      ║\n';
+    text += '╚══════════════════════════╝\n\n';
+    text += '👋 Xin chào <b>' + esc(name) + '</b>\n\n';
     if (admin) {
-      text += '🛠 <b>Chế độ ADMIN</b>\n';
-      text += '• Mở Mini App quản trị\n';
-      text += '• Duyệt key nhanh bằng nút\n';
-      text += '• Lệnh: /admin /pending /keys /approveall\n\n';
+      text += '🛠 <b>CHẾ ĐỘ QUẢN TRỊ VIÊN</b>\n';
+      text += '├─ Mở Mini App quản trị\n';
+      text += '├─ Duyệt key nhanh bằng nút\n';
+      text += '└─ Lệnh: /admin /pending /keys\n\n';
     } else {
-      text += '🎮 Mở tool ngay trong Telegram\n';
-      text += '🎁 Key free: /getkeyv1\n';
-      text += '💎 Mua key: /muakeytx\n';
-      text += '🔄 Reset máy: /resetkeytx\n\n';
+      text += '🎮 <b>DỊCH VỤ CỦA CHÚNG TÔI</b>\n';
+      text += '├─ 🎁 Key free: /getkeyv1\n';
+      text += '├─ 💎 Mua key: /muakeytx\n';
+      text += '└─ 🔄 Reset máy: /resetkeytx\n\n';
     }
-    text += '────────────────────\n';
-    text += '💬 Hỗ trợ @SunNetWin · /menu';
+    text += '━━━━━━━━━━━━━━━━━━━━━━━━\n';
+    text += '💬 Hỗ trợ: <b>@SunNetWin</b> · /menu';
     const rows = [];
     if (base) {
       const adminBase = String(process.env.PUBLIC_ADMIN_URL || '').replace(/\/+$/, '') || (base + '/admin.html');
@@ -1189,12 +1191,12 @@ function startTelegramBot(options) {
     }
     if (admin) {
       rows.push([
-        { text: '📩 Pending', callback_data: 'adm:pending' },
-        { text: '✅ Duyệt all', callback_data: 'adm:approveall' }
+        { text: '📩 Chờ duyệt', callback_data: 'adm:pending' },
+        { text: '✅ Duyệt tất cả', callback_data: 'adm:approveall' }
       ]);
       rows.push([
-        { text: '🔑 Keys', callback_data: 'adm:keys' },
-        { text: '📖 Lệnh admin', callback_data: 'adm:help' }
+        { text: '🔑 Danh sách key', callback_data: 'adm:keys' },
+        { text: '📖 Hướng dẫn', callback_data: 'adm:help' }
       ]);
     }
     // User thường: chỉ 1 nút duy nhất mở Mini App
@@ -1202,7 +1204,7 @@ function startTelegramBot(options) {
       // chỉ giữ nút web_app ở trên, không thêm nút nào khác
     }
     if (admin) {
-      rows.push([{ text: '📋 Menu lệnh', callback_data: 'cmd:menu' }]);
+      rows.push([{ text: '📋 Menu đầy đủ', callback_data: 'cmd:menu' }]);
     }
     const extra = { reply_markup: { inline_keyboard: rows } };
     if (!base) {
