@@ -1204,7 +1204,7 @@ function startTelegramBot(options) {
       // chỉ giữ nút web_app ở trên, không thêm nút nào khác
     }
     if (admin) {
-      rows.push([{ text: '📋 Menu đầy đủ', callback_data: 'cmd:menu' }]);
+      rows.push([{ text: '⚙️ Cài đặt', callback_data: 'adm:settings' }, { text: '📋 Menu đầy đủ', callback_data: 'cmd:menu' }]);
     }
     const extra = { reply_markup: { inline_keyboard: rows } };
     if (!base) {
@@ -1772,6 +1772,217 @@ ${promo ? `📌 <b>Câu cần sao chép:</b>\n<code>${esc(promo)}</code>\n` : ''
       return send(chatId, `⌨️ lockedCommands: <code>${cfg.maintenance.lockedCommands.join(', ')||'—'}</code>`);
     }
 
+    if (cmd === 'setgame') {
+      if (!isAdmin(fromId)) return send(chatId, '⛔ Chỉ admin mới dùng lệnh này.');
+      const args = text.trim().split(/\s+/).slice(1);
+      if (args.length < 2) return send(chatId, '📌 <code>/setgame <id_game> <url></code>\n\nVD: /setgame sunwin_tx https://sunwin.com/...\n\nXem danh sách id: /games');
+      const gid = String(args[0]).toLowerCase().trim();
+      const url = String(args[1]).trim();
+      if (!/^https?:\/\//i.test(url)) return send(chatId, '❌ URL phải bắt đầu bằng http:// hoặc https://');
+      const g = gameConfigs.find(x => x.id === gid);
+      if (!g) return send(chatId, '❌ Không tìm thấy game id: <code>' + gid + '</code>\nXem danh sách: /games');
+      g.url = url;
+      if (FEEDS[gid]) { FEEDS[gid].url = url; FEEDS[gid].lastError = null; }
+      try { saveGameConfigs(); } catch(e){}
+      return send(chatId, '✅ <b>ĐÃ CẬP NHẬT LINK GAME</b>\n├─ Game: <b>' + (g.label||gid) + '</b>\n├─ ID: <code>' + gid + '</code>\n└─ URL: <code>' + url + '</code>');
+    }
+    if (cmd === 'games') {
+      if (!isAdmin(fromId)) return send(chatId, '⛔ Chỉ admin mới dùng lệnh này.');
+      const list = gameConfigs.map(g => '• <code>' + g.id + '</code> — ' + (g.label||'') + (g.enabled===false?' (🔒 khóa)':'')).join('\n');
+      return send(chatId, '🎮 <b>DANH SÁCH GAME ID</b>\n\n' + (list||'Chưa có game nào.') + '\n\nSet link: <code>/setgame <id> <url></code>');
+    }
+    // ====== ADMIN: nhiều lệnh chỉnh sửa ======
+    if (cmd === 'helpadmin' || cmd === 'adminhelp') {
+      if (!isAdmin(fromId)) return send(chatId, '⛔ Chỉ admin.');
+      return send(chatId, '⚙️ <b>MENU LỆNH ADMIN</b>\n━━━━━━━━━━━━━━━\n\n🎮 <b>Game:</b>\n• /games — danh sách game\n• /setgame <id> <url> — set link game\n• /setlabel <id> <tên> — đổi tên game\n• /enablegame <id> — bật game\n• /disablegame <id> — tắt game\n• /lockgame <id> /unlockgame <id>\n\n🔑 <b>Key:</b>\n• /createkey <giờ> <tb> <gói> — tạo key\n• /listkeys — danh sách key\n• /delkey <key> — xóa key\n• /extendkey <key> <giờ> — gia hạn\n• /clearkeys — xóa key hết hạn\n\n⚙️ <b>Cài đặt:</b>\n• /setpoll <giây> — chu kỳ poll\n• /setmaxdevices <số> — tối đa thiết bị\n• /setbank <NH> <STK> <chủ> — ngân hàng\n• /addplan <id> <nhãn> <giá> <giờ>\n• /delplan <id> — xóa gói\n• /plans — danh sách gói\n\n📢 <b>Khác:</b>\n• /broadcast <nội dung> — gửi tất cả user\n• /stats — thống kê\n• /pending — chờ duyệt\n• /approve <id> — duyệt\n• /approveall — duyệt tất cả\n• /setmaint on|off — bảo trì\n• /settg <user> — set admin');
+    }
+    if (cmd === 'setlabel') {
+      if (!isAdmin(fromId)) return send(chatId, '⛔ Chỉ admin.');
+      const args = text.trim().split(/\s+/).slice(1);
+      if (args.length < 2) return send(chatId, '📌 <code>/setlabel <id> <tên mới></code>');
+      const gid = String(args[0]).toLowerCase().trim();
+      const label = args.slice(1).join(' ').slice(0, 60);
+      const g = gameConfigs.find(x => x.id === gid);
+      if (!g) return send(chatId, '❌ Không tìm thấy game: <code>' + gid + '</code>');
+      g.label = label;
+      if (FEEDS[gid]) FEEDS[gid].label = label;
+      try { saveGameConfigs(); } catch(e){}
+      return send(chatId, '✅ Đã đổi tên game <b>' + gid + '</b> thành: <b>' + label + '</b>');
+    }
+    if (cmd === 'enablegame' || cmd === 'disablegame') {
+      if (!isAdmin(fromId)) return send(chatId, '⛔ Chỉ admin.');
+      const gid = String(text.trim().split(/\s+/)[1] || '').toLowerCase().trim();
+      if (!gid) return send(chatId, '📌 <code>/' + cmd + ' <id_game></code>');
+      const g = gameConfigs.find(x => x.id === gid);
+      if (!g) return send(chatId, '❌ Không tìm thấy game: <code>' + gid + '</code>');
+      g.enabled = cmd === 'enablegame';
+      if (FEEDS[gid]) FEEDS[gid].enabled = g.enabled;
+      try { saveGameConfigs(); } catch(e){}
+      return send(chatId, (g.enabled ? '✅ Đã BẬT' : '🔒 Đã TẮT') + ' game: <b>' + (g.label||gid) + '</b>');
+    }
+    if (cmd === 'setpoll') {
+      if (!isAdmin(fromId)) return send(chatId, '⛔ Chỉ admin.');
+      const ms = Number(text.trim().split(/\s+/)[1] || 0);
+      if (!ms || ms < 1000) return send(chatId, '📌 <code>/setpoll <giây></code> — tối thiểu 1000ms (1 giây)\nVD: /setpoll 8000');
+      botSettings.pollMs = ms;
+      try { saveJSON(SETTINGS_FILE, botSettings); } catch(e){}
+      return send(chatId, '✅ Đã set chu kỳ poll: <b>' + ms + 'ms</b> (' + (ms/1000).toFixed(1) + 's)');
+    }
+    if (cmd === 'setmaxdevices') {
+      if (!isAdmin(fromId)) return send(chatId, '⛔ Chỉ admin.');
+      const n = Number(text.trim().split(/\s+/)[1] || 0);
+      if (!n || n < 1) return send(chatId, '📌 <code>/setmaxdevices <số></code>\nVD: /setmaxdevices 3');
+      botSettings.maxDevices = n;
+      try { saveJSON(SETTINGS_FILE, botSettings); } catch(e){}
+      return send(chatId, '✅ Đã set tối đa <b>' + n + '</b> thiết bị/key');
+    }
+    if (cmd === 'delkey') {
+      if (!isAdmin(fromId)) return send(chatId, '⛔ Chỉ admin.');
+      const plain = String(text.trim().split(/\s+/)[1] || '').trim();
+      if (!plain) return send(chatId, '📌 <code>/delkey <mã key></code>');
+      const k = findKey(plain);
+      if (!k) return send(chatId, '❌ Key không tồn tại.');
+      const i = keys.indexOf(k);
+      if (i >= 0) keys.splice(i, 1);
+      try { saveJSON(KEYS_FILE, keys); } catch(e){}
+      return send(chatId, '🗑️ Đã xóa key: <code>' + plain + '</code>');
+    }
+    if (cmd === 'extendkey') {
+      if (!isAdmin(fromId)) return send(chatId, '⛔ Chỉ admin.');
+      const args = text.trim().split(/\s+/).slice(1);
+      if (args.length < 2) return send(chatId, '📌 <code>/extendkey <key> <số giờ></code>\nVD: /extendkey KYT-XXX 720');
+      const plain = String(args[0]).trim();
+      const hours = Number(args[1]) || 0;
+      const k = findKey(plain);
+      if (!k) return send(chatId, '❌ Key không tồn tại.');
+      const now = Date.now();
+      const base = Math.max(now, k.expiresAt || now);
+      k.expiresAt = base + hours * 3600 * 1000;
+      try { saveJSON(KEYS_FILE, keys); } catch(e){}
+      return send(chatId, '⏰ Đã gia hạn key <code>' + plain + '</code> thêm <b>' + hours + ' giờ</b>\nHạn mới: ' + new Date(k.expiresAt).toLocaleString('vi-VN'));
+    }
+    if (cmd === 'clearkeys') {
+      if (!isAdmin(fromId)) return send(chatId, '⛔ Chỉ admin.');
+      const now = Date.now();
+      const before = keys.length;
+      for (let i = keys.length - 1; i >= 0; i--) {
+        if (keys[i].expiresAt && keys[i].expiresAt < now) keys.splice(i, 1);
+      }
+      try { saveJSON(KEYS_FILE, keys); } catch(e){}
+      return send(chatId, '🧹 Đã xóa <b>' + (before - keys.length) + '</b> key hết hạn.\nCòn lại: <b>' + keys.length + '</b> key.');
+    }
+    if (cmd === 'listkeys') {
+      if (!isAdmin(fromId)) return send(chatId, '⛔ Chỉ admin.');
+      const now = Date.now();
+      const active = keys.filter(k => !k.expiresAt || k.expiresAt > now);
+      const expired = keys.length - active.length;
+      let msg = '🔑 <b>THỐNG KÊ KEY</b>\n━━━━━━━━━━━━━━━\n';
+      msg += '• Tổng: <b>' + keys.length + '</b>\n• Còn hạn: <b>' + active.length + '</b>\n• Hết hạn: <b>' + expired + '</b>\n\n';
+      msg += active.slice(0, 15).map(k => '• <code>' + (k.plainKey||'?') + '</code> — ' + (k.label||'') + ' — ' + (k.expiresAt ? new Date(k.expiresAt).toLocaleDateString('vi-VN') : 'Vĩnh viễn')).join('\n');
+      if (active.length > 15) msg += '\n... và ' + (active.length-15) + ' key nữa';
+      return send(chatId, msg);
+    }
+    if (cmd === 'broadcast') {
+      if (!isAdmin(fromId)) return send(chatId, '⛔ Chỉ admin.');
+      const msg = text.trim().split(/\s+/).slice(1).join(' ');
+      if (!msg) return send(chatId, '📌 <code>/broadcast <nội dung></code>');
+      const ids = new Set();
+      (botRequests||[]).forEach(r => { if (r.telegramId) ids.add(String(r.telegramId)); });
+      let sent = 0;
+      ids.forEach(id => { try { send(Number(id), '📢 <b>THÔNG BÁO</b>\n━━━━━━━━━━━━━━━\n\n' + msg); sent++; } catch(e){} });
+      return send(chatId, '📢 Đã gửi thông báo cho <b>' + sent + '</b> user.');
+    }
+    // ====== USER + FUN + CHECK INFO ======
+    if (cmd === 'fun' || cmd === 'tienich') {
+      return send(chatId, '🎮 <b>LỆNH VUI & TIỆN LỢI</b>\n━━━━━━━━━━━━━━━\n\n🎲 <b>Vui:</b>\n• /ngauNhien — số ngẫu nhiên 0-99\n• /nemXu — ném đồng xu\n• /chon A hay B — bot chọn giúp\n• /keoBuaBao <kéo/búa/bao> — chơi với bot\n• /mayMan — may mắn mấy sao hôm nay\n• /diemDanh — điểm danh vui\n• /noiLen — bot nói câu ngẫu nhiên\n• /doChac <câu hỏi> — độ chắc chắn\n• /anUong — gợi ý ăn gì hôm nay\n• /giacNgua — giờ đi ngủ\n• /ngayTot — hôm nay thế nào\n\n🔍 <b>Check info:</b>\n• /check — xem tất cả lệnh check\n• /checkip — IP của bạn\n• /checkdevice — thiết bị của bạn\n• /checkme — thông tin của bạn trên bot\n• /checkstatus — trạng thái bot\n• /mykey — thông tin key của bạn\n• /infotik @user — check TikTok\n• /infofb link — check Facebook');
+    }
+    if (cmd === 'check') {
+      return send(chatId, '🔍 <b>LỆNH KIỂM TRA THÔNG TIN</b>\n━━━━━━━━━━━━━━━\n\n• /checkip — IP + nhà mạng\n• /checkdevice — thiết bị + trình duyệt\n• /checkme — thông tin của bạn trên bot\n• /checkstatus — trạng thái bot + server\n• /mykey — key của bạn (thời hạn, gói)\n• /infotik @user — thông tin TikTok\n• /infofb link — thông tin Facebook\n• /checkig <tên> — Instagram (sắp ra)\n• /checktt <tên> — TikTok chi tiết\n• /checkyt link — YouTube (sắp ra)\n• /checkemail <mail> — check email (sắp ra)');
+    }
+    if (cmd === 'ngaunhien' || cmd === 'ngauNhien') {
+      const n = Math.floor(Math.random() * 100);
+      return send(chatId, '🎲 Số ngẫu nhiên của bạn: <b>' + n + '</b>');
+    }
+    if (cmd === 'nemxu' || cmd === 'nemXu') {
+      const r = Math.random() < 0.5 ? 'NGỬA 🪙' : 'SẤP 🪙';
+      return send(chatId, '🪙 Ném xong...\n→ <b>' + r + '</b>');
+    }
+    if (cmd === 'chon') {
+      const args = text.trim().split(/\s+/).slice(1).join(' ');
+      if (!args) return send(chatId, '📌 <code>/chon Đi học hay Ngủ nướng?</code>');
+      const parts = args.split(/ hay | hoặc | hoăc |\?/i).map(s => s.trim()).filter(Boolean);
+      if (parts.length < 2) return send(chatId, '🤔 Cho tôi 2 lựa chọn đi!\nVD: /chon Đi học hay Ngủ nướng?');
+      const pick = parts[Math.floor(Math.random() * parts.length)];
+      return send(chatId, '🤔 Chọn giúp bạn...\n→ <b>' + pick + '</b> 😎');
+    }
+    if (cmd === 'keobuabao' || cmd === 'keoBuaBao') {
+      const userPick = String(text.trim().split(/\s+/)[1] || '').toLowerCase();
+      const opts = ['kéo', 'búa', 'bao'];
+      if (!opts.includes(userPick)) return send(chatId, '✌️ <code>/keoBuaBao kéo|búa|bao</code>');
+      const botPick = opts[Math.floor(Math.random() * 3)];
+      let result = '';
+      if (userPick === botPick) result = 'HÒA! Chơi lại đi 😉';
+      else if ((userPick==='kéo'&&botPick==='bao')||(userPick==='búa'&&botPick==='kéo')||(userPick==='bao'&&botPick==='búa')) result = 'BẠN THẮNG! 🎉';
+      else result = 'TÔI THẮNG! Lần sau nhé 😝';
+      return send(chatId, '✌️ Bạn: <b>' + userPick + '</b>\n✊ Tôi: <b>' + botPick + '</b>\n\n→ ' + result);
+    }
+    if (cmd === 'mayman' || cmd === 'mayMan') {
+      const stars = Math.floor(Math.random() * 5) + 1;
+      const starStr = '⭐'.repeat(stars) + '☆'.repeat(5-stars);
+      const msgs = ['Khá đấy! Cứ tự tin lên 💪', 'Tuyệt vời! Hôm nay là của bạn 🔥', 'Bình thường thôi, cẩn thận một chút 🙂', 'Không tốt lắm, ở nhà cho an toàn 😴', 'Trời xanh mây trắng, mọi chuyện đều ổn 🌤️'];
+      return send(chatId, '🍀 Hôm nay của bạn: <b>' + starStr + '</b>\n' + msgs[stars-1]);
+    }
+    if (cmd === 'diemdanh' || cmd === 'diemDanh') {
+      return send(chatId, '✅ <b>ĐIỂM DANH</b>\n━━━━━━━━━━━━━━━\n👤 Bạn có mặt! ✔️\n📅 ' + new Date().toLocaleDateString('vi-VN') + '\n⏰ ' + new Date().toLocaleTimeString('vi-VN') + '\n\n💪 Hôm nay cố gắng nha!');
+    }
+    if (cmd === 'noilen' || cmd === 'noiLen') {
+      const quotes = ['Hôm nay là ngày tốt! Làm gì cũng trôi chảy 😉', 'Đừng lo lắng quá, mọi chuyện rồi sẽ ổn thôi 😊', 'Ăn ngủ đủ giấc là khỏe mạnh 💪', 'Uống nhiều nước vào, tốt cho da đó 💧', 'Cuối tuần rồi, nghỉ ngơi đi bạn ơi 🎉', 'Mỉm cười lên, bạn trông đẹp lắm đó 😊', 'Đừng so sánh mình với ai, bạn là nhất 💯', 'Hôm nay trời đẹp, ra ngoài đi dạo đi 🌤️'];
+      return send(chatId, '🗣️ ' + quotes[Math.floor(Math.random()*quotes.length)]);
+    }
+    if (cmd === 'dochac' || cmd === 'doChac') {
+      const pct = Math.floor(Math.random() * 100) + 1;
+      return send(chatId, '🎯 Độ chắc chắn: <b>' + pct + '%</b>\n' + (pct>=80?'✅ Rất chắc! Làm đi!':pct>=50?'🤔 Cũng được, cân nhắc kỹ':'⚠️ Không chắc lắm, suy nghĩ lại đi'));
+    }
+    if (cmd === 'anuong' || cmd === 'anUong') {
+      const foods = ['Cơm tấm 🍚', 'Bún bò 🍜', 'Phở 🍲', 'Bánh mì 🥖', 'Trà sữa 🧋', 'Cơm gà 🍗', 'Bún chả 🍢', 'Chè 🍮', 'Mì cay 🌶️', 'Pizza 🍕', 'Hamburger 🍔', 'Khoai tây chiên 🍟'];
+      return send(chatId, '🍔 Hôm nay ăn gì nhỉ?\n→ <b>' + foods[Math.floor(Math.random()*foods.length)] + '</b>\n→ Hoặc <b>' + foods[Math.floor(Math.random()*foods.length)] + '</b> cũng ngon\n\n😋 Ăn gì cũng được, miễn là no!');
+    }
+    if (cmd === 'giacngua' || cmd === 'giacNgua') {
+      return send(chatId, '😴 <b>ĐI NGỦ THÔI!</b>\n━━━━━━━━━━━━━━━\n💤 Đủ giấc ngủ là khỏe mạnh\n⏰ Ngủ trước 23h là tốt nhất\n🌙 Ngủ ngon nha!');
+    }
+    if (cmd === 'ngaytot' || cmd === 'ngayTot') {
+      const msgs = ['✅ Hôm nay là ngày tốt! Làm gì cũng thuận lợi 🌟', '☀️ Trời nắng đẹp, tâm trạng tốt, làm gì cũng được!', '🌤️ Hôm nay bình thường thôi, cẩn thận một chút 🙂', '☁️ Hơi u ám, ở nhà xem phim cho vui 🎬', '🌈 Hôm nay may mắn! Cứ tự tin tiến lên 💪'];
+      return send(chatId, msgs[Math.floor(Math.random()*msgs.length)]);
+    }
+    if (cmd === 'checkip' || cmd === 'ip') {
+      return send(chatId, '🌐 <b>THÔNG TIN IP</b>\n━━━━━━━━━━━━━━━\n📍 IP: <code>' + (fromId ? 'Đang kiểm tra...' : 'Không xác định') + '</code>\n🏙️ Vị trí: Việt Nam\n🏠 Nhà mạng: VNPT/Viettel/MobiFone\n🕐 Múi giờ: GMT+7\n\n💡 Mở Mini App để xem chính xác IP + thiết bị!');
+    }
+    if (cmd === 'checkdevice' || cmd === 'device') {
+      return send(chatId, '📱 <b>THÔNG TIN THIẾT BỊ</b>\n━━━━━━━━━━━━━━━\n🖥️ Thiết bị: Đang mở Telegram\n📱 Hệ điều hành: iOS / Android\n🌐 Trình duyệt: Telegram WebView\n\n💡 Mở Mini App để xem chi tiết!');
+    }
+    if (cmd === 'checkme' || cmd === 'me') {
+      return send(chatId, '👤 <b>THÔNG TIN CỦA BẠN</b>\n━━━━━━━━━━━━━━━\n🆔 Telegram ID: <code>' + fromId + '</code>\n🏷️ Tên: ' + esc(name) + '\n📅 Tham gia: ' + new Date().toLocaleDateString('vi-VN') + '\n🔑 Key: ' + (keys.length ? 'Đã kích hoạt ✅' : 'Chưa có key') + '\n💎 Gói: ' + (keys.length ? 'VIP' : 'Free') + '\n\n💬 Hỗ trợ: @SunNetWin');
+    }
+    if (cmd === 'checkstatus' || cmd === 'status' || cmd === 'trangthai' || cmd === 'trangThai') {
+      const gameCount = Object.keys(FEEDS).length;
+      return send(chatId, '✅ <b>TRẠNG THÁI HỆ THỐNG</b>\n━━━━━━━━━━━━━━━\n🤖 Bot: <b>Đang chạy</b> ✅\n🖥️ Server: <b>Online</b> ✅\n🎮 Game đang theo dõi: <b>' + gameCount + '</b>\n🔑 Tổng key: <b>' + keys.length + '</b>\n📦 Phiên bản: <b>VIP FINAL</b>\n\n💡 Mọi thứ hoạt động tốt! 🚀');
+    }
+    if (cmd === 'mykey' || cmd === 'my_key') {
+      const userKeys = keys.filter(k => k.telegramId === String(fromId));
+      if (!userKeys.length) return send(chatId, '🔑 <b>KEY CỦA BẠN</b>\n━━━━━━━━━━━━━━━\n❌ Bạn chưa có key nào.\n\n🎁 Nhận free: /getkeyv1\n💎 Mua VIP: /muakeytx');
+      const k = userKeys[userKeys.length-1];
+      const exp = k.expiresAt ? new Date(k.expiresAt).toLocaleString('vi-VN') : 'Vĩnh viễn';
+      return send(chatId, '🔑 <b>KEY CỦA BẠN</b>\n━━━━━━━━━━━━━━━\n🔑 Mã: <code>' + (k.plainKey||'?') + '</code>\n💎 Gói: ' + (k.label||'VIP') + '\n⏰ Hạn: ' + exp + '\n📱 Thiết bị: ' + (k.deviceLimit||3) + '\n\n💬 Hỗ trợ: @SunNetWin');
+    }
+    if (cmd === 'guide' || cmd === 'huongdan' || cmd === 'trogiup' || cmd === 'troGiup' || cmd === 'help') {
+      return send(chatId, '📖 <b>HƯỚNG DẪN SỬ DỤNG</b>\n━━━━━━━━━━━━━━━\n1️⃣ Mở Mini App bằng nút <b>ToolTungTung</b>\n2️⃣ Nhập key vào ô "Mã truy cập"\n3️⃣ Bấm "Đăng nhập" → chọn game → xem dự đoán\n\n🎁 Key free: /getkeyv1\n💎 Mua key: /muakeytx\n🔄 Reset: /resetkeytx\n🎮 Lệnh vui: /fun\n🔍 Check info: /check\n\n💬 Hỗ trợ: @SunNetWin');
+    }
+    if (cmd === 'support' || cmd === 'hotro') {
+      return send(chatId, '💬 <b>HỖ TRỢ</b>\n━━━━━━━━━━━━━━━\n👤 Admin: @SunNetWin\n📝 Gửi tin nhắn cho admin để được hỗ trợ\n\n⏰ Thời gian phản hồi: 5-30 phút\n\n💡 Mua key: /muakeytx');
+    }
+    if (cmd === 'thongbao' || cmd === 'thongBao' || cmd === 'announce') {
+      return send(chatId, '📢 <b>THÔNG BÁO MỚI NHẤT</b>\n━━━━━━━━━━━━━━━\n✅ Tool đang hoạt động ổn định\n🔑 Mua key tự động qua bot\n🎮 Đã hỗ trợ TX / MD5 / Sicbo / Baccarat\n📱 Mini App mở trực tiếp trong Telegram\n\n💬 Hỗ trợ: @SunNetWin');
+    }
     if (cmd === 'setbank') {
       if (args.length < 3) return send(chatId, '📌 <code>/setbank &lt;NH&gt; &lt;STK&gt; &lt;chủ&gt;</code>');
       const cfg = options.getConfig();
