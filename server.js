@@ -1301,6 +1301,21 @@ function startTelegramBot(options) {
     );
   }
 
+  async function sendHelpAdmin(chatId, page) {
+    page = Number(page) || 1;
+    const back = { reply_markup: { inline_keyboard: [
+      [{ text: '📘 help 1', callback_data: 'adm:dohelpadmin' }, { text: '📘 help 2', callback_data: 'adm:dohelpadmin2' }, { text: '📘 help 3', callback_data: 'adm:dohelpadmin3' }],
+      [{ text: '◀️ Menu admin', callback_data: 'adm:home' }]
+    ] } };
+    if (page === 2) {
+      return send(chatId, '📘 <b>HELP ADMIN 2 · GAME</b>\n━━━━━━━━━━━━━━━\n• /games · /gamedetail &lt;id&gt;\n• /addgame &lt;id&gt; &lt;parser&gt; &lt;url&gt; [nhãn]\n• /delgame &lt;id&gt;\n• /setgame &lt;id&gt; &lt;url&gt;\n• /setplayurl &lt;id&gt; &lt;url&gt;\n• /sethistoryurl · /settable · /setbrand · /seticon\n• /setlabel · /setparser · /setgroup\n• /clonegame &lt;from&gt; &lt;to&gt;\n• /testgame &lt;id&gt; · /gameerror\n• /enablegame · /disablegame · /enableall · /disableall\n• /lockgame · /unlockgame\n• /reloadgames · /resetengine &lt;id&gt;\n\nParser: <code>sunwin|lc79|max789|baccarat</code>', back);
+    }
+    if (page === 3) {
+      return send(chatId, '📘 <b>HELP ADMIN 3 · KEY · USER · HỆ THỐNG</b>\n━━━━━━━━━━━━━━━\n🔑 <b>Key</b>\n• /createkey &lt;giờ&gt; &lt;tb&gt; [gói]\n• /givekey &lt;tgid&gt; &lt;giờ&gt; [tb]\n• /keys · /listkeys · /key &lt;id&gt;\n• /findkey &lt;tgid|mã&gt;\n• /delkey · /extendkey · /revoke\n• /setkeylimit · /setkeylabel\n• /activekeys · /expiredkeys · /clearkeys · /resetdevice\n\n👤 <b>User</b>\n• /userinfo &lt;tgid|@user&gt;\n• /topusers · /users · /orders\n• /pending · /approve · /reject · /approveall · /rejectall\n\n⚙️ <b>Hệ thống</b>\n• /settings · /setpoll · /setmaxdevices\n• /setmaint on|off · /lockcmd · /unlockcmd\n• /setbank · /plans · /addplan · /delplan\n• /setplanprice · /setplanduration · /setplandevices · /toggleplan\n• /setwatermark · /setsitetitle · /setsupport · /setannounce\n• /settask · /setpromo · /settaskphotos · /settasktime\n• /broadcast · /logs · /clearlogs · /ping · /whoami · /stats', back);
+    }
+    return send(chatId, '⚙️ <b>MENU ADMIN · ALL BOT</b>\n━━━━━━━━━━━━━━━\n🛠 Bảng nút: <code>/admin</code>\n\n🎮 <b>Game</b>\n• /games · /gamedetail · /addgame · /delgame\n• /setgame · /setplayurl · /setlabel · /setparser\n• /enablegame · /disablegame · /resetengine\n\n🔑 <b>Key</b>\n• /createkey &lt;giờ&gt; &lt;tb&gt; [gói]\n• /givekey &lt;tgid&gt; &lt;giờ&gt; [tb]\n• /keys · /key · /findkey · /delkey · /extendkey\n\n💳 /plans · /addplan · /delplan · /setbank\n⚙️ /settings · /setpoll · /setmaxdevices\n📢 /broadcast · /stats · /pending · /approve\n👤 /userinfo &lt;tgid&gt; · /topusers\n\n📘 /helpadmin2 · /helpadmin3 — chi tiết', back);
+  }
+
   async function showAdminHelp(chatId, page) {
     page = page || 'home';
     const kb = (rows) => ({ reply_markup: { inline_keyboard: rows } });
@@ -1359,7 +1374,7 @@ function startTelegramBot(options) {
       ]));
     }
     if (page === 'cmds') {
-      return send(chatId, '📘 <b>LỆNH TEXT ĐẦY ĐỦ</b>\nGõ:\n• /helpadmin\n• /helpadmin2 — game nâng cao\n• /helpadmin3 — key · user · hệ thống\n\nMọi nút chỉ là lối tắt — lệnh text vẫn dùng 100%.', kb([
+      return send(chatId, '📘 <b>LỆNH TEXT ĐẦY ĐỦ</b>\nBấm nút bên dưới để xem menu (hoặc gõ /helpadmin).', kb([
         [{ text: '📘 helpadmin', callback_data: 'adm:dohelpadmin' }, { text: '📘 help 2', callback_data: 'adm:dohelpadmin2' }],
         [{ text: '📘 help 3', callback_data: 'adm:dohelpadmin3' }],
         [{ text: '◀️ Menu admin', callback_data: 'adm:home' }]
@@ -1793,6 +1808,8 @@ ${promo ? `📌 <b>Câu cần sao chép:</b>\n<code>${esc(promo)}</code>\n` : ''
   // ─── Admin commands ─────────────────────────────────────
   async function handleAdminCommand(message, text) {
     const chatId = message.chat.id;
+    const from = message.from || {};
+    const fromId = String(from.id || '');
     const parts = text.split(/\s+/);
     const cmd = parts[0].toLowerCase().replace(/^\//, '').split('@')[0];
     const args = parts.slice(1);
@@ -2004,7 +2021,7 @@ ${promo ? `📌 <b>Câu cần sao chép:</b>\n<code>${esc(promo)}</code>\n` : ''
     // ====== ADMIN: nhiều lệnh chỉnh sửa ======
     if (cmd === 'helpadmin' || cmd === 'adminhelp') {
       if (!isAdmin(fromId)) return send(chatId, '⛔ Chỉ admin.');
-      return send(chatId, '⚙️ <b>MENU ADMIN · ALL BOT</b>\n━━━━━━━━━━━━━━━\n📘 <b>/helpadmin</b> — trang này\n📘 <b>/helpadmin2</b> — Game nâng cao\n📘 <b>/helpadmin3</b> — Key · User · Hệ thống\n\n🎮 <b>Game cơ bản:</b>\n• /games · /gamedetail &lt;id&gt;\n• /addgame &lt;id&gt; &lt;parser&gt; &lt;url&gt; [nhãn]\n• /delgame &lt;id&gt;\n• /setgame &lt;id&gt; &lt;url&gt;\n• /setplayurl &lt;id&gt; &lt;url&gt;\n• /setlabel · /setparser · /setgroup\n• /enablegame · /disablegame\n• /lockgame · /unlockgame\n• /resetengine &lt;id&gt;\n\n🔑 <b>Key nhanh:</b>\n• /createkey &lt;giờ&gt; &lt;tb&gt; [gói]\n• /givekey &lt;tgid&gt; &lt;giờ&gt; [tb]\n• /listkeys · /keys · /key &lt;id&gt;\n• /delkey · /extendkey · /clearkeys\n\n💳 /plans · /addplan · /delplan · /setbank\n⚙️ /settings · /setpoll · /setmaxdevices\n📢 /broadcast · /stats · /pending · /approve');
+      return sendHelpAdmin(chatId, 1);
     }
     if (cmd === 'setlabel') {
       if (!isAdmin(fromId)) return send(chatId, '⛔ Chỉ admin.');
@@ -2132,11 +2149,11 @@ ${promo ? `📌 <b>Câu cần sao chép:</b>\n<code>${esc(promo)}</code>\n` : ''
     }
     if (cmd === 'helpadmin2') {
       if (!isAdmin(fromId)) return send(chatId, '⛔ Chỉ admin.');
-      return send(chatId, '📘 <b>HELP ADMIN 2 · GAME NÂNG CAO</b>\n━━━━━━━━━━━━━━━\n• /gamedetail &lt;id&gt; — chi tiết 1 game\n• /sethistoryurl &lt;id&gt; &lt;url&gt; — URL lịch sử\n• /settable &lt;id&gt; &lt;bàn&gt; — bàn baccarat\n• /setbrand &lt;id&gt; &lt;brand&gt; — brand/icon group\n• /seticon &lt;id&gt; &lt;icon&gt;\n• /clonegame &lt;from&gt; &lt;toId&gt; [nhãn] — nhân bản\n• /testgame &lt;id&gt; — poll thử 1 lần\n• /gameerror — game đang lỗi API\n• /enableall — bật tất cả game\n• /disableall — tắt tất cả game\n• /reloadgames — reload feeds từ file\n• /resetengine &lt;id&gt; — xóa lịch sử engine\n\nParser: sunwin | lc79 | max789 | baccarat');
+      return sendHelpAdmin(chatId, 2);
     }
     if (cmd === 'helpadmin3') {
       if (!isAdmin(fromId)) return send(chatId, '⛔ Chỉ admin.');
-      return send(chatId, '📘 <b>HELP ADMIN 3 · KEY · USER · HỆ THỐNG</b>\n━━━━━━━━━━━━━━━\n🔑 <b>Key:</b>\n• /givekey &lt;tgid&gt; &lt;giờ&gt; [tb] — tạo + gửi user\n• /findkey &lt;tgid|mã&gt; — tìm key\n• /setkeylimit &lt;key&gt; &lt;số tb&gt;\n• /setkeylabel &lt;key&gt; &lt;nhãn&gt;\n• /activekeys · /expiredkeys\n• /revoke &lt;key&gt; — thu hồi\n\n👤 <b>User / đơn:</b>\n• /users — thống kê user\n• /orders — đơn thanh toán gần đây\n• /reject &lt;id&gt; · /rejectall\n• /pending · /approve · /approveall\n\n⚙️ <b>Site / bot:</b>\n• /setwatermark &lt;text&gt;\n• /setsitetitle &lt;text&gt;\n• /setsupport &lt;url|@user&gt;\n• /setannounce &lt;nội dung&gt;\n• /setpromo · /settask · /settaskphotos · /settasktime\n• /logs · /clearlogs · /ping · /whoami\n• /setplanprice &lt;id&gt; &lt;giá&gt;\n• /setplanduration &lt;id&gt; &lt;giờ&gt;\n• /setplandevices &lt;id&gt; &lt;tb&gt;\n• /toggleplan &lt;id&gt; — bật/tắt gói');
+      return sendHelpAdmin(chatId, 3);
     }
     if (cmd === 'gamedetail') {
       if (!isAdmin(fromId)) return send(chatId, '⛔ Chỉ admin.');
@@ -2780,9 +2797,9 @@ ${promo ? `📌 <b>Câu cần sao chép:</b>\n<code>${esc(promo)}</code>\n` : ''
         } catch(e) { return send(chatId, '❌ Không đọc log'); }
       }
       if (act === 'doping') return send(chatId, '🏓 Pong · '+new Date().toLocaleString('vi-VN'));
-      if (act === 'dohelpadmin') return send(chatId, 'Gõ <code>/helpadmin</code> để xem menu text đầy đủ.');
-      if (act === 'dohelpadmin2') return send(chatId, 'Gõ <code>/helpadmin2</code>');
-      if (act === 'dohelpadmin3') return send(chatId, 'Gõ <code>/helpadmin3</code>');
+      if (act === 'dohelpadmin') return sendHelpAdmin(chatId, 1);
+      if (act === 'dohelpadmin2') return sendHelpAdmin(chatId, 2);
+      if (act === 'dohelpadmin3') return sendHelpAdmin(chatId, 3);
       return showAdminHelp(chatId, 'home');
     }
     if (data.startsWith('adm:') && !isAdmin(fromId)) {
@@ -2843,7 +2860,10 @@ ${promo ? `📌 <b>Câu cần sao chép:</b>\n<code>${esc(promo)}</code>\n` : ''
     if (text.startsWith('/') && isAdmin(fromId)) {
       const cmd = text.split(/\s+/)[0].toLowerCase().replace(/^\//, '').split('@')[0];
       const adminCmds = new Set(['admin', 'panel', 'stats', 'keys', 'key', 'createkey', 'resetdevice', 'resetdevices', 'revoke', 'pending', 'approve', 'reject', 'approveall', 'settask', 'setpromo', 'settaskphotos', 'settasktime', 'setmaint', 'lockgame', 'unlockgame', 'lockcmd', 'unlockcmd', 'setbank', 'settg', 'addplan', 'delplan', 'plans', 'addgame', 'delgame', 'setplayurl', 'setparser', 'setgroup', 'resetengine', 'settings', 'viewsettings', 'helpadmin', 'adminhelp', 'helpadmin2', 'helpadmin3', 'setgame', 'setlabel', 'enablegame', 'disablegame', 'games', 'listkeys', 'delkey', 'extendkey', 'clearkeys', 'setpoll', 'setmaxdevices', 'broadcast', 'gamedetail', 'sethistoryurl', 'settable', 'setbrand', 'seticon', 'clonegame', 'testgame', 'gameerror', 'enableall', 'disableall', 'givekey', 'findkey', 'setkeylimit', 'setkeylabel', 'activekeys', 'expiredkeys', 'revoke', 'setwatermark', 'setsitetitle', 'setsupport', 'setannounce', 'reloadgames', 'logs', 'clearlogs', 'ping', 'whoami', 'users', 'orders', 'rejectall', 'setplanprice', 'setplanduration', 'setplandevices', 'toggleplan', 'userinfo', 'user', 'profile', 'topusers']);
-      if (adminCmds.has(cmd)) return handleAdminCommand(message, text);
+      if (adminCmds.has(cmd)) {
+        try { return await handleAdminCommand(message, text); }
+        catch (e) { console.warn('[admin-cmd]', cmd, e.message); return send(chatId, '❌ Lỗi lệnh: ' + esc(e.message)); }
+      }
     }
 
     const parts = text.split(/\s+/);
@@ -3188,8 +3208,13 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.disable('x-powered-by');
 
 // The front-end can be hosted statically on Netlify. This server also serves it for local testing.
-app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
-app.get('/admin', (req, res) => res.status(410).type('html').send('<!doctype html><meta charset=utf-8><title>Admin qua Bot</title><body style="font-family:sans-serif;padding:40px;background:#0f172a;color:#f8fafc"><h1>🛠 Admin qua Telegram Bot</h1><p>admin.html đã tắt hoàn toàn. Mọi cấu hình dùng lệnh bot.</p><p>Gõ <b>/helpadmin</b> trong bot Telegram.</p></body>'));
+app.get('/', (req, res) => {
+  const idx = path.join(__dirname, 'public', 'index.html');
+  if (fs.existsSync(idx)) return res.sendFile(idx);
+  res.status(500).type('text').send('index.html missing — check deploy public/ folder');
+});
+app.get('/health', (req, res) => res.json({ ok: true, t: Date.now() }));
+app.get('/admin', (req, res) => res.status(410).type('html').send('<!doctype html><meta charset=utf-8><title>Admin qua Bot</title><body style="font-family:sans-serif;padding:40px;background:#0f172a;color:#f8fafc"><h1>🛠 Admin qua Telegram Bot</h1><p>admin.html đã tắt. Dùng bot: /admin hoặc /helpadmin</p></body>'));
 app.get('/admin.html', (req, res) => res.redirect('/admin'));
 
 const KEYS_FILE = path.join(DATA_DIR, 'keys.json');
@@ -4457,6 +4482,11 @@ app.get('/api/shop/my-key', (req, res) => {
 app.get('/api/shop/plans', (req, res) => {
   const plans = (botSettings.plans || []).filter(function(p){ return p.active !== false && Number(p.price) > 0 && Number(p.durationHours) > 0; });
   res.json({ ok: true, plans: plans.map(function(p){ return { id: String(p.id), label: String(p.label), price: Number(p.price), durationHours: Number(p.durationHours), deviceLimit: Number(p.deviceLimit || 3) }; }) });
+});
+
+app.use((req, res) => {
+  if (req.path.startsWith('/api/')) return res.status(404).json({ error: 'Not found', path: req.path });
+  res.status(404).type('html').send('<!doctype html><meta charset=utf-8><title>404</title><body style="font-family:sans-serif;padding:40px"><h1>404 Not Found</h1><p>Path: <code>' + String(req.path).replace(/</g,'') + '</code></p><p><a href="/">← Về trang chủ</a></p></body>');
 });
 
 app.listen(PORT, () => {
