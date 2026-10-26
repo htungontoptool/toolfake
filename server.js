@@ -3204,16 +3204,22 @@ const BRAND = '@SunNetWin';
 
 app.use(cors());
 app.use(express.json({ limit: '2mb' }));
-app.use(express.static(path.join(__dirname, 'public')));
-app.disable('x-powered-by');
+// public/ (ưu tiên) hoặc index.html ở gốc repo (GitHub toolfake)
+const PUBLIC_DIR = (function () {
+  const a = path.join(__dirname, 'public');
+  if (fs.existsSync(path.join(a, 'index.html'))) return a;
+  if (fs.existsSync(path.join(__dirname, 'index.html'))) return __dirname;
+  return a;
+})();
+const INDEX_HTML = path.join(PUBLIC_DIR, 'index.html');
+console.log('[static] PUBLIC_DIR=', PUBLIC_DIR, 'index=', fs.existsSync(INDEX_HTML));
 
-// The front-end can be hosted statically on Netlify. This server also serves it for local testing.
+app.use(express.static(PUBLIC_DIR));
 app.get('/', (req, res) => {
-  const idx = path.join(__dirname, 'public', 'index.html');
-  if (fs.existsSync(idx)) return res.sendFile(idx);
-  res.status(500).type('text').send('index.html missing — check deploy public/ folder');
+  if (fs.existsSync(INDEX_HTML)) return res.sendFile(INDEX_HTML);
+  res.status(500).type('text').send('index.html missing. Put file at public/index.html OR ./index.html in repo root.');
 });
-app.get('/health', (req, res) => res.json({ ok: true, t: Date.now() }));
+app.get('/health', (req, res) => res.json({ ok: true, t: Date.now(), index: fs.existsSync(INDEX_HTML) }));
 app.get('/admin', (req, res) => res.status(410).type('html').send('<!doctype html><meta charset=utf-8><title>Admin qua Bot</title><body style="font-family:sans-serif;padding:40px;background:#0f172a;color:#f8fafc"><h1>🛠 Admin qua Telegram Bot</h1><p>admin.html đã tắt. Dùng bot: /admin hoặc /helpadmin</p></body>'));
 app.get('/admin.html', (req, res) => res.redirect('/admin'));
 
