@@ -1222,7 +1222,17 @@ function startTelegramBot(options) {
   const displayName = from => [from?.first_name, from?.last_name].filter(Boolean).join(' ') || from?.username || 'Bạn';
   const plans = () => (options.getConfig().plans || []).filter(p => p.active !== false && Number(p.price) > 0 && Number(p.durationHours) > 0);
   const idShort = () => crypto.randomBytes(5).toString('hex').toUpperCase();
-  const esc = s => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const decodeHtmlEntities = (str) => String(str || '')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#0*39;/g, "'")
+    .replace(/&apos;/gi, "'")
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => { try { return String.fromCodePoint(parseInt(h, 16)); } catch { return ''; } })
+    .replace(/&#(\d+);/g, (_, d) => { try { return String.fromCodePoint(parseInt(d, 10)); } catch { return ''; } });
+  const esc = s => String(decodeHtmlEntities(s)).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const fmt = n => Number(n || 0).toLocaleString('vi-VN');
   const ensureHttps = u => { let s = String(u || '').trim(); if (!s) return ''; if (!/^https?:\/\//i.test(s)) s = 'https://' + s; return s.replace(/\/+$/, ''); };
 
@@ -1742,50 +1752,66 @@ ${promo ? `📌 <b>Câu cần sao chép:</b>\n<code>${esc(promo)}</code>\n` : ''
     return info;
   }
 
-  async function lookupFacebook(input) {
+    async function lookupFacebook(input) {
     let raw = String(input || '').trim();
     let url = raw;
     if (!/^https?:\/\//i.test(raw)) {
-      raw = raw.replace(/^@/, '');
-      url = `https://www.facebook.com/${encodeURIComponent(raw)}`;
+      raw = raw.replace(/^@/, '').replace(/^facebook\.com\//i, '');
+      url = 'https://www.facebook.com/' + encodeURIComponent(raw.split(/[/?#]/)[0]);
     }
+    // share/reel/watch → giữ nguyên url
     const headers = {
-      'user-agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
-      'accept-language': 'vi-VN,vi;q=0.9,en;q=0.8'
+      'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'accept': 'text/html,application/xhtml+xml',
+      'accept-language': 'vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7'
+    };
+    const decode = (t) => {
+      return String(t || '')
+        .replace(/&nbsp;/gi, ' ')
+        .replace(/&amp;/gi, '&')
+        .replace(/&quot;/gi, '"')
+        .replace(/&#0*39;/g, "'")
+        .replace(/&lt;/gi, '<')
+        .replace(/&gt;/gi, '>')
+        .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => { try { return String.fromCodePoint(parseInt(h, 16)); } catch { return ''; } })
+        .replace(/&#(\d+);/g, (_, d) => { try { return String.fromCodePoint(parseInt(d, 10)); } catch { return ''; } })
+        .replace(/\s+/g, ' ')
+        .trim();
     };
     const info = {
       url, author: '', avatar: '', bio: '', type: 'profile',
       followers: null, likes: null, provider: 'Facebook'
     };
-    // oEmbed (works better for posts/pages)
     try {
-      const oembed = `https://www.facebook.com/plugins/post/oembed.json?url=${encodeURIComponent(url)}`;
+      const oembed = 'https://www.facebook.com/plugins/post/oembed.json?url=' + encodeURIComponent(url);
       const r = await fetch(oembed, { signal: AbortSignal.timeout(10000), headers });
       if (r.ok) {
         const d = await r.json();
-        info.author = d.author_name || '';
+        info.author = decode(d.author_name || '');
         info.url = d.author_url || url;
-        info.bio = (d.html || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 220);
+        info.bio = decode((d.html || '').replace(/<[^>]+>/g, ' ')).slice(0, 220);
         info.provider = d.provider_name || 'Facebook';
         if (d.thumbnail_url) info.avatar = d.thumbnail_url;
       }
     } catch {}
-    // HTML / Open Graph
     try {
       const page = await fetch(url, { signal: AbortSignal.timeout(12000), headers, redirect: 'follow' });
       if (page.ok) {
         const html = await page.text();
         const og = (prop) => {
-          const m = html.match(new RegExp(`<meta[^>]+property=["']${prop}["'][^>]+content=["']([^"']+)["']`, 'i'))
-            || html.match(new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]+property=["']${prop}["']`, 'i'));
-          return m ? m[1] : '';
+          const m = html.match(new RegExp('<meta[^>]+property=["\']' + prop + '["\'][^>]+content=["\']([^"\']+)["\']', 'i'))
+            || html.match(new RegExp('<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']' + prop + '["\']', 'i'));
+          return m ? decode(m[1]) : '';
         };
         const nameMeta = html.match(/<meta[^>]+name=["']description["'][^>]+content=["']([^"']+)["']/i);
-        if (!info.author) info.author = og('og:title') || raw.split('/').filter(Boolean).pop() || 'Facebook';
+        if (!info.author) info.author = og('og:title') || '';
         if (!info.avatar) info.avatar = og('og:image') || '';
-        if (!info.bio) info.bio = (og('og:description') || (nameMeta && nameMeta[1]) || '').slice(0, 220);
+        if (!info.bio) info.bio = (og('og:description') || (nameMeta ? decode(nameMeta[1]) : '')).slice(0, 220);
         info.type = og('og:type') || info.type;
-        // try follower-ish numbers from description
+        // login wall
+        if (/log in or sign up to view/i.test(info.bio) || /đăng nhập hoặc đăng ký/i.test(info.bio)) {
+          info.bio = 'Bài/profile cần đăng nhập Facebook — bot chỉ lấy được tiêu đề công khai.';
+        }
         const nums = String(info.bio).match(/([\d.,]+)\s*(followers|người theo dõi|likes|lượt thích)/i);
         if (nums) {
           const n = parseFloat(nums[1].replace(/\./g, '').replace(',', '.'));
@@ -1794,14 +1820,19 @@ ${promo ? `📌 <b>Câu cần sao chép:</b>\n<code>${esc(promo)}</code>\n` : ''
         }
       }
     } catch {}
-    if (!info.author) {
-      info.author = raw.replace(/^https?:\/\/(www\.)?facebook\.com\//i, '').split(/[/?#]/)[0] || 'Facebook';
-      info.bio = info.bio || 'Không lấy đủ chi tiết (profile private / cần đăng nhập).';
+    if (!info.author || /^facebook$/i.test(info.author)) {
+      const slug = raw.replace(/^https?:\/\/(www\.)?facebook\.com\//i, '').split(/[/?#]/)[0] || '';
+      info.author = info.author && !/^facebook$/i.test(info.author) ? info.author : (slug || 'Facebook');
+      if (!info.bio || /log in or sign up/i.test(info.bio)) {
+        info.bio = 'Không lấy đủ chi tiết (private / share link / cần đăng nhập). Thử username trang: /checkfb ten_trang';
+      }
     }
+    info.author = decode(info.author);
+    info.bio = decode(info.bio);
     return info;
   }
 
-  async function lookupInstagram(input) {
+async function lookupInstagram(input) {
     let username = String(input || '').trim();
     const m = username.match(/instagram\.com\/([A-Za-z0-9._]+)/i);
     if (m) username = m[1];
@@ -1826,9 +1857,9 @@ ${promo ? `📌 <b>Câu cần sao chép:</b>\n<code>${esc(promo)}</code>\n` : ''
         const x = html.match(re) || html.match(re2);
         return x ? x[1] : '';
       };
-      info.fullName = og('og:title') || username;
+      info.fullName = decodeHtmlEntities(og('og:title') || username);
       info.avatar = og('og:image') || '';
-      info.bio = (og('og:description') || '').slice(0, 200);
+      info.bio = decodeHtmlEntities(og('og:description') || '').slice(0, 200);
       // "1,234 Followers, 56 Following, 78 Posts - See Instagram photos..."
       const desc = info.bio;
       const mf = desc.match(/([\d.,]+[KkMm]?)\s*Followers/i);
@@ -2298,17 +2329,33 @@ ${promo ? `📌 <b>Câu cần sao chép:</b>\n<code>${esc(promo)}</code>\n` : ''
       try { saveGameConfigs(); } catch(e){}
       return send(chatId, '✅ brand <b>'+gid+'</b> → <code>'+esc(brand)+'</code>');
     }
-    if (cmd === 'seticon') {
+    if (cmd === 'seticon' || cmd === 'setgameicon' || cmd === 'setimg') {
       if (!isAdmin(fromId)) return send(chatId, '⛔ Chỉ admin.');
       const args = text.trim().split(/\s+/).slice(1);
-      if (args.length < 2) return send(chatId, '📌 <code>/seticon &lt;id&gt; &lt;icon&gt;</code>');
+      if (args.length < 2) return send(chatId, '📌 <b>Đổi ảnh game</b>\n<code>/seticon id url_ảnh</code>\nVD: /seticon sunwin https://i.imgur.com/xxx.png\nHoặc key có sẵn: sunwin, hitclub, max789…\nÁp dụng cả brand: <code>/seticon sunwin URL --brand</code>');
       const gid = String(args[0]).toLowerCase().trim();
-      const icon = String(args[1]).trim().slice(0,40);
+      const applyBrand = args.includes('--brand') || args.includes('-b');
+      const icon = String(args.filter(a => a !== '--brand' && a !== '-b')[1] || '').trim().slice(0, 500);
+      if (!icon) return send(chatId, '❌ Thiếu URL hoặc key icon');
       const g = gameConfigs.find(x => x.id === gid);
-      if (!g) return send(chatId, '❌ Không tìm thấy game');
+      if (!g) return send(chatId, '❌ Không tìm thấy game. /games');
       g.icon = icon;
+      let n = 1;
+      if (applyBrand) {
+        const brand = g.brand || g.id;
+        gameConfigs.forEach(x => {
+          if (x.id === gid) return;
+          if (String(x.brand||x.id) === String(brand)) { x.icon = icon; n++; }
+        });
+      }
       try { saveGameConfigs(); } catch(e){}
-      return send(chatId, '✅ icon <b>'+gid+'</b> → <code>'+esc(icon)+'</code>');
+      // cập nhật FEEDS label icon nếu có
+      try {
+        gameConfigs.forEach(x => {
+          if (FEEDS[x.id]) FEEDS[x.id].icon = x.icon || '';
+        });
+      } catch(e){}
+      return send(chatId, '✅ Ảnh game <b>'+gid+'</b>'+(applyBrand?' (+brand '+n+' game)':'')+'\n<code>'+esc(icon.slice(0,120))+'</code>\n💡 User F5 index để thấy ảnh mới');
     }
     if (cmd === 'clonegame') {
       if (!isAdmin(fromId)) return send(chatId, '⛔ Chỉ admin.');
@@ -2334,7 +2381,7 @@ ${promo ? `📌 <b>Câu cần sao chép:</b>\n<code>${esc(promo)}</code>\n` : ''
         const f = FEEDS[gid];
         const last = f.lastSession;
         const openS = f.openSession || (last != null && /^\d+$/.test(String(last)) ? String(Number(last)+1) : '—');
-        const top = (f.history||[]).slice(0, 5).map(h => '#'+h.session+':'+(h.char||'?')).join(' · ') || '—';
+        const top = (f.rawTop5 && f.rawTop5.length ? f.rawTop5.map(x=>'#'+x).join(' · ') : (f.history||[]).slice(0, 5).map(h => '#'+h.session+':'+(h.char||'?')).join(' · ')) || '—';
         const live = f.lastLive ? (f.lastLive.char||'?')+' sum='+(f.lastLive.sum??'—') : '—';
         // các id cùng brand
         const g0 = gameConfigs.find(x => x.id === gid) || {};
@@ -3572,11 +3619,27 @@ function parseLC79(data) {
   return normalizeSessions(rows);
 }
 function parseFeedData(feed, data) {
-  if (feed.parser === 'sunwin') return parseSunwin(data);
-  if (feed.parser === 'baccarat') return parseBaccarat(data, feed.table);
-  if (feed.parser === 'max789') return parseMax789(data);
-  if (feed.parser === 'b52hist') return parseB52Hist(data);
-  return parseLC79(data);
+  let list = [];
+  if (feed.parser === 'sunwin') list = parseSunwin(data);
+  else if (feed.parser === 'baccarat') return parseBaccarat(data, feed.table);
+  else if (feed.parser === 'max789') list = parseMax789(data);
+  else if (feed.parser === 'b52hist') list = parseB52Hist(data);
+  else list = parseLC79(data);
+  // Luôn deep-scan để bắt phiên MỚI NHẤT nếu parser bỏ sót nhánh JSON
+  try {
+    const deep = extractRowsFromAny(data);
+    if (deep.length) {
+      if (!list.length) return deep;
+      const a = sessionNum(list[0].session) || 0;
+      const b = sessionNum(deep[0].session) || 0;
+      if (b > a) return deep;
+      // merge unique by session
+      const map = new Map();
+      for (const r of [...deep, ...list]) map.set(String(r.session), r);
+      return normalizeSessions([...map.values()]);
+    }
+  } catch (e) {}
+  return list;
 }
 
 function parseB52Hist(data) {
@@ -3760,12 +3823,79 @@ function normalizeSessions(list) {
 }
 function pickSessionId(item) {
   if (!item || typeof item !== 'object') return null;
-  const keys = ['phien','Phien','PHIEN','session','session_id','sessionId','id','round','round_id','period','phien_id','PhienId','game_round','issue'];
+  const keys = ['phien','Phien','PHIEN','session','session_id','sessionId','phien_id','PhienId','game_round','issue','period','round','round_id','id','Phien_Id','phienHienTai','phien_hien_tai','currentSession','current_session'];
   for (const k of keys) {
     if (item[k] !== undefined && item[k] !== null && item[k] !== '') return item[k];
   }
   return null;
 }
+/** Quét sâu toàn JSON lấy mọi số phiên + mảng lịch sử ẩn */
+function deepCollectSessions(node, out, depth) {
+  if (depth > 8 || node == null) return;
+  if (Array.isArray(node)) {
+    // nếu mảng object có phien → coi là history
+    for (const el of node) deepCollectSessions(el, out, depth + 1);
+    return;
+  }
+  if (typeof node !== 'object') return;
+  const sid = pickSessionId(node);
+  if (sid != null && sid !== '') {
+    const n = sessionNum(sid);
+    if (n != null && n > 1000) out.nums.push(n);
+    out.items.push(node);
+  }
+  for (const k of Object.keys(node)) {
+    const v = node[k];
+    if (v && (typeof v === 'object')) deepCollectSessions(v, out, depth + 1);
+  }
+}
+function extractRowsFromAny(data) {
+  const out = { nums: [], items: [] };
+  deepCollectSessions(data, out, 0);
+  // map items → rows chuẩn
+  const rows = [];
+  const seen = new Set();
+  for (const item of out.items) {
+    const session = pickSessionId(item);
+    if (session == null || session === '') continue;
+    const key = String(session);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    let dice = item.xuc_xac || item.dices || item.xucxac || item.dice || null;
+    if (!dice) {
+      dice = [
+        Number(item.xuc_xac1 ?? item.Xuc_xac_1 ?? item.dice1 ?? item.xx1 ?? 0),
+        Number(item.xuc_xac2 ?? item.Xuc_xac_2 ?? item.dice2 ?? item.xx2 ?? 0),
+        Number(item.xuc_xac3 ?? item.Xuc_xac_3 ?? item.dice3 ?? item.xx3 ?? 0)
+      ];
+    }
+    if (Array.isArray(dice)) dice = dice.map(Number);
+    const sum = Number(item.Tong ?? item.tong ?? item.sum ?? item.point ?? item.total ?? (Array.isArray(dice) ? dice.reduce((a,b)=>a+Number(b||0),0) : 0));
+    let char = sum >= 11 ? 'T' : 'X';
+    const raw = String(item.ket_qua || item.Ket_qua || item.ketqua || item.result || item.outcome || item.kq || '').toLowerCase();
+    if (raw.includes('tai') || raw.includes('tài') || raw === 't') char = 'T';
+    else if (raw.includes('xiu') || raw.includes('xỉu') || raw === 'x') char = 'X';
+    rows.push({ session, sum, char, dice });
+  }
+  let list = normalizeSessions(rows);
+  // nếu deep scan có max lớn hơn list[0] — ưu tiên max
+  if (out.nums.length) {
+    const maxN = Math.max(...out.nums);
+    if (list.length) {
+      const top = sessionNum(list[0].session);
+      if (top == null || maxN > top) {
+        // tìm row đúng max
+        const hit = list.find(r => sessionNum(r.session) === maxN);
+        if (hit) list = [hit, ...list.filter(r => r !== hit)];
+        else list = [{ session: maxN, sum: null, char: 'T', dice: null }, ...list];
+      }
+    } else {
+      list = [{ session: maxN, sum: null, char: 'T', dice: null }];
+    }
+  }
+  return list;
+}
+
 
 
 // Load trained state after dynamic feed definitions are ready.
@@ -3790,63 +3920,72 @@ if (savedState?.feeds) {
 /** Sicbo: VỊ = đoán TỔNG 3 xúc xắc (3–18). Bão hiếm → ít/không đoán bão. TX vẫn là cửa chính. */
 function enhanceSicbo(feed, ensemble) {
   const hist = feed.history || [];
-  const rows = hist.filter(h => Number.isFinite(Number(h.sum))).slice(0, 60);
-  const baoCount = hist.slice(0, 50).filter(h => h.isBao).length;
-  const baoRate = hist.length ? baoCount / Math.min(hist.length, 50) : 0.02;
-  const baoProb = Math.round(Math.min(6, Math.max(1, baoRate * 100)));
+  const rows = hist.filter(h => Number.isFinite(Number(h.sum))).slice(0, 80);
 
-  // Phân bố tổng gần đây (3–18)
-  const sumFreq = {};
-  for (let s = 3; s <= 18; s++) sumFreq[s] = 0;
-  for (const r of rows.slice(0, 40)) {
-    const s = Math.round(Number(r.sum));
-    if (s >= 3 && s <= 18) sumFreq[s]++;
-  }
-  // Trọng số: phiên mới hơn quan trọng hơn
+  // 1) Cửa Tài / Xỉu trước (từ ensemble TX)
+  const pr = String(ensemble.predictedResult || '').toUpperCase();
+  const isTai = pr.includes('TÀI') || pr.includes('TAI') || (pr === 'T') || (pr.includes('T') && !pr.includes('X'));
+  const sideLabel = isTai ? 'TÀI' : 'XỈU';
+  // Tài: tổng 11–18 · Xỉu: tổng 3–10
+  const lo = isTai ? 11 : 3;
+  const hi = isTai ? 18 : 10;
+
+  // Trọng số tổng gần đây (phiên mới nặng hơn)
   const weighted = {};
   for (let s = 3; s <= 18; s++) weighted[s] = 0;
-  rows.slice(0, 30).forEach((r, i) => {
-    const s = Math.round(Number(r.sum));
-    if (s < 3 || s > 18) return;
-    const w = 1 + (30 - i) * 0.08;
-    weighted[s] += w;
+  rows.slice(0, 40).forEach((r, i) => {
+    const sm = Math.round(Number(r.sum));
+    if (sm < 3 || sm > 18) return;
+    weighted[sm] += 1 + (40 - i) * 0.1;
   });
 
-  // Top 3 tổng có trọng số cao
-  const ranked = Object.entries(weighted)
-    .map(([s, w]) => ({ sum: Number(s), w, n: sumFreq[s] || 0 }))
-    .sort((a, b) => b.w - a.w);
-  const top3 = ranked.slice(0, 3).filter(x => x.w > 0);
-
-  // Vị chính = tổng điểm cao nhất; lệch theo cửa TX nếu mâu thuẫn mạnh
-  let viTong = top3.length ? top3[0].sum : null;
-  const isTai = String(ensemble.predictedResult || '').toUpperCase().includes('T');
-  if (viTong != null) {
-    const tongIsTai = viTong >= 11;
-    // Nếu top1 ngược cửa TX quá mạnh → chọn top trong cùng phía TX
-    if (tongIsTai !== isTai && top3.length > 1) {
-      const sameSide = ranked.find(x => (x.sum >= 11) === isTai && x.w > 0);
-      if (sameSide) viTong = sameSide.sum;
-    }
+  // 2) Chỉ lấy tổng CÙNG PHÍA với Tài/Xỉu → top 3 vị
+  const rankedSide = [];
+  for (let s = lo; s <= hi; s++) {
+    rankedSide.push({ sum: s, w: weighted[s] || 0 });
   }
-  // Độ tin vị: conf thấp hơn TX, không overclaim
-  let viConf = 0;
-  if (viTong != null && ranked[0]) {
-    const totalW = ranked.reduce((a, b) => a + b.w, 0) || 1;
-    viConf = Math.round(Math.min(62, Math.max(28, (ranked[0].w / totalW) * 100 + 15)));
+  rankedSide.sort((a, b) => b.w - a.w || (isTai ? b.sum - a.sum : a.sum - b.sum));
+
+  // Nếu phía đó chưa có data → fallback theo tần suất lý thuyết gần giữa khoảng
+  let viTop3 = rankedSide.filter(x => x.w > 0).slice(0, 3).map(x => x.sum);
+  if (viTop3.length < 3) {
+    const fill = rankedSide.map(x => x.sum).filter(s => !viTop3.includes(s));
+    while (viTop3.length < 3 && fill.length) viTop3.push(fill.shift());
+  }
+  if (!viTop3.length) {
+    viTop3 = isTai ? [14, 13, 15] : [8, 9, 7];
   }
 
-  // Không đoán bão (hiếm)
+  const viTong = viTop3[0];
+  const totalW = rankedSide.reduce((a, b) => a + b.w, 0) || 1;
+  const topW = rankedSide.find(x => x.sum === viTong)?.w || 0;
+  const viConf = Math.round(Math.min(72, Math.max(32, (topW / totalW) * 100 + 20)));
+
+  function diceForSum(target) {
+    const combos = [];
+    for (let a = 1; a <= 6; a++)
+      for (let b = 1; b <= 6; b++)
+        for (let c = 1; c <= 6; c++)
+          if (a + b + c === target) combos.push([a, b, c]);
+    if (!combos.length) return null;
+    const recent = rows.slice(0, 30).map(r => (Array.isArray(r.dice) ? r.dice.join('-') : ''));
+    combos.sort((A, B) => recent.filter(x => x === B.join('-')).length - recent.filter(x => x === A.join('-')).length);
+    return combos[0];
+  }
+  const diceHints = viTop3.map(sm => ({ sum: sm, dice: diceForSum(sm) }));
+
   return {
     ...ensemble,
+    predictedResult: sideLabel,
     gameType: 'sicbo',
     sicbo: {
-      baoProb,
-      baoHint: false,
-      viTong,           // TỔNG 3 viên (vị)
+      side: sideLabel,
+      sideRange: isTai ? '11-18' : '3-10',
+      viTong,
       viConf,
-      viTop3: top3.map(x => x.sum),
-      note: 'Vị = tổng 3 XX · Bão hiếm, không ép đoán bão'
+      viTop3,           // đúng 3 lần tổng (cùng phía TX)
+      diceHints,
+      note: sideLabel + ' → 3 vị trong ' + (isTai ? '11–18' : '3–10')
     }
   };
 }
@@ -3867,6 +4006,8 @@ async function pollFeed(id) {
     // list[0] = phiên MỚI NHẤT (số lớn nhất)
     const latest = list[0];
     f.lastPolledAt = Date.now();
+    f.rawMaxSession = sessionNum(latest.session);
+    f.rawTop5 = list.slice(0, 5).map(x => String(x.session));
     // Nếu API trả phiên hiện tại (đang mở) riêng
     const openSess = data && (data.phien_hien_tai ?? data.phienHienTai ?? data.current_session ?? data.currentSession);
     if (openSess != null && openSess !== '') f.openSession = openSess;
