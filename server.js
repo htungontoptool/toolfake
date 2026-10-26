@@ -35,14 +35,14 @@ class Engine {
         for (let i = 1; i <= 10; i++) {
             if (this[`model${i}`]) {
                 this.models[`model${i}`] = this[`model${i}`].bind(this);
-                this.weights[`model${i}`] = i === 1 ? 0.15 : 1.0;
+                this.weights[`model${i}`] = i === 1 ? 0.08 : 1.0;
                 this.modelHits[`model${i}`] = { win: 0, loss: 0, ewma: 0.5 };
             }
         }
         this.models['model_antiBreak'] = this.model_antiBreak.bind(this);
         this.weights['model_antiBreak'] = 1.7;
         this.modelHits['model_antiBreak'] = { win: 0, loss: 0, ewma: 0.5 };
-        for (let i = 11; i <= 21; i++) {
+        for (let i = 11; i <= 25; i++) {
             if (this[`model${i}`]) {
                 this.models[`model${i}`] = this[`model${i}`].bind(this);
                 this.weights[`model${i}`] = 1.0;
@@ -50,14 +50,18 @@ class Engine {
             }
         }
         // Pattern-8 lookup weight hơi cao vì bảng thực nghiệm
-        if (this.models['model16']) this.weights['model16'] = 1.35;
-        if (this.models['model17']) this.weights['model17'] = 0.7; // RLE — giảm 1-1
-        if (this.models['model18']) this.weights['model18'] = 1.25;
-        if (this.models['model19']) this.weights['model19'] = 1.15;
-        if (this.models['model20']) this.weights['model20'] = 1.45;
-        if (this.models['model21']) this.weights['model21'] = 1.55; // đọc cầu cao cấp
-        if (this.models['model_antiBreak']) this.weights['model_antiBreak'] = 1.9;
-        if (this.models['model16']) this.weights['model16'] = 1.5; // pattern8 table
+        // SIÊU NÂNG CẤP trọng số model 16-25 + antiBreak
+        if (this.models['model16']) this.weights['model16'] = 1.55;
+        if (this.models['model17']) this.weights['model17'] = 0.85;
+        if (this.models['model18']) this.weights['model18'] = 1.30;
+        if (this.models['model19']) this.weights['model19'] = 1.20;
+        if (this.models['model20']) this.weights['model20'] = 1.55;
+        if (this.models['model21']) this.weights['model21'] = 1.65;
+        if (this.models['model_antiBreak']) this.weights['model_antiBreak'] = 1.95;
+        if (this.models['model22']) this.weights['model22'] = 1.35;
+        if (this.models['model23']) this.weights['model23'] = 1.25;
+        if (this.models['model24']) this.weights['model24'] = 0.95;
+        if (this.models['model25']) this.weights['model25'] = 1.30;
     }
 
     addResult(result, diceSum = null) {
@@ -190,16 +194,24 @@ class Engine {
 
     // ===== CÁC MODEL DỰ ĐOÁN (giữ nguyên tên, nâng cấp logic) =====
 
-    // Model 1: chỉ nhận 1-1 khi xác nhận rõ (6+ phiên đan xen) — tránh bắt 1-1 ảo
+    // Model 1: SIÊU KHÓ bắt 1-1 — chỉ khi ≥12 phiên đan xen sạch (mọi phiên đều flip)
     model1() {
-        const recent = this.history.slice(-10);
-        if (recent.length < 8) return null;
+        const recent = this.history.slice(-14);
+        if (recent.length < 12) return null;
         let flips = 0;
         for (let i = 1; i < recent.length; i++) if (recent[i] !== recent[i - 1]) flips++;
-        if (flips < recent.length - 1) return null;
+        // phải gần như 100% flip (cho phép tối đa 1 lần không flip)
+        if (flips < recent.length - 2) return null;
+        // kiểm tra RLE: nếu có đoạn ≥2 thì không phải 1-1
+        let run = 1, maxRun = 1;
+        for (let i = 1; i < recent.length; i++) {
+            if (recent[i] === recent[i-1]) { run++; maxRun = Math.max(maxRun, run); }
+            else run = 1;
+        }
+        if (maxRun >= 2) return null;
         const last = recent[recent.length - 1];
         const pred = last === 'T' ? 'X' : 'T';
-        return { prediction: pred, confidence: 0.55, reason: `1-1 sạch ${recent.length} phiên → đảo nhẹ` };
+        return { prediction: pred, confidence: 0.48, reason: `1-1 sạch ${recent.length} phiên (hiếm) → đảo nhẹ` };
     }
 
     // Model Anti-Break: dung hazard thuc nghiem cua chuoi
@@ -815,6 +827,58 @@ class Engine {
         return null;
     }
 
+    // ====== SIÊU THUẬT TOÁN MỚI (model22-25) ======
+    model22() {
+        // Fibonacci Streak: đảo chiều tại các mốc Fibonacci (1,2,3,5,8,13)
+        const h = this.history; if (!h || h.length < 3) return null;
+        const last = h[h.length-1]; let streak = 1;
+        for (let i = h.length-2; i >= 0 && h[i] === last; i--) streak++;
+        const fibs = [1,2,3,5,8,13,21];
+        if (fibs.includes(streak)) {
+            return { prediction: last === 'T' ? 'X' : 'T', confidence: 0.72 + Math.min(0.15, streak*0.01), reason: `Fibonacci @ chuỗi ${streak} → đảo chiều` };
+        }
+        return { prediction: last, confidence: 0.58, reason: `Fibonacci: chuỗi ${streak} chưa tới mốc → tiếp` };
+    }
+    model23() {
+        // Markov 2-step: dựa trên cặp 2 kết quả cuối
+        const h = this.history; if (!h || h.length < 10) return null;
+        const last2 = h.slice(-2).join('');
+        let tCount = 0, xCount = 0;
+        for (let i = 0; i < h.length - 2; i++) {
+            if (h[i] === h[h.length-2] && h[i+1] === h[h.length-1]) {
+                if (h[i+2] === 'T') tCount++; else xCount++;
+            }
+        }
+        const total = tCount + xCount;
+        if (total < 3) return null;
+        if (tCount > xCount) return { prediction: 'T', confidence: 0.55 + (tCount/total)*0.2, reason: `Markov 2-step [${last2}]: T=${tCount} X=${xCount}` };
+        return { prediction: 'X', confidence: 0.55 + (xCount/total)*0.2, reason: `Markov 2-step [${last2}]: T=${tCount} X=${xCount}` };
+    }
+    model24() {
+        // Entropy: đo độ ngẫu nhiên — nếu quá ngẫu nhiên thì cảnh báo, dự đoán nhẹ
+        const h = this.history; if (!h || h.length < 8) return null;
+        const recent = h.slice(-10);
+        const t = recent.filter(x => x === 'T').length;
+        const x = recent.length - t;
+        const pT = t/recent.length, pX = x/recent.length;
+        const entropy = -(pT * Math.log2(pT||0.01) + pX * Math.log2(pX||0.01));
+        if (entropy > 0.95) return { prediction: h[h.length-1], confidence: 0.52, reason: `Entropy cao ${entropy.toFixed(2)} → ngẫu nhiên, cẩn thận` };
+        const pick = t >= x ? 'T' : 'X';
+        return { prediction: pick, confidence: 0.62 + (1-entropy)*0.2, reason: `Entropy ${entropy.toFixed(2)} → lệch ${pick==='T'?'TÀI':'XỈU'}` };
+    }
+    model25() {
+        // Weighted Recent: nặng kết quả gần nhất (EWMA)
+        const h = this.history; if (!h || h.length < 5) return null;
+        let wT = 0, wX = 0, totalW = 0;
+        for (let i = 0; i < h.length; i++) {
+            const w = Math.pow(0.85, h.length - 1 - i);
+            if (h[i] === 'T') wT += w; else wX += w;
+            totalW += w;
+        }
+        if (wT > wX) return { prediction: 'T', confidence: 0.55 + (wT/totalW - 0.5)*0.5, reason: `EWMA: Tài ${(wT/totalW*100).toFixed(0)}%` };
+        return { prediction: 'X', confidence: 0.55 + (wX/totalW - 0.5)*0.5, reason: `EWMA: Xỉu ${(wX/totalW*100).toFixed(0)}%` };
+    }
+
     // Ensemble: Log-odds pooling + trong so EWMA accuracy + shrink + cooling
     getEnsemblePrediction() {
         const allPreds = this.getAllPredictions();
@@ -831,11 +895,13 @@ class Engine {
         for (const [modelName, pred] of Object.entries(allPreds)) {
             if (!pred || !pred.prediction) continue;
             let baseW = (this.weights[modelName] !== undefined ? this.weights[modelName] : 1.0);
-            // Regime-aware: bệt → boost antiBreak/model20; 1-1 regime → modest model1
-            if (isBet && (modelName === 'model_antiBreak' || modelName === 'model20' || modelName === 'model17')) baseW *= 1.25;
-            if (isNhip && modelName === 'model1') baseW *= 1.1;
-            if (isBet && modelName === 'model1') baseW *= 0.25;
-            if (isBet && modelName === 'model_antiBreak') baseW *= 1.35; // đừng bắt 1-1 khi đang bệt
+            // SIÊU NÂNG: học cầu nhiều, giảm 1-1
+            if (isBet && (modelName === 'model_antiBreak' || modelName === 'model20' || modelName === 'model17' || modelName === 'model21')) baseW *= 1.35;
+            if (isBet && (modelName === 'model16' || modelName === 'model22' || modelName === 'model23')) baseW *= 1.2;
+            if (isNhip && modelName === 'model1') baseW *= 0.7; // giảm bắt 1-1 kể cả khi regime nhịp
+            if (isBet && modelName === 'model1') baseW *= 0.12;
+            if (isBet && modelName === 'model_antiBreak') baseW *= 1.4;
+            if (!isNhip && modelName === 'model1') baseW *= 0.35; // hầu như bỏ model1 khi không phải nhịp sạch
             const ewma = this.modelHits[modelName] ? this.modelHits[modelName].ewma : 0.5;
             const accMult = 0.5 + ewma;
             const w = baseW * accMult * pred.confidence;
@@ -1172,9 +1238,9 @@ function startTelegramBot(options) {
     text += '👋 Xin chào <b>' + esc(name) + '</b>\n\n';
     if (admin) {
       text += '🛠 <b>CHẾ ĐỘ QUẢN TRỊ VIÊN</b>\n';
-      text += '├─ Mở Mini App quản trị\n';
+      text += '├─ Bảng điều khiển nút: /admin\n';
       text += '├─ Duyệt key nhanh bằng nút\n';
-      text += '└─ Lệnh: /admin /pending /keys\n\n';
+      text += '└─ Lệnh text: /helpadmin /pending /keys\n\n';
     } else {
       text += '🎮 <b>DỊCH VỤ CỦA CHÚNG TÔI</b>\n';
       text += '├─ 🎁 Key free: /getkeyv1\n';
@@ -1185,27 +1251,28 @@ function startTelegramBot(options) {
     text += '💬 Hỗ trợ: <b>@SunNetWin</b> · /menu';
     const rows = [];
     if (base) {
-      const adminBase = String(process.env.PUBLIC_ADMIN_URL || '').replace(/\/+$/, '') || (base + '/admin.html');
-      const url = admin ? adminBase : (base.endsWith('.html') ? base : base + '/');
-      rows.push([{ text: admin ? '🛠 Mở Admin (Mini App)' : 'ToolTungTung', web_app: { url: url } }]);
+      const url = (base.endsWith('.html') ? base : base + '/'); // admin.html đã tắt — mọi người mở Mini App
+      rows.push([{ text: '🎮 Mở Tool (Mini App)', web_app: { url: url } }]);
     }
     if (admin) {
       rows.push([
-        { text: '📩 Chờ duyệt', callback_data: 'adm:pending' },
-        { text: '✅ Duyệt tất cả', callback_data: 'adm:approveall' }
+        { text: '🛠 Bảng Admin', callback_data: 'adm:home' },
+        { text: '📩 Chờ duyệt', callback_data: 'adm:pending' }
       ]);
       rows.push([
-        { text: '🔑 Danh sách key', callback_data: 'adm:keys' },
-        { text: '📖 Hướng dẫn', callback_data: 'adm:help' }
+        { text: '✅ Duyệt all', callback_data: 'adm:approveall' },
+        { text: '🔑 Keys', callback_data: 'adm:dokeys' }
+      ]);
+      rows.push([
+        { text: '🎮 Games', callback_data: 'adm:dogames' },
+        { text: '📊 Stats', callback_data: 'adm:dostats' }
+      ]);
+      rows.push([
+        { text: '⚙️ Settings', callback_data: 'adm:dosettings' },
+        { text: '📘 Lệnh text', callback_data: 'adm:cmds' }
       ]);
     }
-    // User thường: chỉ 1 nút duy nhất mở Mini App
-    if (!admin) {
-      // chỉ giữ nút web_app ở trên, không thêm nút nào khác
-    }
-    if (admin) {
-      rows.push([{ text: '⚙️ Cài đặt', callback_data: 'adm:settings' }, { text: '📋 Menu đầy đủ', callback_data: 'cmd:menu' }]);
-    }
+    // User thường: chỉ nút Mini App (web_app) — không thêm nút lệnh
     const extra = { reply_markup: { inline_keyboard: rows } };
     if (!base) {
       text += '\n\n⚠️ Chưa set <code>PUBLIC_URL</code> — Mini App chưa gắn domain HTTPS.';
@@ -1215,14 +1282,16 @@ function startTelegramBot(options) {
 
   async function showUserMenu(chatId) {
     await send(chatId,
-      '📋 <b>MENU NHANH</b>\n' +
+      '📋 <b>MENU USER</b>\n' +
       '────────────────────\n' +
       '🚀 Mini App — mở tool\n' +
       '🎁 /getkeyv1 — key free\n' +
       '💎 /muakeytx — mua key\n' +
       '🔄 /resetkeytx — reset key\n' +
-      '⏳ /status — yêu cầu đang chờ\n' +
-      '🔎 /infotik @user · /infofb link\n' +
+      '🔑 /mykey · 👤 /checkme · /id\n' +
+      '📱 /checktt @user — TikTok\n' +
+      '📘 /checkfb · 📸 /checkig · ▶️ /checkyt\n' +
+      '🔍 /check — full menu lệnh\n' +
       '────────────────────\n' +
       '💬 @SunNetWin',
       { reply_markup: { inline_keyboard: [
@@ -1232,39 +1301,71 @@ function startTelegramBot(options) {
     );
   }
 
-  async function showAdminHelp(chatId) {
-    await send(chatId,
-`🛠 <b>ADMIN</b>
-────────────────
-🔑 <b>Key</b>
-/keys — danh sách
-/key &lt;id|mã&gt; — chi tiết
-/createkey [giờ] [TB] [nhãn]
-/resetdevice &lt;id|mã&gt;
-/revoke &lt;id|mã&gt;
-
-📩 <b>Yêu cầu</b>
-/pending
-/approve &lt;id&gt;
-/reject &lt;id&gt;
-/approveall — duyệt tất cả pending
-
-⚙️ <b>Cấu hình</b>
-/settask &lt;hướng dẫn nhiệm vụ&gt;
-/setpromo &lt;câu copy quảng cáo&gt;
-/settaskphotos &lt;số ảnh&gt;
-/settasktime &lt;giây&gt;
-/setmaint on|off [nội dung]
-/lockgame &lt;id&gt; · /unlockgame &lt;id&gt;
-/lockcmd &lt;lệnh&gt; · /unlockcmd &lt;lệnh&gt;
-/setbank &lt;NH&gt; &lt;STK&gt; &lt;chủ&gt;
-/addplan &lt;id&gt; &lt;nhãn&gt; &lt;giá&gt; &lt;giờ&gt;
-/delplan &lt;id&gt;
-/plans
-/settg &lt;user&gt;
-/stats
-
-VD: <code>/createkey 24 3 VIP 1N</code>`);
+  async function showAdminHelp(chatId, page) {
+    page = page || 'home';
+    const kb = (rows) => ({ reply_markup: { inline_keyboard: rows } });
+    if (page === 'home') {
+      return send(chatId,
+        '🛠 <b>BẢNG ĐIỀU KHIỂN ADMIN</b>\n━━━━━━━━━━━━━━━\nChọn nhóm bên dưới — hoặc gõ lệnh text.\nUser vẫn dùng lệnh bình thường.',
+        kb([
+          [{ text: '📩 Yêu cầu', callback_data: 'adm:req' }, { text: '🔑 Key', callback_data: 'adm:keys' }],
+          [{ text: '🎮 Game', callback_data: 'adm:games' }, { text: '💳 Gói & Bank', callback_data: 'adm:plans' }],
+          [{ text: '⚙️ Hệ thống', callback_data: 'adm:sys' }, { text: '📢 Site / Bot', callback_data: 'adm:site' }],
+          [{ text: '📊 Stats', callback_data: 'adm:dostats' }, { text: '👥 Users', callback_data: 'adm:dousers' }],
+          [{ text: '📜 Logs', callback_data: 'adm:dologs' }, { text: '🏓 Ping', callback_data: 'adm:doping' }],
+          [{ text: '📘 Lệnh text đầy đủ', callback_data: 'adm:cmds' }]
+        ])
+      );
+    }
+    if (page === 'req') {
+      return send(chatId, '📩 <b>YÊU CẦU</b>\n• Nút nhanh bên dưới\n• Lệnh: /pending /approve /reject /approveall /rejectall /orders', kb([
+        [{ text: '📩 Xem pending', callback_data: 'adm:pending' }, { text: '✅ Duyệt tất cả', callback_data: 'adm:approveall' }],
+        [{ text: '🗑️ Từ chối tất cả', callback_data: 'adm:rejectall' }, { text: '💳 Orders', callback_data: 'adm:doorders' }],
+        [{ text: '◀️ Menu admin', callback_data: 'adm:home' }]
+      ]));
+    }
+    if (page === 'keys') {
+      return send(chatId, '🔑 <b>KEY</b>\nLệnh:\n<code>/createkey 24 3 VIP</code>\n<code>/givekey tgid 24 3</code>\n<code>/findkey tgid</code>\n<code>/key id</code> · /delkey · /extendkey · /revoke', kb([
+        [{ text: '📋 List keys', callback_data: 'adm:dokeys' }, { text: '✅ Active', callback_data: 'adm:doactive' }],
+        [{ text: '⏰ Expired', callback_data: 'adm:doexpired' }, { text: '🧹 Clear expired', callback_data: 'adm:doclearkeys' }],
+        [{ text: '◀️ Menu admin', callback_data: 'adm:home' }]
+      ]));
+    }
+    if (page === 'games') {
+      return send(chatId, '🎮 <b>GAME</b>\n<code>/games</code> · <code>/gamedetail id</code>\n<code>/addgame id parser url [nhãn]</code>\n<code>/setgame id url</code> · /setplayurl · /testgame\nParser: sunwin|lc79|max789|baccarat', kb([
+        [{ text: '📋 Danh sách', callback_data: 'adm:dogames' }, { text: '⚠️ Lỗi API', callback_data: 'adm:dogameerr' }],
+        [{ text: '✅ Bật all', callback_data: 'adm:doenableall' }, { text: '🔒 Tắt all', callback_data: 'adm:dodisableall' }],
+        [{ text: '♻️ Reload', callback_data: 'adm:doreload' }],
+        [{ text: '◀️ Menu admin', callback_data: 'adm:home' }]
+      ]));
+    }
+    if (page === 'plans') {
+      return send(chatId, '💳 <b>GÓI & BANK</b>\n<code>/plans</code>\n<code>/addplan id nhãn giá giờ</code>\n<code>/setbank NH STK chủ</code>\n<code>/setplanprice id giá</code>', kb([
+        [{ text: '📦 Xem gói', callback_data: 'adm:doplans' }, { text: '🏦 Xem bank', callback_data: 'adm:dobank' }],
+        [{ text: '◀️ Menu admin', callback_data: 'adm:home' }]
+      ]));
+    }
+    if (page === 'sys') {
+      return send(chatId, '⚙️ <b>HỆ THỐNG</b>\n<code>/settings</code>\n<code>/setmaint on|off</code>\n<code>/setpoll ms</code> · /setmaxdevices\n<code>/lockcmd getkey</code>', kb([
+        [{ text: '⚙️ Settings', callback_data: 'adm:dosettings' }, { text: '🛠 Bảo trì ON', callback_data: 'adm:mainton' }],
+        [{ text: '✅ Bảo trì OFF', callback_data: 'adm:maintoff' }],
+        [{ text: '◀️ Menu admin', callback_data: 'adm:home' }]
+      ]));
+    }
+    if (page === 'site') {
+      return send(chatId, '📢 <b>SITE / BOT</b>\n<code>/setannounce ...</code>\n<code>/setpromo ...</code> · /settask\n<code>/setwatermark</code> · /setsitetitle · /setsupport', kb([
+        [{ text: '📣 Xem announce', callback_data: 'adm:doannounce' }],
+        [{ text: '◀️ Menu admin', callback_data: 'adm:home' }]
+      ]));
+    }
+    if (page === 'cmds') {
+      return send(chatId, '📘 <b>LỆNH TEXT ĐẦY ĐỦ</b>\nGõ:\n• /helpadmin\n• /helpadmin2 — game nâng cao\n• /helpadmin3 — key · user · hệ thống\n\nMọi nút chỉ là lối tắt — lệnh text vẫn dùng 100%.', kb([
+        [{ text: '📘 helpadmin', callback_data: 'adm:dohelpadmin' }, { text: '📘 help 2', callback_data: 'adm:dohelpadmin2' }],
+        [{ text: '📘 help 3', callback_data: 'adm:dohelpadmin3' }],
+        [{ text: '◀️ Menu admin', callback_data: 'adm:home' }]
+      ]));
+    }
+    return showAdminHelp(chatId, 'home');
   }
 
   async function notifyAdmins(request, proofFileId) {
@@ -1272,29 +1373,53 @@ VD: <code>/createkey 24 3 VIP 1N</code>`);
     const planText = request.type === 'payment'
       ? `💎 ${esc(request.planLabel)} · ${fmt(request.price)}đ · ${request.durationHours}h`
       : request.type === 'reset' ? '🔄 Reset thiết bị' : '🎁 Key free (nhiệm vụ)';
+    let profileBlock = '';
+    try {
+      if (typeof userProfiles !== 'undefined' && request.telegramId && userProfiles[String(request.telegramId)]) {
+        const p = userProfiles[String(request.telegramId)];
+        profileBlock = `\n📡 IP: <code>${esc(p.lastIp || '—')}</code>\n🖥 UA: <code>${esc(String(p.lastUa || '—').slice(0, 80))}</code>\n🌐 Lang: ${esc(p.languageCode || '—')} · Premium: ${p.isPremium ? 'yes' : 'no'}`;
+      }
+    } catch (e) {}
     const text =
 `📩 <b>YÊU CẦU MỚI</b> #${request.id}
 ────────────────────
 👤 ${esc(request.userName)} (@${esc(request.username || '—')})
 🆔 <code>${request.telegramId}</code>
 📦 ${planText}
-${request.groupLink ? '🔗 ' + esc(request.groupLink) + '\n' : ''}
-Bấm nút hoặc gõ lệnh:`;
+📷 Ảnh: <b>${(request.proofFileIds && request.proofFileIds.length) || (proofFileId ? 1 : 0)}</b>${profileBlock}
+${request.groupLink ? '🔗 ' + esc(request.groupLink) + '\n' : ''}${request.caption ? '💬 ' + esc(String(request.caption).slice(0, 120)) + '\n' : ''}
+Bấm nút duyệt / từ chối:`;
     const keyboard = {
       inline_keyboard: [[
         { text: '✅ Duyệt', callback_data: 'ap:' + request.id },
         { text: '❌ Từ chối', callback_data: 'rj:' + request.id }
+      ], [
+        { text: '👤 Hồ sơ user', callback_data: 'adm:userinfo:' + request.telegramId }
       ]]
     };
+    const ids = Array.isArray(request.proofFileIds) && request.proofFileIds.length
+      ? request.proofFileIds.slice(0, 10)
+      : (proofFileId ? [proofFileId] : []);
     for (const aid of adminIds) {
       try {
-        if (proofFileId) {
-          await sendPhoto(aid, proofFileId, { caption: text, reply_markup: keyboard });
+        if (ids.length >= 2) {
+          // Gộp tất cả ảnh thành 1 album — không spam từng ảnh
+          const media = ids.map((fid, i) => ({
+            type: 'photo',
+            media: fid,
+            caption: i === 0 ? (`📷 Bộ ảnh nhiệm vụ #${request.id} · ${ids.length} ảnh`) : undefined,
+            parse_mode: i === 0 ? 'HTML' : undefined
+          }));
+          await tg('sendMediaGroup', { chat_id: aid, media });
+          await send(aid, text, { reply_markup: keyboard });
+        } else if (ids.length === 1) {
+          await sendPhoto(aid, ids[0], { caption: text, reply_markup: keyboard });
         } else {
           await send(aid, text, { reply_markup: keyboard });
         }
       } catch (e) {
         console.warn('[telegram] notify admin fail', aid, e.message);
+        try { await send(aid, text, { reply_markup: keyboard }); } catch (e2) {}
       }
     }
   }
@@ -1393,11 +1518,8 @@ Bấm nút hoặc gõ lệnh:`;
 🎫 Mã: <b>#${request.id}</b>
 ⏳ Chờ admin duyệt → nhận key
 📱 3 thiết bị · @SunNetWin`);
-      // notify admins with all photos
+      // Gộp all ảnh → 1 album + 1 tin nút duyệt
       await notifyAdmins(request, request.proofFileId);
-      for (let i = 1; i < (request.proofFileIds || []).length; i++) {
-        try { await notifyAdmins(request, request.proofFileIds[i]); } catch {}
-      }
       return;
     }
 
@@ -1580,6 +1702,94 @@ ${promo ? `📌 <b>Câu cần sao chép:</b>\n<code>${esc(promo)}</code>\n` : ''
     return info;
   }
 
+  async function lookupInstagram(input) {
+    let username = String(input || '').trim();
+    const m = username.match(/instagram\.com\/([A-Za-z0-9._]+)/i);
+    if (m) username = m[1];
+    username = username.replace(/^@/, '').split(/[/?#\s]/)[0];
+    if (!username || username.length < 2) throw new Error('Username Instagram không hợp lệ.');
+    const profileUrl = 'https://www.instagram.com/' + username + '/';
+    const headers = {
+      'user-agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+      'accept-language': 'vi-VN,vi;q=0.9,en;q=0.8'
+    };
+    const info = {
+      username, fullName: username, avatar: '', bio: '', verified: false, private: false,
+      followers: null, following: null, posts: null, profileUrl
+    };
+    try {
+      const page = await fetch(profileUrl, { signal: AbortSignal.timeout(12000), headers, redirect: 'follow' });
+      if (!page.ok) throw new Error('HTTP ' + page.status);
+      const html = await page.text();
+      const og = (prop) => {
+        const re = new RegExp('<meta[^>]+property=["\']' + prop + '["\'][^>]+content=["\']([^"\']+)["\']', 'i');
+        const re2 = new RegExp('<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']' + prop + '["\']', 'i');
+        const x = html.match(re) || html.match(re2);
+        return x ? x[1] : '';
+      };
+      info.fullName = og('og:title') || username;
+      info.avatar = og('og:image') || '';
+      info.bio = (og('og:description') || '').slice(0, 200);
+      // "1,234 Followers, 56 Following, 78 Posts - See Instagram photos..."
+      const desc = info.bio;
+      const mf = desc.match(/([\d.,]+[KkMm]?)\s*Followers/i);
+      const mg = desc.match(/([\d.,]+[KkMm]?)\s*Following/i);
+      const mp = desc.match(/([\d.,]+[KkMm]?)\s*Posts/i);
+      const parseCount = (t) => {
+        if (!t) return null;
+        let x = String(t).replace(/,/g, '').trim();
+        const mul = /k$/i.test(x) ? 1e3 : /m$/i.test(x) ? 1e6 : 1;
+        x = x.replace(/[kKmM]$/, '');
+        const n = parseFloat(x);
+        return Number.isFinite(n) ? Math.round(n * mul) : null;
+      };
+      info.followers = parseCount(mf && mf[1]);
+      info.following = parseCount(mg && mg[1]);
+      info.posts = parseCount(mp && mp[1]);
+      if (/private/i.test(html.slice(0, 5000))) info.private = true;
+    } catch (e) {
+      throw new Error('Không lấy được Instagram (private / chặn bot): ' + (e.message || e));
+    }
+    return info;
+  }
+
+  async function lookupYouTube(input) {
+    let raw = String(input || '').trim();
+    let url = raw;
+    if (!/^https?:\/\//i.test(raw)) {
+      raw = raw.replace(/^@/, '');
+      url = 'https://www.youtube.com/@' + encodeURIComponent(raw);
+    }
+    const headers = {
+      'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'accept-language': 'vi-VN,vi;q=0.9,en;q=0.8'
+    };
+    const info = { title: '', description: '', avatar: '', url, channelId: '', handle: '' };
+    try {
+      const page = await fetch(url, { signal: AbortSignal.timeout(12000), headers, redirect: 'follow' });
+      if (!page.ok) throw new Error('HTTP ' + page.status);
+      const html = await page.text();
+      const og = (prop) => {
+        const re = new RegExp('<meta[^>]+property=["\']' + prop + '["\'][^>]+content=["\']([^"\']+)["\']', 'i');
+        const re2 = new RegExp('<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']' + prop + '["\']', 'i');
+        const x = html.match(re) || html.match(re2);
+        return x ? x[1] : '';
+      };
+      info.title = og('og:title') || raw;
+      info.description = (og('og:description') || '').slice(0, 200);
+      info.avatar = og('og:image') || '';
+      info.url = og('og:url') || url;
+      const idm = html.match(/"channelId":"(UC[^"]+)"/);
+      if (idm) info.channelId = idm[1];
+      const hm = html.match(/"vanityChannelUrl":"http[^"]*\/@([^"]+)"/) || raw.match(/@([A-Za-z0-9._-]+)/);
+      if (hm) info.handle = '@' + (hm[1] || '');
+    } catch (e) {
+      throw new Error('Không lấy được YouTube: ' + (e.message || e));
+    }
+    if (!info.title) throw new Error('Không tìm thấy kênh.');
+    return info;
+  }
+
   // ─── Admin commands ─────────────────────────────────────
   async function handleAdminCommand(message, text) {
     const chatId = message.chat.id;
@@ -1588,7 +1798,7 @@ ${promo ? `📌 <b>Câu cần sao chép:</b>\n<code>${esc(promo)}</code>\n` : ''
     const args = parts.slice(1);
     const argText = text.replace(/^\/\S+\s*/, '').trim();
 
-    if (cmd === 'admin' || cmd === 'panel') return showAdminHelp(chatId);
+    if (cmd === 'admin' || cmd === 'panel') return showAdminHelp(chatId, 'home');
 
     if (cmd === 'stats') {
       const keys = options.getKeys ? options.getKeys() : [];
@@ -1794,7 +2004,7 @@ ${promo ? `📌 <b>Câu cần sao chép:</b>\n<code>${esc(promo)}</code>\n` : ''
     // ====== ADMIN: nhiều lệnh chỉnh sửa ======
     if (cmd === 'helpadmin' || cmd === 'adminhelp') {
       if (!isAdmin(fromId)) return send(chatId, '⛔ Chỉ admin.');
-      return send(chatId, '⚙️ <b>MENU LỆNH ADMIN</b>\n━━━━━━━━━━━━━━━\n\n🎮 <b>Game:</b>\n• /games — danh sách game\n• /setgame <id> <url> — set link game\n• /setlabel <id> <tên> — đổi tên game\n• /enablegame <id> — bật game\n• /disablegame <id> — tắt game\n• /lockgame <id> /unlockgame <id>\n\n🔑 <b>Key:</b>\n• /createkey <giờ> <tb> <gói> — tạo key\n• /listkeys — danh sách key\n• /delkey <key> — xóa key\n• /extendkey <key> <giờ> — gia hạn\n• /clearkeys — xóa key hết hạn\n\n⚙️ <b>Cài đặt:</b>\n• /setpoll <giây> — chu kỳ poll\n• /setmaxdevices <số> — tối đa thiết bị\n• /setbank <NH> <STK> <chủ> — ngân hàng\n• /addplan <id> <nhãn> <giá> <giờ>\n• /delplan <id> — xóa gói\n• /plans — danh sách gói\n\n📢 <b>Khác:</b>\n• /broadcast <nội dung> — gửi tất cả user\n• /stats — thống kê\n• /pending — chờ duyệt\n• /approve <id> — duyệt\n• /approveall — duyệt tất cả\n• /setmaint on|off — bảo trì\n• /settg <user> — set admin');
+      return send(chatId, '⚙️ <b>MENU ADMIN · ALL BOT</b>\n━━━━━━━━━━━━━━━\n📘 <b>/helpadmin</b> — trang này\n📘 <b>/helpadmin2</b> — Game nâng cao\n📘 <b>/helpadmin3</b> — Key · User · Hệ thống\n\n🎮 <b>Game cơ bản:</b>\n• /games · /gamedetail &lt;id&gt;\n• /addgame &lt;id&gt; &lt;parser&gt; &lt;url&gt; [nhãn]\n• /delgame &lt;id&gt;\n• /setgame &lt;id&gt; &lt;url&gt;\n• /setplayurl &lt;id&gt; &lt;url&gt;\n• /setlabel · /setparser · /setgroup\n• /enablegame · /disablegame\n• /lockgame · /unlockgame\n• /resetengine &lt;id&gt;\n\n🔑 <b>Key nhanh:</b>\n• /createkey &lt;giờ&gt; &lt;tb&gt; [gói]\n• /givekey &lt;tgid&gt; &lt;giờ&gt; [tb]\n• /listkeys · /keys · /key &lt;id&gt;\n• /delkey · /extendkey · /clearkeys\n\n💳 /plans · /addplan · /delplan · /setbank\n⚙️ /settings · /setpoll · /setmaxdevices\n📢 /broadcast · /stats · /pending · /approve');
     }
     if (cmd === 'setlabel') {
       if (!isAdmin(fromId)) return send(chatId, '⛔ Chỉ admin.');
@@ -1819,6 +2029,411 @@ ${promo ? `📌 <b>Câu cần sao chép:</b>\n<code>${esc(promo)}</code>\n` : ''
       if (FEEDS[gid]) FEEDS[gid].enabled = g.enabled;
       try { saveGameConfigs(); } catch(e){}
       return send(chatId, (g.enabled ? '✅ Đã BẬT' : '🔒 Đã TẮT') + ' game: <b>' + (g.label||gid) + '</b>');
+    }
+    // ===== ALL-BOT ADMIN: thêm/xóa game + playUrl + parser + reset engine =====
+    if (cmd === 'addgame') {
+      if (!isAdmin(fromId)) return send(chatId, '⛔ Chỉ admin.');
+      const args = text.trim().split(/\s+/).slice(1);
+      if (args.length < 3) return send(chatId, '📌 <code>/addgame &lt;id&gt; &lt;parser&gt; &lt;url&gt; [nhãn]</code>\nParser: sunwin | lc79 | max789 | baccarat\nVD: /addgame mytx sunwin https://api... My TX');
+      const gid = String(args[0]).toLowerCase().replace(/[^a-z0-9_]/g,'').slice(0,40);
+      const parser = String(args[1]).toLowerCase();
+      const url = String(args[2]).trim();
+      const label = args.slice(3).join(' ').slice(0,60) || gid;
+      if (!gid) return send(chatId, '❌ ID không hợp lệ');
+      if (!['sunwin','lc79','max789','baccarat'].includes(parser)) return send(chatId, '❌ Parser phải là: sunwin, lc79, max789, baccarat');
+      if (!/^https?:\/\//i.test(url)) return send(chatId, '❌ URL phải http/https');
+      if (gameConfigs.some(x => x.id === gid)) return send(chatId, '❌ ID đã tồn tại: <code>'+gid+'</code>');
+      const config = { id: gid, label, brand: gid, brandLabel: label, variant: '', url, parser, group: parser==='baccarat'?'baccarat':'tx', icon: '', enabled: true, playUrl: '', historyUrl: '', table: '' };
+      gameConfigs.push(config);
+      try { saveGameConfigs(); } catch(e){}
+      try { FEEDS[gid] = createFeed(config); } catch(e){ console.warn('createFeed', e.message); }
+      return send(chatId, '✅ <b>ĐÃ THÊM GAME</b>\n├─ ID: <code>'+gid+'</code>\n├─ Parser: '+parser+'\n├─ Nhãn: '+label+'\n└─ URL: <code>'+url+'</code>');
+    }
+    if (cmd === 'delgame') {
+      if (!isAdmin(fromId)) return send(chatId, '⛔ Chỉ admin.');
+      const gid = String(text.trim().split(/\s+/)[1]||'').toLowerCase().trim();
+      if (!gid) return send(chatId, '📌 <code>/delgame &lt;id&gt;</code>');
+      const i = gameConfigs.findIndex(x => x.id === gid);
+      if (i < 0) return send(chatId, '❌ Không tìm thấy: <code>'+gid+'</code>');
+      const [removed] = gameConfigs.splice(i, 1);
+      delete FEEDS[gid];
+      try { saveGameConfigs(); saveState(); } catch(e){}
+      return send(chatId, '🗑️ Đã xóa game <b>'+(removed.label||gid)+'</b> (<code>'+gid+'</code>)');
+    }
+    if (cmd === 'setplayurl') {
+      if (!isAdmin(fromId)) return send(chatId, '⛔ Chỉ admin.');
+      const args = text.trim().split(/\s+/).slice(1);
+      if (args.length < 2) return send(chatId, '📌 <code>/setplayurl &lt;id&gt; &lt;url&gt;</code>\nVD: /setplayurl sunwin https://sun.win/...');
+      const gid = String(args[0]).toLowerCase().trim();
+      const playUrl = String(args[1]).trim().slice(0,500);
+      const g = gameConfigs.find(x => x.id === gid);
+      if (!g) return send(chatId, '❌ Không tìm thấy game: <code>'+gid+'</code>');
+      g.playUrl = playUrl;
+      if (FEEDS[gid]) FEEDS[gid].playUrl = playUrl;
+      try { saveGameConfigs(); } catch(e){}
+      return send(chatId, '✅ playUrl <b>'+gid+'</b> → <code>'+playUrl+'</code>');
+    }
+    if (cmd === 'setparser') {
+      if (!isAdmin(fromId)) return send(chatId, '⛔ Chỉ admin.');
+      const args = text.trim().split(/\s+/).slice(1);
+      if (args.length < 2) return send(chatId, '📌 <code>/setparser &lt;id&gt; &lt;sunwin|lc79|max789|baccarat&gt;</code>');
+      const gid = String(args[0]).toLowerCase().trim();
+      const parser = String(args[1]).toLowerCase().trim();
+      if (!['sunwin','lc79','max789','baccarat'].includes(parser)) return send(chatId, '❌ Parser không hợp lệ');
+      const g = gameConfigs.find(x => x.id === gid);
+      if (!g) return send(chatId, '❌ Không tìm thấy: <code>'+gid+'</code>');
+      g.parser = parser;
+      if (FEEDS[gid]) FEEDS[gid].parser = parser;
+      try { saveGameConfigs(); } catch(e){}
+      return send(chatId, '✅ Parser <b>'+gid+'</b> → <code>'+parser+'</code>');
+    }
+    if (cmd === 'setgroup') {
+      if (!isAdmin(fromId)) return send(chatId, '⛔ Chỉ admin.');
+      const args = text.trim().split(/\s+/).slice(1);
+      if (args.length < 2) return send(chatId, '📌 <code>/setgroup &lt;id&gt; &lt;tx|sicbo|baccarat&gt;</code>');
+      const gid = String(args[0]).toLowerCase().trim();
+      const group = String(args[1]).toLowerCase().trim();
+      if (!['tx','sicbo','baccarat'].includes(group)) return send(chatId, '❌ Group: tx | sicbo | baccarat');
+      const g = gameConfigs.find(x => x.id === gid);
+      if (!g) return send(chatId, '❌ Không tìm thấy: <code>'+gid+'</code>');
+      g.group = group;
+      if (FEEDS[gid]) FEEDS[gid].group = group;
+      try { saveGameConfigs(); } catch(e){}
+      return send(chatId, '✅ Group <b>'+gid+'</b> → <code>'+group+'</code>');
+    }
+    if (cmd === 'resetengine') {
+      if (!isAdmin(fromId)) return send(chatId, '⛔ Chỉ admin.');
+      const gid = String(text.trim().split(/\s+/)[1]||'').toLowerCase().trim();
+      if (!gid) return send(chatId, '📌 <code>/resetengine &lt;id_game&gt;</code>');
+      const feed = FEEDS[gid];
+      if (!feed) return send(chatId, '❌ Feed không tồn tại: <code>'+gid+'</code>');
+      try {
+        if (feed.engine) {
+          feed.engine.history = [];
+          feed.engine.detailedHistory = [];
+          feed.engine.lastPredictions = {};
+          feed.engine.consecutiveLosses = 0;
+        }
+        feed.history = [];
+        feed.accuracyHistory = [];
+        feed.lastSession = null;
+        try { saveState(); } catch(e){}
+        return send(chatId, '♻️ Đã reset engine + lịch sử game <b>'+gid+'</b>');
+      } catch(e) {
+        return send(chatId, '❌ Lỗi reset: '+e.message);
+      }
+    }
+    if (cmd === 'settings' || cmd === 'viewsettings') {
+      if (!isAdmin(fromId)) return send(chatId, '⛔ Chỉ admin.');
+      const cfg = (typeof options.getConfig === 'function' ? options.getConfig() : {}) || {};
+      const mt = cfg.maintenance || {};
+      const bank = (cfg.bankCode||'') + ' · ' + (cfg.bankAccount||'') + ' · ' + (cfg.bankAccountName||'');
+      return send(chatId, '⚙️ <b>CẤU HÌNH HIỆN TẠI</b>\n━━━━━━━━━━━━━━━\n🎮 Game: <b>'+gameConfigs.length+'</b>\n🔑 Key: <b>'+keys.length+'</b>\n📡 Poll: <b>'+(botSettings.pollMs||'?')+'ms</b>\n📱 Max devices: <b>'+(botSettings.maxDevices||3)+'</b>\n🏦 Bank: <code>'+bank+'</code>\n🛠 Bảo trì: <b>'+(mt.enabled?'ON':'OFF')+'</b>\n🔒 Locked games: <code>'+((mt.lockedGames||[]).join(', ')||'—')+'</code>\n⌨️ Locked cmds: <code>'+((mt.lockedCommands||[]).join(', ')||'—')+'</code>\n🏷 Title: '+(cfg.siteTitle||'—')+'\n💧 WM: '+(cfg.watermarkText||'—').slice(0,40)+'\n💬 Support: '+(cfg.supportUrl||'—')+'\n\n💡 /helpadmin · /helpadmin2 · /helpadmin3');
+    }
+    if (cmd === 'helpadmin2') {
+      if (!isAdmin(fromId)) return send(chatId, '⛔ Chỉ admin.');
+      return send(chatId, '📘 <b>HELP ADMIN 2 · GAME NÂNG CAO</b>\n━━━━━━━━━━━━━━━\n• /gamedetail &lt;id&gt; — chi tiết 1 game\n• /sethistoryurl &lt;id&gt; &lt;url&gt; — URL lịch sử\n• /settable &lt;id&gt; &lt;bàn&gt; — bàn baccarat\n• /setbrand &lt;id&gt; &lt;brand&gt; — brand/icon group\n• /seticon &lt;id&gt; &lt;icon&gt;\n• /clonegame &lt;from&gt; &lt;toId&gt; [nhãn] — nhân bản\n• /testgame &lt;id&gt; — poll thử 1 lần\n• /gameerror — game đang lỗi API\n• /enableall — bật tất cả game\n• /disableall — tắt tất cả game\n• /reloadgames — reload feeds từ file\n• /resetengine &lt;id&gt; — xóa lịch sử engine\n\nParser: sunwin | lc79 | max789 | baccarat');
+    }
+    if (cmd === 'helpadmin3') {
+      if (!isAdmin(fromId)) return send(chatId, '⛔ Chỉ admin.');
+      return send(chatId, '📘 <b>HELP ADMIN 3 · KEY · USER · HỆ THỐNG</b>\n━━━━━━━━━━━━━━━\n🔑 <b>Key:</b>\n• /givekey &lt;tgid&gt; &lt;giờ&gt; [tb] — tạo + gửi user\n• /findkey &lt;tgid|mã&gt; — tìm key\n• /setkeylimit &lt;key&gt; &lt;số tb&gt;\n• /setkeylabel &lt;key&gt; &lt;nhãn&gt;\n• /activekeys · /expiredkeys\n• /revoke &lt;key&gt; — thu hồi\n\n👤 <b>User / đơn:</b>\n• /users — thống kê user\n• /orders — đơn thanh toán gần đây\n• /reject &lt;id&gt; · /rejectall\n• /pending · /approve · /approveall\n\n⚙️ <b>Site / bot:</b>\n• /setwatermark &lt;text&gt;\n• /setsitetitle &lt;text&gt;\n• /setsupport &lt;url|@user&gt;\n• /setannounce &lt;nội dung&gt;\n• /setpromo · /settask · /settaskphotos · /settasktime\n• /logs · /clearlogs · /ping · /whoami\n• /setplanprice &lt;id&gt; &lt;giá&gt;\n• /setplanduration &lt;id&gt; &lt;giờ&gt;\n• /setplandevices &lt;id&gt; &lt;tb&gt;\n• /toggleplan &lt;id&gt; — bật/tắt gói');
+    }
+    if (cmd === 'gamedetail') {
+      if (!isAdmin(fromId)) return send(chatId, '⛔ Chỉ admin.');
+      const gid = String(text.trim().split(/\s+/)[1]||'').toLowerCase().trim();
+      if (!gid) return send(chatId, '📌 <code>/gamedetail &lt;id&gt;</code>');
+      const g = gameConfigs.find(x => x.id === gid);
+      if (!g) return send(chatId, '❌ Không tìm thấy: <code>'+gid+'</code>');
+      const f = FEEDS[gid] || {};
+      return send(chatId, '🎮 <b>'+esc(g.label||gid)+'</b>\n━━━━━━━━━━━━━━━\nID: <code>'+g.id+'</code>\nParser: <code>'+(g.parser||'')+'</code>\nGroup: <code>'+(g.group||'')+'</code>\nEnabled: <b>'+(g.enabled!==false?'ON':'OFF')+'</b>\nAPI: <code>'+esc(String(g.url||'').slice(0,80))+'</code>\nplayUrl: <code>'+esc(String(g.playUrl||'').slice(0,60))+'</code>\nhistoryUrl: <code>'+esc(String(g.historyUrl||'').slice(0,60))+'</code>\ntable: <code>'+(g.table||'—')+'</code>\nbrand/icon: <code>'+(g.brand||'')+'</code> / <code>'+(g.icon||'')+'</code>\nPhiên: '+(f.lastSession||'—')+' · Hist: '+(f.history?f.history.length:0)+'\nLỗi: '+(f.lastError||'—'));
+    }
+    if (cmd === 'sethistoryurl') {
+      if (!isAdmin(fromId)) return send(chatId, '⛔ Chỉ admin.');
+      const args = text.trim().split(/\s+/).slice(1);
+      if (args.length < 2) return send(chatId, '📌 <code>/sethistoryurl &lt;id&gt; &lt;url&gt;</code>');
+      const gid = String(args[0]).toLowerCase().trim();
+      const url = String(args[1]).trim();
+      const g = gameConfigs.find(x => x.id === gid);
+      if (!g) return send(chatId, '❌ Không tìm thấy game');
+      g.historyUrl = url;
+      if (FEEDS[gid]) FEEDS[gid].historyUrl = url;
+      try { saveGameConfigs(); } catch(e){}
+      return send(chatId, '✅ historyUrl <b>'+gid+'</b> đã cập nhật');
+    }
+    if (cmd === 'settable') {
+      if (!isAdmin(fromId)) return send(chatId, '⛔ Chỉ admin.');
+      const args = text.trim().split(/\s+/).slice(1);
+      if (args.length < 2) return send(chatId, '📌 <code>/settable &lt;id&gt; &lt;tên bàn&gt;</code>');
+      const gid = String(args[0]).toLowerCase().trim();
+      const table = args.slice(1).join(' ').slice(0,80);
+      const g = gameConfigs.find(x => x.id === gid);
+      if (!g) return send(chatId, '❌ Không tìm thấy game');
+      g.table = table;
+      if (FEEDS[gid]) FEEDS[gid].table = table;
+      try { saveGameConfigs(); } catch(e){}
+      return send(chatId, '✅ table <b>'+gid+'</b> → <code>'+esc(table)+'</code>');
+    }
+    if (cmd === 'setbrand') {
+      if (!isAdmin(fromId)) return send(chatId, '⛔ Chỉ admin.');
+      const args = text.trim().split(/\s+/).slice(1);
+      if (args.length < 2) return send(chatId, '📌 <code>/setbrand &lt;id&gt; &lt;brand&gt;</code>');
+      const gid = String(args[0]).toLowerCase().trim();
+      const brand = String(args[1]).trim().slice(0,40);
+      const g = gameConfigs.find(x => x.id === gid);
+      if (!g) return send(chatId, '❌ Không tìm thấy game');
+      g.brand = brand; g.brandLabel = g.brandLabel || brand;
+      try { saveGameConfigs(); } catch(e){}
+      return send(chatId, '✅ brand <b>'+gid+'</b> → <code>'+esc(brand)+'</code>');
+    }
+    if (cmd === 'seticon') {
+      if (!isAdmin(fromId)) return send(chatId, '⛔ Chỉ admin.');
+      const args = text.trim().split(/\s+/).slice(1);
+      if (args.length < 2) return send(chatId, '📌 <code>/seticon &lt;id&gt; &lt;icon&gt;</code>');
+      const gid = String(args[0]).toLowerCase().trim();
+      const icon = String(args[1]).trim().slice(0,40);
+      const g = gameConfigs.find(x => x.id === gid);
+      if (!g) return send(chatId, '❌ Không tìm thấy game');
+      g.icon = icon;
+      try { saveGameConfigs(); } catch(e){}
+      return send(chatId, '✅ icon <b>'+gid+'</b> → <code>'+esc(icon)+'</code>');
+    }
+    if (cmd === 'clonegame') {
+      if (!isAdmin(fromId)) return send(chatId, '⛔ Chỉ admin.');
+      const args = text.trim().split(/\s+/).slice(1);
+      if (args.length < 2) return send(chatId, '📌 <code>/clonegame &lt;fromId&gt; &lt;toId&gt; [nhãn]</code>');
+      const fromId = String(args[0]).toLowerCase().trim();
+      const toId = String(args[1]).toLowerCase().replace(/[^a-z0-9_]/g,'').slice(0,40);
+      const label = args.slice(2).join(' ').slice(0,60) || toId;
+      const src = gameConfigs.find(x => x.id === fromId);
+      if (!src) return send(chatId, '❌ Nguồn không tồn tại');
+      if (gameConfigs.some(x => x.id === toId)) return send(chatId, '❌ toId đã tồn tại');
+      const config = Object.assign({}, src, { id: toId, label: label, brand: toId, brandLabel: label });
+      gameConfigs.push(config);
+      try { saveGameConfigs(); FEEDS[toId] = createFeed(config); } catch(e){}
+      return send(chatId, '✅ Clone <b>'+fromId+'</b> → <code>'+toId+'</code> ('+esc(label)+')');
+    }
+    if (cmd === 'testgame') {
+      if (!isAdmin(fromId)) return send(chatId, '⛔ Chỉ admin.');
+      const gid = String(text.trim().split(/\s+/)[1]||'').toLowerCase().trim();
+      if (!gid || !FEEDS[gid]) return send(chatId, '📌 <code>/testgame &lt;id&gt;</code> — game phải tồn tại');
+      try {
+        await pollFeed(gid);
+        const f = FEEDS[gid];
+        return send(chatId, '🧪 <b>TEST '+gid+'</b>\nPhiên: '+(f.lastSession||'—')+'\nHist: '+(f.history?f.history.length:0)+'\nLỗi: '+(f.lastError||'Không'));
+      } catch(e) {
+        return send(chatId, '❌ Test lỗi: '+e.message);
+      }
+    }
+    if (cmd === 'gameerror') {
+      if (!isAdmin(fromId)) return send(chatId, '⛔ Chỉ admin.');
+      const lines = gameConfigs.map(g => {
+        const f = FEEDS[g.id];
+        if (!f || !f.lastError) return null;
+        return '• <code>'+g.id+'</code>: '+esc(String(f.lastError).slice(0,80));
+      }).filter(Boolean);
+      return send(chatId, lines.length ? ('⚠️ <b>GAME LỖI</b>\n'+lines.join('\n')) : '✅ Không game nào đang báo lỗi API');
+    }
+    if (cmd === 'enableall' || cmd === 'disableall') {
+      if (!isAdmin(fromId)) return send(chatId, '⛔ Chỉ admin.');
+      const on = cmd === 'enableall';
+      gameConfigs.forEach(g => { g.enabled = on; if (FEEDS[g.id]) FEEDS[g.id].enabled = on; });
+      try { saveGameConfigs(); } catch(e){}
+      return send(chatId, (on?'✅ Đã BẬT':'🔒 Đã TẮT')+' <b>tất cả</b> game ('+gameConfigs.length+')');
+    }
+    if (cmd === 'reloadgames') {
+      if (!isAdmin(fromId)) return send(chatId, '⛔ Chỉ admin.');
+      try {
+        const loaded = loadJSON(GAMES_FILE, null);
+        if (Array.isArray(loaded)) { gameConfigs = loaded; initializeFeedConfigs(); }
+        return send(chatId, '♻️ Đã reload '+gameConfigs.length+' game từ file');
+      } catch(e) { return send(chatId, '❌ '+e.message); }
+    }
+    if (cmd === 'givekey') {
+      if (!isAdmin(fromId)) return send(chatId, '⛔ Chỉ admin.');
+      const args = text.trim().split(/\s+/).slice(1);
+      if (args.length < 2) return send(chatId, '📌 <code>/givekey &lt;telegramId&gt; &lt;giờ&gt; [tb]</code>\nVD: /givekey 123456789 24 3');
+      const tgid = String(args[0]).replace(/\D/g,'');
+      const hours = Math.max(0, parseInt(args[1],10)||24);
+      const devices = Math.max(1, Math.min(10, parseInt(args[2],10)||3));
+      if (!tgid) return send(chatId, '❌ telegramId không hợp lệ');
+      try {
+        const issued = options.createKey({ label: 'Gift '+hours+'h', durationHours: hours, deviceLimit: devices, source: 'telegram-gift', telegramId: tgid });
+        await send(tgid, '🎁 <b>ADMIN TẶNG KEY</b>\n🔑 <code>'+issued.plainKey+'</code>\n⏱ '+hours+'h · 📱 '+devices+' TB\n\nMở Mini App và đăng nhập bằng mã này.');
+        return send(chatId, '✅ Đã tạo + gửi key cho <code>'+tgid+'</code>\n🔑 <code>'+issued.plainKey+'</code>');
+      } catch(e) { return send(chatId, '❌ '+e.message); }
+    }
+    if (cmd === 'findkey') {
+      if (!isAdmin(fromId)) return send(chatId, '⛔ Chỉ admin.');
+      const q = String(text.trim().split(/\s+/)[1]||'').trim();
+      if (!q) return send(chatId, '📌 <code>/findkey &lt;tgid|mã|id&gt;</code>');
+      const list = (options.getKeys?options.getKeys():keys).filter(k =>
+        String(k.telegramId||'')===q || String(k.id||'').includes(q) || String(k.label||'').toLowerCase().includes(q.toLowerCase()) || String(k.plainKey||'')===q
+      ).slice(0,15);
+      if (!list.length) {
+        const byHash = options.findKey ? options.findKey(q) : findKey(q);
+        if (byHash) list.push(byHash);
+      }
+      if (!list.length) return send(chatId, '❌ Không tìm thấy');
+      const lines = list.map(k => {
+        const st = k.status==='revoked'?'🚫':(options.isExpired&&options.isExpired(k)?'⏰':'✅');
+        return st+' <code>'+(k.id||'')+'</code> · TG '+(k.telegramId||'—')+' · '+(k.label||'')+' · 📱'+((k.deviceHashes||[]).length)+'/'+(k.deviceLimit||3);
+      });
+      return send(chatId, '🔍 <b>KẾT QUẢ</b>\n'+lines.join('\n'));
+    }
+    if (cmd === 'setkeylimit') {
+      if (!isAdmin(fromId)) return send(chatId, '⛔ Chỉ admin.');
+      const args = text.trim().split(/\s+/).slice(1);
+      if (args.length < 2) return send(chatId, '📌 <code>/setkeylimit &lt;key|id&gt; &lt;số tb&gt;</code>');
+      const k = (options.findKey&&options.findKey(args[0])) || (options.getKeys?options.getKeys():keys).find(x=>x.id===args[0]);
+      if (!k) return send(chatId, '❌ Không tìm thấy key');
+      k.deviceLimit = Math.max(1, Math.min(20, parseInt(args[1],10)||3));
+      try { if (options.saveKeys) options.saveKeys(); else saveKeys(); } catch(e){}
+      return send(chatId, '✅ deviceLimit key <code>'+k.id+'</code> → <b>'+k.deviceLimit+'</b>');
+    }
+    if (cmd === 'setkeylabel') {
+      if (!isAdmin(fromId)) return send(chatId, '⛔ Chỉ admin.');
+      const args = text.trim().split(/\s+/).slice(1);
+      if (args.length < 2) return send(chatId, '📌 <code>/setkeylabel &lt;key|id&gt; &lt;nhãn&gt;</code>');
+      const k = (options.findKey&&options.findKey(args[0])) || (options.getKeys?options.getKeys():keys).find(x=>x.id===args[0]);
+      if (!k) return send(chatId, '❌ Không tìm thấy key');
+      k.label = args.slice(1).join(' ').slice(0,80);
+      try { if (options.saveKeys) options.saveKeys(); else saveKeys(); } catch(e){}
+      return send(chatId, '✅ label → <b>'+esc(k.label)+'</b>');
+    }
+    if (cmd === 'activekeys') {
+      if (!isAdmin(fromId)) return send(chatId, '⛔ Chỉ admin.');
+      const list = (options.getKeys?options.getKeys():keys).filter(k => k.status!=='revoked' && !(options.isExpired&&options.isExpired(k))).slice(0,20);
+      if (!list.length) return send(chatId, '📭 Không có key active');
+      return send(chatId, '✅ <b>ACTIVE KEYS</b> ('+list.length+')\n'+list.map(k=>'• <code>'+k.id+'</code> · '+(k.label||'')+' · TG '+(k.telegramId||'—')).join('\n'));
+    }
+    if (cmd === 'expiredkeys') {
+      if (!isAdmin(fromId)) return send(chatId, '⛔ Chỉ admin.');
+      const list = (options.getKeys?options.getKeys():keys).filter(k => options.isExpired&&options.isExpired(k)).slice(0,20);
+      if (!list.length) return send(chatId, '✅ Không có key hết hạn');
+      return send(chatId, '⏰ <b>EXPIRED</b> ('+list.length+')\n'+list.map(k=>'• <code>'+k.id+'</code> · '+(k.label||'')).join('\n'));
+    }
+    if (cmd === 'setwatermark') {
+      if (!isAdmin(fromId)) return send(chatId, '⛔ Chỉ admin.');
+      if (!argText) return send(chatId, '📌 <code>/setwatermark &lt;nội dung&gt;</code>');
+      const cfg = options.getConfig();
+      cfg.watermarkText = argText.slice(0,300);
+      if (options.saveConfig) options.saveConfig(cfg);
+      return send(chatId, '✅ Watermark:\n<code>'+esc(cfg.watermarkText)+'</code>');
+    }
+    if (cmd === 'setsitetitle') {
+      if (!isAdmin(fromId)) return send(chatId, '⛔ Chỉ admin.');
+      if (!argText) return send(chatId, '📌 <code>/setsitetitle &lt;tên&gt;</code>');
+      const cfg = options.getConfig();
+      cfg.siteTitle = argText.slice(0,80);
+      if (options.saveConfig) options.saveConfig(cfg);
+      return send(chatId, '✅ Site title: <b>'+esc(cfg.siteTitle)+'</b>');
+    }
+    if (cmd === 'setsupport') {
+      if (!isAdmin(fromId)) return send(chatId, '⛔ Chỉ admin.');
+      if (!argText) return send(chatId, '📌 <code>/setsupport https://t.me/xxx</code> hoặc <code>@user</code>');
+      const cfg = options.getConfig();
+      let u = argText.trim();
+      if (u.startsWith('@')) u = 'https://t.me/'+u.slice(1);
+      cfg.supportUrl = u.slice(0,200);
+      if (options.saveConfig) options.saveConfig(cfg);
+      return send(chatId, '✅ Support: <code>'+esc(cfg.supportUrl)+'</code>');
+    }
+    if (cmd === 'setannounce') {
+      if (!isAdmin(fromId)) return send(chatId, '⛔ Chỉ admin.');
+      if (!argText) return send(chatId, '📌 <code>/setannounce &lt;nội dung thông báo&gt;</code>');
+      const cfg = options.getConfig();
+      cfg.announceText = argText.slice(0,1000);
+      if (options.saveConfig) options.saveConfig(cfg);
+      return send(chatId, '✅ Đã lưu thông báo (user xem /thongbao):\n'+esc(cfg.announceText).slice(0,200));
+    }
+    if (cmd === 'logs') {
+      if (!isAdmin(fromId)) return send(chatId, '⛔ Chỉ admin.');
+      try {
+        const lines = fs.readFileSync(LOG_FILE,'utf8').split('\n').filter(Boolean).slice(-25);
+        return send(chatId, '📜 <b>LOGS</b> (25 dòng cuối)\n<code>'+esc(lines.join('\n')).slice(0,3500)+'</code>');
+      } catch(e) { return send(chatId, '❌ Không đọc được log'); }
+    }
+    if (cmd === 'clearlogs') {
+      if (!isAdmin(fromId)) return send(chatId, '⛔ Chỉ admin.');
+      try { fs.writeFileSync(LOG_FILE, ''); return send(chatId, '🗑️ Đã xóa log file'); }
+      catch(e) { return send(chatId, '❌ '+e.message); }
+    }
+    if (cmd === 'ping') {
+      if (!isAdmin(fromId)) return send(chatId, '⛔ Chỉ admin.');
+      return send(chatId, '🏓 Pong · ' + new Date().toLocaleString('vi-VN') + '\nGame: '+Object.keys(FEEDS).length+' · Key: '+keys.length);
+    }
+    if (cmd === 'whoami') {
+      return send(chatId, '👤 ID: <code>'+fromId+'</code>\nTên: '+esc(name)+'\nAdmin: '+(isAdmin(fromId)?'✅':'❌'));
+    }
+    if (cmd === 'users') {
+      if (!isAdmin(fromId)) return send(chatId, '⛔ Chỉ admin.');
+      const ids = new Set();
+      (botRequests||[]).forEach(r => { if (r.telegramId) ids.add(String(r.telegramId)); });
+      (keys||[]).forEach(k => { if (k.telegramId) ids.add(String(k.telegramId)); });
+      const pending = (botRequests||[]).filter(r => r.status==='pending').length;
+      return send(chatId, '👥 <b>USERS</b>\nUnique TG: <b>'+ids.size+'</b>\nKey records: <b>'+keys.length+'</b>\nPending requests: <b>'+pending+'</b>');
+    }
+    if (cmd === 'userinfo' || cmd === 'user' || cmd === 'profile') {
+      if (!isAdmin(fromId)) return send(chatId, '⛔ Chỉ admin.');
+      const q = String(args[0] || '').replace(/^@/, '').trim();
+      if (!q) return send(chatId, '📌 <code>/userinfo &lt;telegramId|@username&gt;</code>');
+      let p = null;
+      if (userProfiles[q]) p = userProfiles[q];
+      else {
+        const hit = Object.values(userProfiles).find(u => String(u.username||'').toLowerCase() === q.toLowerCase() || String(u.telegramId) === q);
+        p = hit || null;
+      }
+      if (!p && /^\d+$/.test(q)) {
+        p = { telegramId: q, name: '—', username: '' };
+      }
+      if (!p) return send(chatId, '❌ Chưa có hồ sơ. User cần /start hoặc mở Mini App trước.');
+      const uk = (keys||[]).filter(k => String(k.telegramId) === String(p.telegramId));
+      const reqs = (botRequests||[]).filter(r => String(r.telegramId) === String(p.telegramId)).slice(0, 5);
+      let extra = '\n🔑 Keys gắn: <b>' + uk.length + '</b>';
+      if (uk.length) {
+        extra += '\n' + uk.slice(-3).map(k => '· ' + (k.label||'') + ' · ' + (k.status||'') + ' · 📱' + ((k.deviceHashes||[]).length) + '/' + (k.deviceLimit||3)).join('\n');
+      }
+      extra += '\n📩 Requests: ' + reqs.length;
+      return send(chatId, formatUserProfile(p, extra));
+    }
+    if (cmd === 'topusers') {
+      if (!isAdmin(fromId)) return send(chatId, '⛔ Chỉ admin.');
+      const list = Object.values(userProfiles||{}).sort((a,b)=>(b.lastSeen||0)-(a.lastSeen||0)).slice(0,15);
+      if (!list.length) return send(chatId, '📭 Chưa có user profile');
+      return send(chatId, '👥 <b>TOP USER GẦN ĐÂY</b>\n' + list.map(u => '· <code>'+u.telegramId+'</code> '+(u.username?'@'+u.username:u.name||'')+' · IP '+(u.lastIp||'—')).join('\n'));
+    }
+
+    if (cmd === 'orders') {
+      if (!isAdmin(fromId)) return send(chatId, '⛔ Chỉ admin.');
+      try {
+        const list = (typeof orders!=='undefined' && Array.isArray(orders) ? orders : []).slice().reverse().slice(0,12);
+        if (!list.length) return send(chatId, '📭 Chưa có đơn (orders.js runtime)');
+        return send(chatId, '💳 <b>ORDERS</b>\n'+list.map(o=>'• <code>'+o.id+'</code> '+(o.status||'')+' · '+(o.planLabel||o.planId)+' · '+o.price+'đ · TG '+(o.telegramId||'—')).join('\n'));
+      } catch(e) { return send(chatId, '📭 Orders chưa sẵn sàng trong bot scope'); }
+    }
+    if (cmd === 'rejectall') {
+      if (!isAdmin(fromId)) return send(chatId, '⛔ Chỉ admin.');
+      const pending = (options.getRequests?options.getRequests():[]).filter(r => r.status==='pending');
+      let n = 0;
+      for (const r of pending) {
+        try { options.reviewRequest(r.id, false, 'telegram-rejectall:'+fromId); n++; } catch(e){}
+      }
+      return send(chatId, '🗑️ Đã từ chối <b>'+n+'</b> yêu cầu pending');
+    }
+    if (cmd === 'setplanprice' || cmd === 'setplanduration' || cmd === 'setplandevices' || cmd === 'toggleplan') {
+      if (!isAdmin(fromId)) return send(chatId, '⛔ Chỉ admin.');
+      const args = text.trim().split(/\s+/).slice(1);
+      if (!args[0]) return send(chatId, '📌 Cần id gói');
+      const cfg = options.getConfig();
+      cfg.plans = cfg.plans || [];
+      const p = cfg.plans.find(x => x.id === String(args[0]).toLowerCase());
+      if (!p) return send(chatId, '❌ Không có gói: <code>'+args[0]+'</code> · /plans');
+      if (cmd === 'toggleplan') { p.active = p.active === false ? true : false; }
+      else if (cmd === 'setplanprice') { p.price = Math.max(0, Number(args[1])||0); }
+      else if (cmd === 'setplanduration') { p.durationHours = Math.max(1, Number(args[1])||24); }
+      else if (cmd === 'setplandevices') { p.deviceLimit = Math.max(1, Math.min(20, Number(args[1])||3)); }
+      if (options.saveConfig) options.saveConfig(cfg);
+      return send(chatId, '✅ Gói <b>'+p.id+'</b>\n'+p.label+' · '+p.price+'đ · '+p.durationHours+'h · TB '+(p.deviceLimit||3)+' · '+(p.active===false?'OFF':'ON'));
     }
     if (cmd === 'setpoll') {
       if (!isAdmin(fromId)) return send(chatId, '⛔ Chỉ admin.');
@@ -1892,97 +2507,6 @@ ${promo ? `📌 <b>Câu cần sao chép:</b>\n<code>${esc(promo)}</code>\n` : ''
       ids.forEach(id => { try { send(Number(id), '📢 <b>THÔNG BÁO</b>\n━━━━━━━━━━━━━━━\n\n' + msg); sent++; } catch(e){} });
       return send(chatId, '📢 Đã gửi thông báo cho <b>' + sent + '</b> user.');
     }
-    // ====== USER + FUN + CHECK INFO ======
-    if (cmd === 'fun' || cmd === 'tienich') {
-      return send(chatId, '🎮 <b>LỆNH VUI & TIỆN LỢI</b>\n━━━━━━━━━━━━━━━\n\n🎲 <b>Vui:</b>\n• /ngauNhien — số ngẫu nhiên 0-99\n• /nemXu — ném đồng xu\n• /chon A hay B — bot chọn giúp\n• /keoBuaBao <kéo/búa/bao> — chơi với bot\n• /mayMan — may mắn mấy sao hôm nay\n• /diemDanh — điểm danh vui\n• /noiLen — bot nói câu ngẫu nhiên\n• /doChac <câu hỏi> — độ chắc chắn\n• /anUong — gợi ý ăn gì hôm nay\n• /giacNgua — giờ đi ngủ\n• /ngayTot — hôm nay thế nào\n\n🔍 <b>Check info:</b>\n• /check — xem tất cả lệnh check\n• /checkip — IP của bạn\n• /checkdevice — thiết bị của bạn\n• /checkme — thông tin của bạn trên bot\n• /checkstatus — trạng thái bot\n• /mykey — thông tin key của bạn\n• /infotik @user — check TikTok\n• /infofb link — check Facebook');
-    }
-    if (cmd === 'check') {
-      return send(chatId, '🔍 <b>LỆNH KIỂM TRA THÔNG TIN</b>\n━━━━━━━━━━━━━━━\n\n• /checkip — IP + nhà mạng\n• /checkdevice — thiết bị + trình duyệt\n• /checkme — thông tin của bạn trên bot\n• /checkstatus — trạng thái bot + server\n• /mykey — key của bạn (thời hạn, gói)\n• /infotik @user — thông tin TikTok\n• /infofb link — thông tin Facebook\n• /checkig <tên> — Instagram (sắp ra)\n• /checktt <tên> — TikTok chi tiết\n• /checkyt link — YouTube (sắp ra)\n• /checkemail <mail> — check email (sắp ra)');
-    }
-    if (cmd === 'ngaunhien' || cmd === 'ngauNhien') {
-      const n = Math.floor(Math.random() * 100);
-      return send(chatId, '🎲 Số ngẫu nhiên của bạn: <b>' + n + '</b>');
-    }
-    if (cmd === 'nemxu' || cmd === 'nemXu') {
-      const r = Math.random() < 0.5 ? 'NGỬA 🪙' : 'SẤP 🪙';
-      return send(chatId, '🪙 Ném xong...\n→ <b>' + r + '</b>');
-    }
-    if (cmd === 'chon') {
-      const args = text.trim().split(/\s+/).slice(1).join(' ');
-      if (!args) return send(chatId, '📌 <code>/chon Đi học hay Ngủ nướng?</code>');
-      const parts = args.split(/ hay | hoặc | hoăc |\?/i).map(s => s.trim()).filter(Boolean);
-      if (parts.length < 2) return send(chatId, '🤔 Cho tôi 2 lựa chọn đi!\nVD: /chon Đi học hay Ngủ nướng?');
-      const pick = parts[Math.floor(Math.random() * parts.length)];
-      return send(chatId, '🤔 Chọn giúp bạn...\n→ <b>' + pick + '</b> 😎');
-    }
-    if (cmd === 'keobuabao' || cmd === 'keoBuaBao') {
-      const userPick = String(text.trim().split(/\s+/)[1] || '').toLowerCase();
-      const opts = ['kéo', 'búa', 'bao'];
-      if (!opts.includes(userPick)) return send(chatId, '✌️ <code>/keoBuaBao kéo|búa|bao</code>');
-      const botPick = opts[Math.floor(Math.random() * 3)];
-      let result = '';
-      if (userPick === botPick) result = 'HÒA! Chơi lại đi 😉';
-      else if ((userPick==='kéo'&&botPick==='bao')||(userPick==='búa'&&botPick==='kéo')||(userPick==='bao'&&botPick==='búa')) result = 'BẠN THẮNG! 🎉';
-      else result = 'TÔI THẮNG! Lần sau nhé 😝';
-      return send(chatId, '✌️ Bạn: <b>' + userPick + '</b>\n✊ Tôi: <b>' + botPick + '</b>\n\n→ ' + result);
-    }
-    if (cmd === 'mayman' || cmd === 'mayMan') {
-      const stars = Math.floor(Math.random() * 5) + 1;
-      const starStr = '⭐'.repeat(stars) + '☆'.repeat(5-stars);
-      const msgs = ['Khá đấy! Cứ tự tin lên 💪', 'Tuyệt vời! Hôm nay là của bạn 🔥', 'Bình thường thôi, cẩn thận một chút 🙂', 'Không tốt lắm, ở nhà cho an toàn 😴', 'Trời xanh mây trắng, mọi chuyện đều ổn 🌤️'];
-      return send(chatId, '🍀 Hôm nay của bạn: <b>' + starStr + '</b>\n' + msgs[stars-1]);
-    }
-    if (cmd === 'diemdanh' || cmd === 'diemDanh') {
-      return send(chatId, '✅ <b>ĐIỂM DANH</b>\n━━━━━━━━━━━━━━━\n👤 Bạn có mặt! ✔️\n📅 ' + new Date().toLocaleDateString('vi-VN') + '\n⏰ ' + new Date().toLocaleTimeString('vi-VN') + '\n\n💪 Hôm nay cố gắng nha!');
-    }
-    if (cmd === 'noilen' || cmd === 'noiLen') {
-      const quotes = ['Hôm nay là ngày tốt! Làm gì cũng trôi chảy 😉', 'Đừng lo lắng quá, mọi chuyện rồi sẽ ổn thôi 😊', 'Ăn ngủ đủ giấc là khỏe mạnh 💪', 'Uống nhiều nước vào, tốt cho da đó 💧', 'Cuối tuần rồi, nghỉ ngơi đi bạn ơi 🎉', 'Mỉm cười lên, bạn trông đẹp lắm đó 😊', 'Đừng so sánh mình với ai, bạn là nhất 💯', 'Hôm nay trời đẹp, ra ngoài đi dạo đi 🌤️'];
-      return send(chatId, '🗣️ ' + quotes[Math.floor(Math.random()*quotes.length)]);
-    }
-    if (cmd === 'dochac' || cmd === 'doChac') {
-      const pct = Math.floor(Math.random() * 100) + 1;
-      return send(chatId, '🎯 Độ chắc chắn: <b>' + pct + '%</b>\n' + (pct>=80?'✅ Rất chắc! Làm đi!':pct>=50?'🤔 Cũng được, cân nhắc kỹ':'⚠️ Không chắc lắm, suy nghĩ lại đi'));
-    }
-    if (cmd === 'anuong' || cmd === 'anUong') {
-      const foods = ['Cơm tấm 🍚', 'Bún bò 🍜', 'Phở 🍲', 'Bánh mì 🥖', 'Trà sữa 🧋', 'Cơm gà 🍗', 'Bún chả 🍢', 'Chè 🍮', 'Mì cay 🌶️', 'Pizza 🍕', 'Hamburger 🍔', 'Khoai tây chiên 🍟'];
-      return send(chatId, '🍔 Hôm nay ăn gì nhỉ?\n→ <b>' + foods[Math.floor(Math.random()*foods.length)] + '</b>\n→ Hoặc <b>' + foods[Math.floor(Math.random()*foods.length)] + '</b> cũng ngon\n\n😋 Ăn gì cũng được, miễn là no!');
-    }
-    if (cmd === 'giacngua' || cmd === 'giacNgua') {
-      return send(chatId, '😴 <b>ĐI NGỦ THÔI!</b>\n━━━━━━━━━━━━━━━\n💤 Đủ giấc ngủ là khỏe mạnh\n⏰ Ngủ trước 23h là tốt nhất\n🌙 Ngủ ngon nha!');
-    }
-    if (cmd === 'ngaytot' || cmd === 'ngayTot') {
-      const msgs = ['✅ Hôm nay là ngày tốt! Làm gì cũng thuận lợi 🌟', '☀️ Trời nắng đẹp, tâm trạng tốt, làm gì cũng được!', '🌤️ Hôm nay bình thường thôi, cẩn thận một chút 🙂', '☁️ Hơi u ám, ở nhà xem phim cho vui 🎬', '🌈 Hôm nay may mắn! Cứ tự tin tiến lên 💪'];
-      return send(chatId, msgs[Math.floor(Math.random()*msgs.length)]);
-    }
-    if (cmd === 'checkip' || cmd === 'ip') {
-      return send(chatId, '🌐 <b>THÔNG TIN IP</b>\n━━━━━━━━━━━━━━━\n📍 IP: <code>' + (fromId ? 'Đang kiểm tra...' : 'Không xác định') + '</code>\n🏙️ Vị trí: Việt Nam\n🏠 Nhà mạng: VNPT/Viettel/MobiFone\n🕐 Múi giờ: GMT+7\n\n💡 Mở Mini App để xem chính xác IP + thiết bị!');
-    }
-    if (cmd === 'checkdevice' || cmd === 'device') {
-      return send(chatId, '📱 <b>THÔNG TIN THIẾT BỊ</b>\n━━━━━━━━━━━━━━━\n🖥️ Thiết bị: Đang mở Telegram\n📱 Hệ điều hành: iOS / Android\n🌐 Trình duyệt: Telegram WebView\n\n💡 Mở Mini App để xem chi tiết!');
-    }
-    if (cmd === 'checkme' || cmd === 'me') {
-      return send(chatId, '👤 <b>THÔNG TIN CỦA BẠN</b>\n━━━━━━━━━━━━━━━\n🆔 Telegram ID: <code>' + fromId + '</code>\n🏷️ Tên: ' + esc(name) + '\n📅 Tham gia: ' + new Date().toLocaleDateString('vi-VN') + '\n🔑 Key: ' + (keys.length ? 'Đã kích hoạt ✅' : 'Chưa có key') + '\n💎 Gói: ' + (keys.length ? 'VIP' : 'Free') + '\n\n💬 Hỗ trợ: @SunNetWin');
-    }
-    if (cmd === 'checkstatus' || cmd === 'status' || cmd === 'trangthai' || cmd === 'trangThai') {
-      const gameCount = Object.keys(FEEDS).length;
-      return send(chatId, '✅ <b>TRẠNG THÁI HỆ THỐNG</b>\n━━━━━━━━━━━━━━━\n🤖 Bot: <b>Đang chạy</b> ✅\n🖥️ Server: <b>Online</b> ✅\n🎮 Game đang theo dõi: <b>' + gameCount + '</b>\n🔑 Tổng key: <b>' + keys.length + '</b>\n📦 Phiên bản: <b>VIP FINAL</b>\n\n💡 Mọi thứ hoạt động tốt! 🚀');
-    }
-    if (cmd === 'mykey' || cmd === 'my_key') {
-      const userKeys = keys.filter(k => k.telegramId === String(fromId));
-      if (!userKeys.length) return send(chatId, '🔑 <b>KEY CỦA BẠN</b>\n━━━━━━━━━━━━━━━\n❌ Bạn chưa có key nào.\n\n🎁 Nhận free: /getkeyv1\n💎 Mua VIP: /muakeytx');
-      const k = userKeys[userKeys.length-1];
-      const exp = k.expiresAt ? new Date(k.expiresAt).toLocaleString('vi-VN') : 'Vĩnh viễn';
-      return send(chatId, '🔑 <b>KEY CỦA BẠN</b>\n━━━━━━━━━━━━━━━\n🔑 Mã: <code>' + (k.plainKey||'?') + '</code>\n💎 Gói: ' + (k.label||'VIP') + '\n⏰ Hạn: ' + exp + '\n📱 Thiết bị: ' + (k.deviceLimit||3) + '\n\n💬 Hỗ trợ: @SunNetWin');
-    }
-    if (cmd === 'guide' || cmd === 'huongdan' || cmd === 'trogiup' || cmd === 'troGiup' || cmd === 'help') {
-      return send(chatId, '📖 <b>HƯỚNG DẪN SỬ DỤNG</b>\n━━━━━━━━━━━━━━━\n1️⃣ Mở Mini App bằng nút <b>ToolTungTung</b>\n2️⃣ Nhập key vào ô "Mã truy cập"\n3️⃣ Bấm "Đăng nhập" → chọn game → xem dự đoán\n\n🎁 Key free: /getkeyv1\n💎 Mua key: /muakeytx\n🔄 Reset: /resetkeytx\n🎮 Lệnh vui: /fun\n🔍 Check info: /check\n\n💬 Hỗ trợ: @SunNetWin');
-    }
-    if (cmd === 'support' || cmd === 'hotro') {
-      return send(chatId, '💬 <b>HỖ TRỢ</b>\n━━━━━━━━━━━━━━━\n👤 Admin: @SunNetWin\n📝 Gửi tin nhắn cho admin để được hỗ trợ\n\n⏰ Thời gian phản hồi: 5-30 phút\n\n💡 Mua key: /muakeytx');
-    }
-    if (cmd === 'thongbao' || cmd === 'thongBao' || cmd === 'announce') {
-      return send(chatId, '📢 <b>THÔNG BÁO MỚI NHẤT</b>\n━━━━━━━━━━━━━━━\n✅ Tool đang hoạt động ổn định\n🔑 Mua key tự động qua bot\n🎮 Đã hỗ trợ TX / MD5 / Sicbo / Baccarat\n📱 Mini App mở trực tiếp trong Telegram\n\n💬 Hỗ trợ: @SunNetWin');
-    }
     if (cmd === 'setbank') {
       if (args.length < 3) return send(chatId, '📌 <code>/setbank &lt;NH&gt; &lt;STK&gt; &lt;chủ&gt;</code>');
       const cfg = options.getConfig();
@@ -2031,7 +2555,7 @@ ${promo ? `📌 <b>Câu cần sao chép:</b>\n<code>${esc(promo)}</code>\n` : ''
       return send(chatId, `💎 <b>GÓI</b>\n` + list.map(p => `• <code>${p.id}</code> ${esc(p.label)} · ${fmt(p.price)}đ · ${p.durationHours}h`).join('\n'));
     }
 
-    return send(chatId, '❓ Gõ /admin');
+    return send(chatId, '❓ Gõ /helpadmin để xem lệnh admin');
   }
 
   // ─── Message router ─────────────────────────────────────
@@ -2116,20 +2640,161 @@ ${promo ? `📌 <b>Câu cần sao chép:</b>\n<code>${esc(promo)}</code>\n` : ''
     }
     if (data === 'cmd:start') return showStart(chatId, displayName(cq.from), cq.from);
     if (data === 'cmd:menu') return showUserMenu(chatId);
-    if (data === 'adm:pending' && isAdmin(fromId)) return send(chatId, '📩 Gõ /pending để xem list + nút duyệt từng yêu cầu.');
-    if (data === 'adm:approveall' && isAdmin(fromId)) {
-      const list = (options.getRequests ? options.getRequests() : []).filter(r => r.status === 'pending');
-      let n = 0;
-      for (const r of list) {
-        try {
-          const result = options.reviewRequest(r.id, true, 'telegram-btn-approveall:' + fromId);
-          if (result && result.ok) { n++; try { await deliverReviewedKey(result, chatId); } catch (e) {} }
-        } catch (e) {}
+    // ===== ADMIN INLINE PANEL (nút gọn) =====
+    if (data.startsWith('adm:') && isAdmin(fromId)) {
+      try { await tg('answerCallbackQuery', { callback_query_id: cq.id }); } catch (e) {}
+      const act = data.slice(4);
+      if (['home','req','keys','games','plans','sys','site','cmds'].includes(act)) return showAdminHelp(chatId, act);
+      if (act === 'help') return showAdminHelp(chatId, 'home');
+      if (act === 'pending') {
+        const pending = (options.getRequests ? options.getRequests() : []).filter(r => r.status === 'pending').slice(0, 15);
+        if (!pending.length) return send(chatId, '✅ Không có yêu cầu chờ duyệt.');
+        for (const r of pending) {
+          const line = `📩 <b>#${r.id}</b> · ${r.type || '?'} · TG <code>${r.telegramId || ''}</code> · ${esc(r.userName || r.username || '')}`;
+          await send(chatId, line, { reply_markup: { inline_keyboard: [[
+            { text: '✅ Duyệt', callback_data: 'ap:' + r.id },
+            { text: '❌ Từ chối', callback_data: 'rj:' + r.id }
+          ]] } });
+        }
+        return;
       }
-      return send(chatId, '✅ Duyệt nhanh <b>' + n + '</b> yêu cầu.');
+      if (act === 'approveall') {
+        const list = (options.getRequests ? options.getRequests() : []).filter(r => r.status === 'pending');
+        let n = 0;
+        for (const r of list) {
+          try {
+            const result = options.reviewRequest(r.id, true, 'telegram-btn-approveall:' + fromId);
+            if (result && result.ok) { n++; try { await deliverReviewedKey(result, chatId); } catch (e) {} }
+          } catch (e) {}
+        }
+        return send(chatId, '✅ Duyệt nhanh <b>' + n + '</b> yêu cầu.');
+      }
+      if (act === 'rejectall') {
+        const list = (options.getRequests ? options.getRequests() : []).filter(r => r.status === 'pending');
+        let n = 0;
+        for (const r of list) {
+          try { options.reviewRequest(r.id, false, 'telegram-btn-rejectall:' + fromId); n++; } catch (e) {}
+        }
+        return send(chatId, '🗑️ Từ chối <b>' + n + '</b> yêu cầu.');
+      }
+      if (act === 'dokeys' || act === 'keys') {
+        const list = (options.getKeys ? options.getKeys() : []).slice().sort((a,b)=>(b.created||0)-(a.created||0)).slice(0,12);
+        if (!list.length) return send(chatId, '📭 Chưa có key.');
+        const lines = list.map(k => {
+          const d = (k.deviceHashes||[]).length; const lim = k.deviceLimit||3;
+          const st = k.status==='revoked'?'🚫':(options.isExpired&&options.isExpired(k)?'⏰':'✅');
+          return `${st} <code>${k.id}</code> · ${esc(k.label)} · 📱${d}/${lim}`;
+        });
+        return send(chatId, '🔑 <b>KEYS</b>\n' + lines.join('\n'));
+      }
+      if (act === 'doactive') {
+        const list = (options.getKeys?options.getKeys():[]).filter(k => k.status!=='revoked' && !(options.isExpired&&options.isExpired(k))).slice(0,20);
+        return send(chatId, list.length ? ('✅ <b>ACTIVE</b>\n'+list.map(k=>'• <code>'+k.id+'</code> · '+(k.label||'')).join('\n')) : '📭 Không có key active');
+      }
+      if (act === 'doexpired') {
+        const list = (options.getKeys?options.getKeys():[]).filter(k => options.isExpired&&options.isExpired(k)).slice(0,20);
+        return send(chatId, list.length ? ('⏰ <b>EXPIRED</b>\n'+list.map(k=>'• <code>'+k.id+'</code>').join('\n')) : '✅ Không có key hết hạn');
+      }
+      if (act === 'doclearkeys') {
+        const all = options.getKeys ? options.getKeys() : [];
+        let n = 0;
+        for (let i = all.length - 1; i >= 0; i--) {
+          if (options.isExpired && options.isExpired(all[i])) { all.splice(i,1); n++; }
+        }
+        try { if (options.saveKeys) options.saveKeys(); } catch(e){}
+        return send(chatId, '🧹 Đã xóa <b>'+n+'</b> key hết hạn');
+      }
+      if (act === 'dogames') {
+        const list = (gameConfigs||[]).map(g => '• <code>'+g.id+'</code> — '+(g.label||'')+(g.enabled===false?' 🔒':'')).join('\n');
+        return send(chatId, '🎮 <b>GAMES</b>\n'+(list||'Trống')+'\n\nChi tiết: <code>/gamedetail id</code>');
+      }
+      if (act === 'dogameerr') {
+        const lines = (gameConfigs||[]).map(g => {
+          const f = FEEDS[g.id]; if (!f||!f.lastError) return null;
+          return '• <code>'+g.id+'</code>: '+esc(String(f.lastError).slice(0,80));
+        }).filter(Boolean);
+        return send(chatId, lines.length ? ('⚠️ <b>LỖI</b>\n'+lines.join('\n')) : '✅ Không game lỗi');
+      }
+      if (act === 'doenableall' || act === 'dodisableall') {
+        const on = act === 'doenableall';
+        (gameConfigs||[]).forEach(g => { g.enabled = on; if (FEEDS[g.id]) FEEDS[g.id].enabled = on; });
+        try { saveGameConfigs(); } catch(e){}
+        return send(chatId, (on?'✅ BẬT':'🔒 TẮT')+' tất cả game');
+      }
+      if (act === 'doreload') {
+        try {
+          const loaded = loadJSON(GAMES_FILE, null);
+          if (Array.isArray(loaded)) { gameConfigs.length = 0; gameConfigs.push(...loaded); initializeFeedConfigs(); }
+          return send(chatId, '♻️ Reload '+gameConfigs.length+' game');
+        } catch(e) { return send(chatId, '❌ '+e.message); }
+      }
+      if (act === 'doplans') {
+        const cfg = options.getConfig();
+        const ps = cfg.plans||[];
+        if (!ps.length) return send(chatId, '📭 Chưa có gói');
+        return send(chatId, '📦 <b>PLANS</b>\n'+ps.map(p=>'• <code>'+p.id+'</code> '+p.label+' · '+p.price+'đ · '+p.durationHours+'h · '+(p.active===false?'OFF':'ON')).join('\n'));
+      }
+      if (act === 'dobank') {
+        const cfg = options.getConfig();
+        return send(chatId, '🏦 <b>BANK</b>\n<code>'+(cfg.bankCode||'—')+'</code>\nSTK: <code>'+(cfg.bankAccount||'—')+'</code>\nChủ: '+(cfg.bankAccountName||'—')+'\n\nSửa: <code>/setbank NH STK chủ</code>');
+      }
+      if (act === 'dosettings' || act === 'settings') {
+        const cfg = options.getConfig()||{};
+        const mt = cfg.maintenance||{};
+        return send(chatId, '⚙️ <b>SETTINGS</b>\nGame: '+(gameConfigs?gameConfigs.length:0)+'\nKey: '+(keys?keys.length:0)+'\nBảo trì: '+(mt.enabled?'ON':'OFF')+'\nBank: '+(cfg.bankCode||'—')+'\nSupport: '+(cfg.supportUrl||'—'));
+      }
+      if (act === 'mainton' || act === 'maintoff') {
+        const cfg = options.getConfig();
+        cfg.maintenance = cfg.maintenance || { enabled:false, message:'', lockedGames:[], lockedCommands:[] };
+        cfg.maintenance.enabled = act === 'mainton';
+        if (options.saveConfig) options.saveConfig(cfg);
+        return send(chatId, act==='mainton' ? '🛠 Đã BẬT bảo trì' : '✅ Đã TẮT bảo trì');
+      }
+      if (act === 'doannounce') {
+        const cfg = options.getConfig()||{};
+        return send(chatId, '📣 <b>ANNOUNCE</b>\n'+(cfg.announceText||'(trống — /setannounce ...)'));
+      }
+      if (act === 'dostats') {
+        const ks = options.getKeys?options.getKeys():[];
+        const active = ks.filter(k => k.status!=='revoked' && !(options.isExpired&&options.isExpired(k))).length;
+        const pending = (options.getRequests?options.getRequests():[]).filter(r=>r.status==='pending').length;
+        return send(chatId, `📊 <b>STATS</b>\n🔑 Key: ${ks.length} · ✅ Active: ${active}\n⏳ Pending: ${pending}\n🎮 Game: ${(gameConfigs||[]).length}`);
+      }
+      if (act === 'dousers') {
+        const ids = new Set();
+        (botRequests||[]).forEach(r=>{ if(r.telegramId) ids.add(String(r.telegramId)); });
+        (keys||[]).forEach(k=>{ if(k.telegramId) ids.add(String(k.telegramId)); });
+        return send(chatId, '👥 Unique TG: <b>'+ids.size+'</b>\nKey: '+keys.length+'\nPending: '+((botRequests||[]).filter(r=>r.status==='pending').length));
+      }
+      if (act === 'doorders') {
+        try {
+          const list = (typeof orders!=='undefined' && Array.isArray(orders)?orders:[]).slice().reverse().slice(0,10);
+          if (!list.length) return send(chatId, '📭 Chưa có đơn');
+          return send(chatId, '💳 <b>ORDERS</b>\n'+list.map(o=>'• <code>'+o.id+'</code> '+o.status+' · '+(o.planLabel||'')+' · '+o.price+'đ').join('\n'));
+        } catch(e) { return send(chatId, '📭 Orders N/A'); }
+      }
+      if (act === 'dologs') {
+        try {
+          const lines = fs.readFileSync(LOG_FILE,'utf8').split('\n').filter(Boolean).slice(-20);
+          return send(chatId, '📜 <b>LOGS</b>\n<code>'+esc(lines.join('\n')).slice(0,3500)+'</code>');
+        } catch(e) { return send(chatId, '❌ Không đọc log'); }
+      }
+      if (act === 'doping') return send(chatId, '🏓 Pong · '+new Date().toLocaleString('vi-VN'));
+      if (act === 'dohelpadmin') return send(chatId, 'Gõ <code>/helpadmin</code> để xem menu text đầy đủ.');
+      if (act === 'dohelpadmin2') return send(chatId, 'Gõ <code>/helpadmin2</code>');
+      if (act === 'dohelpadmin3') return send(chatId, 'Gõ <code>/helpadmin3</code>');
+      return showAdminHelp(chatId, 'home');
     }
-    if (data === 'adm:keys' && isAdmin(fromId)) return send(chatId, '🔑 Gõ /keys để xem danh sách.');
-    if (data === 'adm:help' && isAdmin(fromId)) return showAdminHelp(chatId);
+    if (data.startsWith('adm:') && !isAdmin(fromId)) {
+      try { await tg('answerCallbackQuery', { callback_query_id: cq.id, text: 'Chỉ admin', show_alert: true }); } catch(e){}
+      return;
+    }
+    if (data.startsWith('adm:userinfo:') && isAdmin(fromId)) {
+      const tid = data.slice('adm:userinfo:'.length);
+      const p = userProfiles[tid] || { telegramId: tid };
+      const uk = (keys||[]).filter(k => String(k.telegramId) === String(tid));
+      return send(chatId, formatUserProfile(p, '\n🔑 Keys: '+uk.length));
+    }
     // Admin quick approve / reject
     if (data.startsWith('ap:') || data.startsWith('rj:')) {
       if (!isAdmin(fromId)) {
@@ -2153,6 +2818,16 @@ ${promo ? `📌 <b>Câu cần sao chép:</b>\n<code>${esc(promo)}</code>\n` : ''
     const chatId = message.chat.id;
     const fromId = String(from.id);
     const sessions = options.getSessions();
+    try {
+      touchUserProfile(fromId, {
+        name: displayName(from),
+        username: from.username || '',
+        languageCode: from.language_code || '',
+        isPremium: !!from.is_premium,
+        isBot: !!from.is_bot,
+        lastSource: 'telegram'
+      });
+    } catch (e) {}
 
     // photo proofs
     if (message.photo?.length) {
@@ -2167,7 +2842,7 @@ ${promo ? `📌 <b>Câu cần sao chép:</b>\n<code>${esc(promo)}</code>\n` : ''
     // admin commands first
     if (text.startsWith('/') && isAdmin(fromId)) {
       const cmd = text.split(/\s+/)[0].toLowerCase().replace(/^\//, '').split('@')[0];
-      const adminCmds = new Set(['admin', 'panel', 'stats', 'keys', 'key', 'createkey', 'resetdevice', 'resetdevices', 'revoke', 'pending', 'approve', 'reject', 'approveall', 'settask', 'setpromo', 'settaskphotos', 'settasktime', 'setmaint', 'lockgame', 'unlockgame', 'lockcmd', 'unlockcmd', 'setbank', 'settg', 'addplan', 'delplan', 'plans']);
+      const adminCmds = new Set(['admin', 'panel', 'stats', 'keys', 'key', 'createkey', 'resetdevice', 'resetdevices', 'revoke', 'pending', 'approve', 'reject', 'approveall', 'settask', 'setpromo', 'settaskphotos', 'settasktime', 'setmaint', 'lockgame', 'unlockgame', 'lockcmd', 'unlockcmd', 'setbank', 'settg', 'addplan', 'delplan', 'plans', 'addgame', 'delgame', 'setplayurl', 'setparser', 'setgroup', 'resetengine', 'settings', 'viewsettings', 'helpadmin', 'adminhelp', 'helpadmin2', 'helpadmin3', 'setgame', 'setlabel', 'enablegame', 'disablegame', 'games', 'listkeys', 'delkey', 'extendkey', 'clearkeys', 'setpoll', 'setmaxdevices', 'broadcast', 'gamedetail', 'sethistoryurl', 'settable', 'setbrand', 'seticon', 'clonegame', 'testgame', 'gameerror', 'enableall', 'disableall', 'givekey', 'findkey', 'setkeylimit', 'setkeylabel', 'activekeys', 'expiredkeys', 'revoke', 'setwatermark', 'setsitetitle', 'setsupport', 'setannounce', 'reloadgames', 'logs', 'clearlogs', 'ping', 'whoami', 'users', 'orders', 'rejectall', 'setplanprice', 'setplanduration', 'setplandevices', 'toggleplan', 'userinfo', 'user', 'profile', 'topusers']);
       if (adminCmds.has(cmd)) return handleAdminCommand(message, text);
     }
 
@@ -2262,20 +2937,89 @@ Gửi <b>mã key</b> cần reset.
 👉 Đăng nhập lại trên web (tối đa ${k.deviceLimit || 3} máy)`);
     }
 
-    if (cmd === 'infotik') {
-      if (!argText) return send(chatId, '📌 <code>/infotik @user</code>\nhoặc link profile');
-      await send(chatId, '⏳ Đang lấy info TikTok...');
+    // ===== USER COMMANDS (hữu ích — không vui) =====
+    const uname = displayName(from);
+    if (cmd === 'id' || cmd === 'myid') {
+      return send(chatId, '🆔 Telegram ID:\n<code>' + fromId + '</code>\nUsername: @' + (from.username || '—'));
+    }
+    if (cmd === 'time' || cmd === 'gio') {
+      return send(chatId, '🕐 <b>' + new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' }) + '</b>\nGMT+7');
+    }
+    if (cmd === 'check' || cmd === 'menu') {
+      return send(chatId,
+        '🔍 <b>MENU LỆNH USER</b>\n━━━━━━━━━━━━━━━\n' +
+        '👤 /checkme · /id · /mykey\n' +
+        '🌐 /checkip · /checkdevice\n' +
+        '📱 /checktt @user · /infotik @user\n' +
+        '📘 /checkfb link|user · /infofb\n' +
+        '📸 /checkig @user\n' +
+        '▶️ /checkyt @channel|link\n' +
+        '📢 /thongbao · /guide · /support\n' +
+        '📦 /version · /server · /checkstatus\n' +
+        '🎁 /getkeyv1 · 💳 /muakeytx · 🔄 /resetkeytx'
+      );
+    }
+    if (cmd === 'checkip' || cmd === 'ip') {
+      const p = (typeof userProfiles!=='undefined' && userProfiles[fromId]) ? userProfiles[fromId] : null;
+      return send(chatId, '🌐 <b>IP</b>\n<code>'+(p&&p.lastIp?p.lastIp:'Chưa có — mở Mini App 1 lần')+'</code>\n🕐 GMT+7');
+    }
+    if (cmd === 'checkdevice' || cmd === 'device') {
+      const p = (typeof userProfiles!=='undefined' && userProfiles[fromId]) ? userProfiles[fromId] : null;
+      return send(chatId, '📱 <b>THIẾT BỊ</b>\nUA: <code>'+esc(String(p&&p.lastUa||'Mở Mini App để cập nhật').slice(0,140))+'</code>\nDevice: <code>'+esc(String(p&&p.lastDeviceHash||'—').slice(0,16))+'</code>');
+    }
+    if (cmd === 'checkme' || cmd === 'me') {
+      const p = (typeof userProfiles!=='undefined' && userProfiles[fromId]) ? userProfiles[fromId] : null;
+      const userKeys = (keys||[]).filter(k => String(k.telegramId)===fromId);
+      const k = userKeys[userKeys.length-1];
+      return send(chatId, '👤 <b>THÔNG TIN CỦA BẠN</b>\n━━━━━━━━━━━━━━━\n🆔 <code>'+fromId+'</code>\n🏷 '+esc(uname)+'\n🔗 @'+(from.username||'—')+'\n🌐 Lang: '+(from.language_code||'—')+'\n⭐ Premium: '+(from.is_premium?'yes':'no')+'\n📡 IP: <code>'+(p&&p.lastIp||'—')+'</code>\n🔑 Key: '+(k?(k.label||'VIP'):'Chưa có')+'\n\n🎁 /getkeyv1 · 💳 /muakeytx');
+    }
+    if (cmd === 'checkstatus' || cmd === 'trangthai' || cmd === 'trangThai') {
+      return send(chatId, '✅ <b>HỆ THỐNG</b>\n🤖 Bot online\n🎮 Game: <b>'+Object.keys(FEEDS).length+'</b>\n🔑 Key: <b>'+keys.length+'</b>\n📦 VIP FINAL');
+    }
+    if (cmd === 'mykey' || cmd === 'my_key') {
+      const userKeys = (keys||[]).filter(k => String(k.telegramId)===fromId);
+      if (!userKeys.length) return send(chatId, '🔑 Bạn chưa có key.\n🎁 /getkeyv1 · 💎 /muakeytx');
+      const lines = userKeys.slice(-5).map(k => {
+        const exp = k.expiresAt ? new Date(k.expiresAt).toLocaleString('vi-VN') : 'Vĩnh viễn';
+        const st = k.status==='revoked'?'🚫':(options.isExpired&&options.isExpired(k)?'⏰':'✅');
+        return st+' <b>'+esc(k.label||'VIP')+'</b>\n⏱ '+exp+' · 📱 '+(k.deviceHashes||[]).length+'/'+(k.deviceLimit||3);
+      });
+      return send(chatId, '🔑 <b>KEY CỦA BẠN</b>\n'+lines.join('\n\n'));
+    }
+    if (cmd === 'guide' || cmd === 'huongdan' || cmd === 'trogiup') {
+      return send(chatId, '📖 <b>HƯỚNG DẪN</b>\n1️⃣ /start → mở Mini App\n2️⃣ Nhập key → đăng nhập\n3️⃣ Chọn game xem dự đoán\n\n🎁 /getkeyv1 · 💎 /muakeytx\n🔄 /resetkeytx · 🔑 /mykey\n🔍 /check · 📱 /checktt @user');
+    }
+    if (cmd === 'support' || cmd === 'hotro') {
+      const cfg = (options.getConfig&&options.getConfig())||{};
+      return send(chatId, '💬 <b>HỖ TRỢ</b>\n'+(cfg.supportUrl||'https://t.me/SunNetWin')+'\nAdmin: @SunNetWin');
+    }
+    if (cmd === 'thongbao' || cmd === 'thongBao' || cmd === 'announce') {
+      const cfg = (options.getConfig&&options.getConfig())||{};
+      const custom = String(cfg.announceText||'').trim();
+      if (custom) return send(chatId, '📢 <b>THÔNG BÁO</b>\n'+custom);
+      return send(chatId, '📢 Tool ổn định · TX/MD5/Sicbo/Baccarat · @SunNetWin');
+    }
+    if (cmd === 'version' || cmd === 'ver') {
+      return send(chatId, '📦 <b>VIP FINAL</b> · All-bot admin');
+    }
+    if (cmd === 'server') {
+      return send(chatId, '🖥️ Online · Feeds: '+Object.keys(FEEDS).length+' · '+new Date().toLocaleString('vi-VN'));
+    }
+    // —— Check tài khoản MXH ——
+    if (cmd === 'checktt' || cmd === 'infotik' || cmd === 'tiktok' || cmd === 'tt') {
+      if (!argText) return send(chatId, '📌 <code>/checktt @username</code>\nhoặc link tiktok.com/@user');
+      await send(chatId, '⏳ Đang check TikTok...');
       try {
         const info = await lookupTikTok(argText);
         const fmtN = n => n == null ? '—' : Number(n).toLocaleString('vi-VN');
         const created = info.createTime ? new Date(info.createTime).toLocaleString('vi-VN') : '—';
         const text =
-`📱 <b>TIKTOK INFO</b>
+`📱 <b>TIKTOK</b>
 ────────────────
 👤 <b>${esc(info.nickname)}</b> ${info.verified ? '✅' : ''}
 🆔 @${esc(info.username)}
 ${info.private ? '🔒 Private' : '🌐 Public'}
-📝 ${esc((info.bio || '—').slice(0, 160))}
+📝 ${esc((info.bio || '—').slice(0, 180))}
 
 👥 Followers: <b>${fmtN(info.followers)}</b>
 ➡️ Following: <b>${fmtN(info.following)}</b>
@@ -2284,44 +3028,83 @@ ${info.private ? '🔒 Private' : '🌐 Public'}
 📅 Tạo: ${created}
 🔗 ${info.profileUrl}`;
         if (info.avatar) {
-          try {
-            await sendPhoto(chatId, info.avatar, { caption: text });
-            return;
-          } catch {}
+          try { await sendPhoto(chatId, info.avatar, { caption: text }); return; } catch (e) {}
         }
         return send(chatId, text);
       } catch (e) {
-        return send(chatId, `❌ ${e.message}`);
+        return send(chatId, '❌ ' + e.message);
       }
     }
-
-    if (cmd === 'infofb') {
-      if (!argText) return send(chatId, '📌 <code>/fb username</code>\nhoặc link profile');
-      await send(chatId, '⏳ Đang lấy info Facebook...');
+    if (cmd === 'checkfb' || cmd === 'infofb' || cmd === 'facebook' || cmd === 'fb') {
+      if (!argText) return send(chatId, '📌 <code>/checkfb username</code>\nhoặc link facebook.com/...');
+      await send(chatId, '⏳ Đang check Facebook...');
       try {
         const info = await lookupFacebook(argText);
         const fmtN = n => n == null ? '—' : Number(n).toLocaleString('vi-VN');
         const text =
-`📘 <b>FACEBOOK INFO</b>
+`📘 <b>FACEBOOK</b>
 ────────────────
 👤 <b>${esc(info.author)}</b>
 📝 ${esc((info.bio || '—').slice(0, 180))}
 👥 Followers/Likes: <b>${fmtN(info.followers ?? info.likes)}</b>
 🔗 ${esc(info.url)}`;
         if (info.avatar) {
-          try {
-            await sendPhoto(chatId, info.avatar, { caption: text });
-            return;
-          } catch {}
+          try { await sendPhoto(chatId, info.avatar, { caption: text }); return; } catch (e) {}
         }
         return send(chatId, text);
       } catch (e) {
-        return send(chatId, `❌ ${e.message}`);
+        return send(chatId, '❌ ' + e.message);
+      }
+    }
+    if (cmd === 'checkig' || cmd === 'instagram' || cmd === 'ig') {
+      if (!argText) return send(chatId, '📌 <code>/checkig @username</code>');
+      await send(chatId, '⏳ Đang check Instagram...');
+      try {
+        const info = await lookupInstagram(argText);
+        const fmtN = n => n == null ? '—' : Number(n).toLocaleString('vi-VN');
+        const text =
+`📸 <b>INSTAGRAM</b>
+────────────────
+👤 <b>${esc(info.fullName || info.username)}</b> ${info.verified ? '✅' : ''}
+🆔 @${esc(info.username)}
+${info.private ? '🔒 Private' : '🌐 Public'}
+📝 ${esc((info.bio || '—').slice(0, 160))}
+
+👥 Followers: <b>${fmtN(info.followers)}</b>
+➡️ Following: <b>${fmtN(info.following)}</b>
+🖼 Posts: <b>${fmtN(info.posts)}</b>
+🔗 ${info.profileUrl}`;
+        if (info.avatar) {
+          try { await sendPhoto(chatId, info.avatar, { caption: text }); return; } catch (e) {}
+        }
+        return send(chatId, text);
+      } catch (e) {
+        return send(chatId, '❌ ' + e.message);
+      }
+    }
+    if (cmd === 'checkyt' || cmd === 'youtube' || cmd === 'yt') {
+      if (!argText) return send(chatId, '📌 <code>/checkyt @channel</code>\nhoặc link youtube.com/@...');
+      await send(chatId, '⏳ Đang check YouTube...');
+      try {
+        const info = await lookupYouTube(argText);
+        const text =
+`▶️ <b>YOUTUBE</b>
+────────────────
+📺 <b>${esc(info.title)}</b>
+🆔 ${esc(info.channelId || info.handle || '—')}
+📝 ${esc((info.description || '—').slice(0, 160))}
+🔗 ${esc(info.url)}`;
+        if (info.avatar) {
+          try { await sendPhoto(chatId, info.avatar, { caption: text }); return; } catch (e) {}
+        }
+        return send(chatId, text);
+      } catch (e) {
+        return send(chatId, '❌ ' + e.message);
       }
     }
 
     if (text.startsWith('/')) {
-      return send(chatId, '❓ Gõ /start xem lệnh.');
+      return send(chatId, '❓ Lệnh không rõ. Gõ /start · /check · /checktt @user · /guide');
     }
   }
 
@@ -2406,8 +3189,8 @@ app.disable('x-powered-by');
 
 // The front-end can be hosted statically on Netlify. This server also serves it for local testing.
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
-app.get('/admin', (req, res) => { const f = path.join(__dirname, 'public', 'admin.html'); if (fs.existsSync(f)) res.sendFile(f); else res.send('Admin page not found. Upload public/admin.html.'); });
-app.get('/admin.html', (req, res) => { const f = path.join(__dirname, 'public', 'admin.html'); if (fs.existsSync(f)) res.sendFile(f); else res.send('Admin page not found.'); });
+app.get('/admin', (req, res) => res.status(410).type('html').send('<!doctype html><meta charset=utf-8><title>Admin qua Bot</title><body style="font-family:sans-serif;padding:40px;background:#0f172a;color:#f8fafc"><h1>🛠 Admin qua Telegram Bot</h1><p>admin.html đã tắt hoàn toàn. Mọi cấu hình dùng lệnh bot.</p><p>Gõ <b>/helpadmin</b> trong bot Telegram.</p></body>'));
+app.get('/admin.html', (req, res) => res.redirect('/admin'));
 
 const KEYS_FILE = path.join(DATA_DIR, 'keys.json');
 const STATE_FILE = path.join(DATA_DIR, 'state.json');
@@ -2415,6 +3198,7 @@ const LOG_FILE = path.join(DATA_DIR, 'server.log');
 const GAMES_FILE = path.join(DATA_DIR, 'games.json');
 const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
 const REQUESTS_FILE = path.join(DATA_DIR, 'bot_requests.json');
+const USERS_FILE = path.join(DATA_DIR, 'user_profiles.json');
 const BOT_SESSIONS_FILE = path.join(DATA_DIR, 'telegram_sessions.json');
 
 function loadJSON(file, fallback) {
@@ -2989,6 +3773,7 @@ function normalizeSettings(value) {
     label: String(p.label || '').trim().slice(0, 80),
     price: Math.max(0, Math.floor(Number(p.price || 0))),
     durationHours: Math.max(0, Math.floor(Number(p.durationHours || 0))),
+    deviceLimit: Math.max(1, Math.min(20, Math.floor(Number(p.deviceLimit || 3)))),
     active: p.active !== false
   })).filter(p => p.id && p.label && p.price > 0 && p.durationHours > 0) : [];
   if (!plans.length) {
@@ -3012,6 +3797,7 @@ function normalizeSettings(value) {
     supportUrl: String(v.supportUrl || 'https://t.me/SunNetWin').trim().slice(0, 200),
     watermarkText: String(v.watermarkText || 'SunWin · MD5 · HitClub · Tool tưng tửng').trim().slice(0, 300),
     siteTitle: String(v.siteTitle || 'Tool tưng tửng').trim().slice(0, 80),
+    announceText: String(v.announceText || '').slice(0, 1000),
     maintenance: {
       enabled: !!(v.maintenance && v.maintenance.enabled),
       message: String((v.maintenance && v.maintenance.message) || 'Hệ thống đang bảo trì, vui lòng quay lại sau.').slice(0, 500),
@@ -3033,6 +3819,47 @@ if (!Array.isArray(botRequests)) botRequests = [];
 let botSessions = loadJSON(BOT_SESSIONS_FILE, {});
 if (!botSessions || typeof botSessions !== 'object') botSessions = {};
 function saveRequests() { saveJSON(REQUESTS_FILE, botRequests); }
+let userProfiles = loadJSON(typeof USERS_FILE !== 'undefined' ? USERS_FILE : path.join(DATA_DIR, 'user_profiles.json'), {});
+if (!userProfiles || typeof userProfiles !== 'object') userProfiles = {};
+function saveUserProfiles() {
+  try { saveJSON(typeof USERS_FILE !== 'undefined' ? USERS_FILE : path.join(DATA_DIR, 'user_profiles.json'), userProfiles); } catch (e) {}
+}
+function touchUserProfile(id, patch) {
+  const tid = String(id || '').trim();
+  if (!tid) return null;
+  const cur = userProfiles[tid] || { telegramId: tid, firstSeen: Date.now() };
+  Object.assign(cur, patch || {});
+  cur.telegramId = tid;
+  cur.lastSeen = Date.now();
+  cur.seenCount = Number(cur.seenCount || 0) + 1;
+  userProfiles[tid] = cur;
+  saveUserProfiles();
+  return cur;
+}
+function formatUserProfile(p, extra) {
+  if (!p) return '❌ Chưa có hồ sơ user';
+  const lines = [
+    '👤 <b>HỒ SƠ USER</b>',
+    '━━━━━━━━━━━━━━━',
+    '🆔 TG ID: <code>' + (p.telegramId || '—') + '</code>',
+    '🏷 Tên: ' + (p.name || '—'),
+    '🔗 Username: @' + (p.username || '—'),
+    '🌐 Language: ' + (p.languageCode || '—'),
+    '🤖 Is bot: ' + (p.isBot ? 'yes' : 'no'),
+    '⭐ Premium TG: ' + (p.isPremium ? 'yes' : 'no'),
+    '📅 First: ' + (p.firstSeen ? new Date(p.firstSeen).toLocaleString('vi-VN') : '—'),
+    '👁 Last: ' + (p.lastSeen ? new Date(p.lastSeen).toLocaleString('vi-VN') : '—'),
+    '🔢 Seen: ' + (p.seenCount || 0),
+    '📡 IP (Mini App): <code>' + (p.lastIp || '—') + '</code>',
+    '🖥 UA: <code>' + String(p.lastUa || '—').slice(0, 120) + '</code>',
+    '📱 DeviceId hash: <code>' + String(p.lastDeviceHash || '—').slice(0, 16) + '</code>',
+    '🔑 Key login: ' + (p.lastKeyLabel || '—'),
+    '🎮 Last game: ' + (p.lastGame || '—'),
+  ];
+  if (extra) lines.push(extra);
+  return lines.join('\n');
+}
+
 function getSessions() { return botSessions; }
 function saveSessions(next) { botSessions = next || {}; saveJSON(BOT_SESSIONS_FILE, botSessions); }
 function addRequest(request) { botRequests.unshift(request); botRequests = botRequests.slice(0, 5000); saveRequests(); }
@@ -3097,7 +3924,7 @@ app.get('/api/public/miniapp', (req, res) => {
   const base = getPublicBase() || (req.protocol + '://' + req.get('host'));
   res.json({
     userUrl: base + '/',
-    adminUrl: base + '/admin',
+    adminUrl: null, // dùng bot /helpadmin
     brand: 'Tool tưng tửng',
     support: '@SunNetWin'
   });
@@ -3110,14 +3937,26 @@ app.post('/api/auth/telegram-webapp', express.json(), (req, res) => {
   if (!tgId) return res.status(400).json({ error: 'Thiếu Telegram user' });
   const admin = isTelegramAdmin(tgId);
   const base = getPublicBase() || (req.protocol + '://' + req.get('host'));
-  // IP từ proxy
   const ip = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+  const ua = String(req.headers['user-agent'] || '').slice(0, 300);
+  try {
+    touchUserProfile(tgId, {
+      name: [user.first_name, user.last_name].filter(Boolean).join(' ') || user.username || '',
+      username: user.username || '',
+      languageCode: user.language_code || user.languageCode || '',
+      isPremium: !!(user.is_premium || user.isPremium),
+      isBot: !!user.is_bot,
+      lastIp: ip || undefined,
+      lastUa: ua || undefined,
+      lastSource: 'miniapp'
+    });
+  } catch (e) {}
   res.json({
     ok: true,
     telegramId: tgId,
     isAdmin: admin,
     ip,
-    openUrl: admin ? (base + '/admin') : (base + '/'),
+    openUrl: (base + '/'),
     role: admin ? 'admin' : 'user'
   });
 });
@@ -3162,7 +4001,17 @@ app.post('/api/auth', (req, res) => {
   const requestedExpiry = Date.now() + TOKEN_TTL_MS;
   const exp = found.expiresAt ? Math.min(requestedExpiry, found.expiresAt) : requestedExpiry;
   const token = sign({ type: 'user', keyId: found.id, deviceHash, exp });
-  logLine(`user auth ok: ${found.label} device=${deviceHash.slice(0, 8)}`);
+  const ip = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+  const ua = String(req.headers['user-agent'] || '').slice(0, 300);
+  try {
+    if (found.telegramId) {
+      touchUserProfile(found.telegramId, {
+        lastIp: ip, lastUa: ua, lastDeviceHash: deviceHash, lastKeyLabel: found.label,
+        lastSource: 'key-login'
+      });
+    }
+  } catch (e) {}
+  logLine(`user auth ok: ${found.label} device=${deviceHash.slice(0, 8)} ip=${ip}`);
   res.json({ token, expiresIn: exp - Date.now(), label: found.label, expiresAt: found.expiresAt || null, deviceLimit: found.deviceLimit || 1 });
 });
 app.post('/api/admin/login', (req, res) => {
