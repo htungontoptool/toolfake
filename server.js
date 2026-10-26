@@ -2328,11 +2328,22 @@ ${promo ? `📌 <b>Câu cần sao chép:</b>\n<code>${esc(promo)}</code>\n` : ''
     if (cmd === 'testgame') {
       if (!isAdmin(fromId)) return send(chatId, '⛔ Chỉ admin.');
       const gid = String(text.trim().split(/\s+/)[1]||'').toLowerCase().trim();
-      if (!gid || !FEEDS[gid]) return send(chatId, '📌 <code>/testgame &lt;id&gt;</code> — game phải tồn tại');
+      if (!gid || !FEEDS[gid]) return send(chatId, '📌 <code>/testgame &lt;id&gt;</code> — game phải tồn tại\n💡 /games để xem id');
       try {
         await pollFeed(gid);
         const f = FEEDS[gid];
-        return send(chatId, '🧪 <b>TEST '+gid+'</b>\nPhiên: '+(f.lastSession||'—')+'\nHist: '+(f.history?f.history.length:0)+'\nLỗi: '+(f.lastError||'Không'));
+        const last = f.lastSession;
+        const openS = f.openSession || (last != null && /^\d+$/.test(String(last)) ? String(Number(last)+1) : '—');
+        const top = (f.history||[]).slice(0, 5).map(h => '#'+h.session+':'+(h.char||'?')).join(' · ') || '—';
+        const live = f.lastLive ? (f.lastLive.char||'?')+' sum='+(f.lastLive.sum??'—') : '—';
+        // các id cùng brand
+        const g0 = gameConfigs.find(x => x.id === gid) || {};
+        const brand = g0.brand || gid;
+        const siblings = gameConfigs.filter(x => (x.brand||x.id) === brand || x.id === gid).map(x => {
+          const ff = FEEDS[x.id];
+          return '• <code>'+x.id+'</code> phiên '+(ff&&ff.lastSession!=null?ff.lastSession:'—');
+        }).join('\n');
+        return send(chatId, '🧪 <b>TEST '+gid+'</b>\n━━━━━━━━━━━━━━━\n📥 <b>API last</b>: <code>'+(last??'—')+'</code>\n🎯 <b>Robot next</b>: <code>'+openS+'</code>\n🎲 Live row: '+live+'\n📚 Hist: '+(f.history?f.history.length:0)+'\n🔝 Top: '+top+'\n⏱ Poll: '+(f.lastPolledAt?new Date(f.lastPolledAt).toLocaleTimeString('vi-VN'):'—')+'\nLỗi: '+(f.lastError||'Không')+'\n\n🏷 Cùng brand:\n'+(siblings||'—')+'\n\n⚠️ Robot trong index = <b>Robot next</b>.\nNếu bàn web lớn hơn nhiều → URL API đang trả data cũ, đổi bằng /setgame');
       } catch(e) {
         return send(chatId, '❌ Test lỗi: '+e.message);
       }
@@ -4320,9 +4331,9 @@ app.get('/api/predict', requireUser, async (req, res) => {
   if (mt.enabled && Array.isArray(mt.lockedGames) && mt.lockedGames.map(String).map(s=>s.toLowerCase()).includes(gid)) {
     return res.status(503).json({ error: mt.message || 'Game đang bảo trì.', maintenance: true });
   }
-  // Làm mới feed nếu quá 2.5s — tránh phiên robot lệch live
+  // Luôn làm mới feed nếu >1.2s (robot index khớp API)
   try {
-    if (!f.lastPolledAt || (Date.now() - f.lastPolledAt) > 2500) {
+    if (!f.lastPolledAt || (Date.now() - f.lastPolledAt) > 1200 || req.query.fresh === '1') {
       await pollFeed(String(req.query.game));
     }
   } catch (e) {}
