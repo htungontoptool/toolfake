@@ -1304,17 +1304,101 @@ function startTelegramBot(options) {
   async function sendHelpAdmin(chatId, page) {
     page = Number(page) || 1;
     const back = { reply_markup: { inline_keyboard: [
-      [{ text: '📘 help 1', callback_data: 'adm:dohelpadmin' }, { text: '📘 help 2', callback_data: 'adm:dohelpadmin2' }, { text: '📘 help 3', callback_data: 'adm:dohelpadmin3' }],
+      [{ text: '📘 1·Tổng quan', callback_data: 'adm:dohelpadmin' }, { text: '🎮 2·Game', callback_data: 'adm:dohelpadmin2' }, { text: '🔑 3·Key/User', callback_data: 'adm:dohelpadmin3' }],
       [{ text: '◀️ Menu admin', callback_data: 'adm:home' }]
     ] } };
     if (page === 2) {
-      return send(chatId, '📘 <b>HELP ADMIN 2 · GAME</b>\n━━━━━━━━━━━━━━━\n• /games · /gamedetail &lt;id&gt;\n• /addgame &lt;id&gt; &lt;parser&gt; &lt;url&gt; [nhãn]\n• /delgame &lt;id&gt;\n• /setgame &lt;id&gt; &lt;url&gt;\n• /setplayurl &lt;id&gt; &lt;url&gt;\n• /sethistoryurl · /settable · /setbrand · /seticon\n• /setlabel · /setparser · /setgroup\n• /clonegame &lt;from&gt; &lt;to&gt;\n• /testgame &lt;id&gt; · /gameerror\n• /enablegame · /disablegame · /enableall · /disableall\n• /lockgame · /unlockgame\n• /reloadgames · /resetengine &lt;id&gt;\n\nParser: <code>sunwin|lc79|max789|baccarat</code>', back);
+      return send(chatId, `🎮 <b>HELP 2 · GAME</b>
+━━━━━━━━━━━━━━━
+📋 <b>Xem</b>
+• <code>/games</code> — danh sách game
+• <code>/gamedetail id</code> — chi tiết 1 game
+• <code>/gameerror</code> — game đang lỗi API
+• <code>/testgame id</code> — thử gọi API
+
+➕ <b>Thêm / xóa</b>
+• <code>/addgame id parser url [nhãn]</code>
+  VD: <code>/addgame sunwin_tx sunwin https://api... Sunwin TX</code>
+  Parser: <code>sunwin|lc79|max789</code> (đã bỏ baccarat)
+• <code>/delgame id</code> — xóa game
+
+🔗 <b>Link chơi (TX + Sicbo cùng cổng = 1 link)</b>
+• <code>/setplayurl id url</code>
+  Set 1 id → tự đồng bộ game cùng brand (vd sunwin)
+• <code>/setgame id url</code> — đổi URL API feed
+
+🏷 <b>Nhãn / nhóm</b>
+• <code>/setlabel id tên</code>
+• <code>/setparser id sunwin|lc79|max789</code>
+• <code>/setgroup id tx|sicbo|md5</code>
+• <code>/setbrand id brand</code> · <code>/seticon id url</code>
+
+⚡ <b>Bật tắt</b>
+• <code>/enablegame id</code> · <code>/disablegame id</code>
+• <code>/enableall</code> · <code>/disableall</code>
+• <code>/reloadgames</code> · <code>/resetengine id</code>`, back);
     }
     if (page === 3) {
-      return send(chatId, '📘 <b>HELP ADMIN 3 · KEY · USER · HỆ THỐNG</b>\n━━━━━━━━━━━━━━━\n🔑 <b>Key</b>\n• /createkey &lt;giờ&gt; &lt;tb&gt; [gói]\n• /givekey &lt;tgid&gt; &lt;giờ&gt; [tb]\n• /keys · /listkeys · /key &lt;id&gt;\n• /findkey &lt;tgid|mã&gt;\n• /delkey · /extendkey · /revoke\n• /setkeylimit · /setkeylabel\n• /activekeys · /expiredkeys · /clearkeys · /resetdevice\n\n👤 <b>User</b>\n• /userinfo &lt;tgid|@user&gt;\n• /topusers · /users · /orders\n• /pending · /approve · /reject · /approveall · /rejectall\n\n⚙️ <b>Hệ thống</b>\n• /settings · /setpoll · /setmaxdevices\n• /setmaint on|off · /lockcmd · /unlockcmd\n• /setbank · /plans · /addplan · /delplan\n• /setplanprice · /setplanduration · /setplandevices · /toggleplan\n• /setwatermark · /setsitetitle · /setsupport · /setannounce\n• /settask · /setpromo · /settaskphotos · /settasktime\n• /broadcast · /logs · /clearlogs · /ping · /whoami · /stats', back);
+      return send(chatId, `🔑 <b>HELP 3 · KEY · USER · HỆ THỐNG</b>
+━━━━━━━━━━━━━━━
+🔑 <b>Key</b>
+• <code>/createkey giờ tb [gói]</code> — tạo key
+  VD: <code>/createkey 24 3 VIP</code>
+• <code>/givekey tgid giờ [tb]</code> — tạo + gửi user
+• <code>/keys</code> · <code>/listkeys</code> · <code>/key id</code>
+• <code>/findkey tgid|mã</code>
+• <code>/extendkey id giờ</code> · <code>/delkey id</code>
+• <code>/revoke id</code> · <code>/resetdevice id</code>
+• <code>/activekeys</code> · <code>/expiredkeys</code> · <code>/clearkeys</code>
+• <code>/setkeylimit id số</code> · <code>/setkeylabel id tên</code>
+
+👤 <b>User</b>
+• <code>/userinfo tgid|@user</code> — hồ sơ IP/TG
+• <code>/topusers</code> · <code>/users</code> · <code>/orders</code>
+• <code>/pending</code> — chờ duyệt (+ nút)
+• <code>/approve id</code> · <code>/reject id</code>
+• <code>/approveall</code> · <code>/rejectall</code>
+
+💳 <b>Gói & bank (hiện ở Cửa hàng index)</b>
+• <code>/plans</code>
+• <code>/addplan id nhãn giá giờ</code>
+  VD: <code>/addplan vip1 VIP-1N 50000 24</code>
+• <code>/delplan id</code> · <code>/toggleplan id</code>
+• <code>/setplanprice id giá</code>
+• <code>/setplanduration id giờ</code>
+• <code>/setbank NH STK chủ</code>
+
+⚙️ <b>Hệ thống</b>
+• <code>/settings</code> · <code>/setpoll ms</code>
+• <code>/setmaxdevices số</code>
+• <code>/setmaint on|off [nội dung]</code>
+• <code>/setannounce ...</code> · <code>/setsupport url</code>
+• <code>/broadcast nội dung</code>
+• <code>/logs</code> · <code>/ping</code> · <code>/stats</code>
+• <code>/admin</code> — bảng nút`, back);
     }
-    return send(chatId, '⚙️ <b>MENU ADMIN · ALL BOT</b>\n━━━━━━━━━━━━━━━\n🛠 Bảng nút: <code>/admin</code>\n\n🎮 <b>Game</b>\n• /games · /gamedetail · /addgame · /delgame\n• /setgame · /setplayurl · /setlabel · /setparser\n• /enablegame · /disablegame · /resetengine\n\n🔑 <b>Key</b>\n• /createkey &lt;giờ&gt; &lt;tb&gt; [gói]\n• /givekey &lt;tgid&gt; &lt;giờ&gt; [tb]\n• /keys · /key · /findkey · /delkey · /extendkey\n\n💳 /plans · /addplan · /delplan · /setbank\n⚙️ /settings · /setpoll · /setmaxdevices\n📢 /broadcast · /stats · /pending · /approve\n👤 /userinfo &lt;tgid&gt; · /topusers\n\n📘 /helpadmin2 · /helpadmin3 — chi tiết', back);
+    return send(chatId, `⚙️ <b>HELP 1 · TỔNG QUAN ADMIN</b>
+━━━━━━━━━━━━━━━
+🛠 Bảng nút nhanh: <code>/admin</code>
+
+🎮 <b>Game</b> → xem /helpadmin2
+• Thêm game, set API, set link chơi
+• 1 cổng (Sunwin) TX+Sicbo <b>chung 1 playUrl</b>
+
+🔑 <b>Key & User</b> → /helpadmin3
+• Tạo key, duyệt nhiệm vụ, xem IP user
+
+💳 <b>Cửa hàng</b>
+• <code>/addplan</code> · <code>/setplanprice</code>
+• User bấm gói trên web → mở bot
+
+📢 <b>Thông báo / site</b>
+• <code>/setannounce</code> · <code>/setsitetitle</code>
+• <code>/setwatermark</code> · <code>/setsupport</code>
+
+📌 Gõ <code>/helpadmin2</code> hoặc <code>/helpadmin3</code> để xem chi tiết + ví dụ.`, back);
   }
+
 
   async function showAdminHelp(chatId, page) {
     page = page || 'home';
@@ -2087,8 +2171,20 @@ ${promo ? `📌 <b>Câu cần sao chép:</b>\n<code>${esc(promo)}</code>\n` : ''
       if (!g) return send(chatId, '❌ Không tìm thấy game: <code>'+gid+'</code>');
       g.playUrl = playUrl;
       if (FEEDS[gid]) FEEDS[gid].playUrl = playUrl;
+      // Cùng brand (vd sunwin TX + Sicbo) → dùng chung 1 link
+      const brand = String(g.brand || g.id).toLowerCase().replace(/[_-]?(tx|md5|sicbo|sieu|vip).*$/i,'').replace(/\d+$/,'') || g.id;
+      let synced = 0;
+      (gameConfigs||[]).forEach(x => {
+        if (x.id === gid) return;
+        const b = String(x.brand || x.id).toLowerCase().replace(/[_-]?(tx|md5|sicbo|sieu|vip).*$/i,'').replace(/\d+$/,'') || x.id;
+        if (b === brand || String(x.brand||'') === String(g.brand||'') || String(x.id).startsWith(String(g.brand||g.id).split(/[_-]/)[0])) {
+          x.playUrl = playUrl;
+          if (FEEDS[x.id]) FEEDS[x.id].playUrl = playUrl;
+          synced++;
+        }
+      });
       try { saveGameConfigs(); } catch(e){}
-      return send(chatId, '✅ playUrl <b>'+gid+'</b> → <code>'+playUrl+'</code>');
+      return send(chatId, '✅ playUrl <b>'+gid+'</b> → <code>'+playUrl+'</code>' + (synced ? ('\n🔗 Đồng bộ thêm <b>'+synced+'</b> game cùng cổng') : ''));
     }
     if (cmd === 'setparser') {
       if (!isAdmin(fromId)) return send(chatId, '⛔ Chỉ admin.');
@@ -3406,16 +3502,33 @@ function initializeFeedConfigs() {
 initializeFeedConfigs();
 
 function parseSunwin(data) {
-  const full = Array.isArray(data) ? data : (data?.data && Array.isArray(data.data) ? data.data : [data]);
-  return full.map(item => {
-    const dice = item.xuc_xac || item.dices || item.xucxac || item.dice || [0, 0, 0];
-    const sum = Number(item.Tong ?? item.tong ?? item.sum ?? item.point ?? dice.reduce((a, b) => Number(a) + Number(b), 0));
+  let full = [];
+  if (Array.isArray(data)) full = data;
+  else if (Array.isArray(data?.data)) full = data.data;
+  else if (Array.isArray(data?.list)) full = data.list;
+  else if (Array.isArray(data?.history)) full = data.history;
+  else if (Array.isArray(data?.Lich_su)) full = data.Lich_su;
+  else if (data && typeof data === 'object') full = [data];
+  const rows = full.map(item => {
+    if (!item || typeof item !== 'object') return null;
+    let dice = item.xuc_xac || item.dices || item.xucxac || item.dice || null;
+    if (!dice) {
+      dice = [
+        Number(item.xuc_xac1 ?? item.Xuc_xac_1 ?? item.dice1 ?? 0),
+        Number(item.xuc_xac2 ?? item.Xuc_xac_2 ?? item.dice2 ?? 0),
+        Number(item.xuc_xac3 ?? item.Xuc_xac_3 ?? item.dice3 ?? 0)
+      ];
+    }
+    if (Array.isArray(dice)) dice = dice.map(Number);
+    const sum = Number(item.Tong ?? item.tong ?? item.sum ?? item.point ?? (Array.isArray(dice) ? dice.reduce((a,b)=>a+Number(b||0),0) : 0));
     let char = sum >= 11 ? 'T' : 'X';
-    const raw = String(item.ket_qua || item.ketqua || item.result || '').toLowerCase();
-    if (raw.includes('tai') || raw === 't') char = 'T';
-    else if (raw.includes('xiu') || raw === 'x') char = 'X';
-    return { session: item.phien ?? item.session ?? item.session_id ?? item.id, sum, char, dice };
-  }).filter(i => i.session !== undefined && i.session !== null && i.session !== '');
+    const raw = String(item.ket_qua || item.Ket_qua || item.ketqua || item.result || item.outcome || '').toLowerCase();
+    if (raw.includes('tai') || raw.includes('tài') || raw === 't') char = 'T';
+    else if (raw.includes('xiu') || raw.includes('xỉu') || raw === 'x') char = 'X';
+    const session = pickSessionId(item);
+    return session != null ? { session, sum, char, dice } : null;
+  }).filter(Boolean);
+  return normalizeSessions(rows);
 }
 function parseLC79(data) {
   let full = [];
@@ -3423,15 +3536,29 @@ function parseLC79(data) {
   else if (Array.isArray(data?.list)) full = data.list;
   else if (Array.isArray(data?.sessions)) full = data.sessions;
   else if (Array.isArray(data?.data)) full = data.data;
-  else full = [data];
-  return full.map(item => {
-    const dice = item.dices || item.dice || item.xuc_xac || item.xucxac || [0, 0, 0];
-    const sum = Number(item.point ?? item.sum ?? item.total ?? item.Tong ?? dice.reduce((a, b) => Number(a) + Number(b), 0));
-    const raw = String(item.ket_qua || item.ketqua || item.result || item.outcome || '').toLowerCase();
+  else if (Array.isArray(data?.history)) full = data.history;
+  else if (Array.isArray(data?.Lich_su)) full = data.Lich_su;
+  else full = data ? [data] : [];
+  const rows = full.map(item => {
+    if (!item || typeof item !== 'object') return null;
+    let dice = item.dices || item.dice || item.xuc_xac || item.xucxac || null;
+    if (!dice) {
+      dice = [
+        Number(item.xuc_xac1 ?? item.Xuc_xac_1 ?? item.dice1 ?? 0),
+        Number(item.xuc_xac2 ?? item.Xuc_xac_2 ?? item.dice2 ?? 0),
+        Number(item.xuc_xac3 ?? item.Xuc_xac_3 ?? item.dice3 ?? 0)
+      ];
+    }
+    if (Array.isArray(dice)) dice = dice.map(Number);
+    const sum = Number(item.point ?? item.sum ?? item.total ?? item.Tong ?? item.tong ?? (Array.isArray(dice) ? dice.reduce((a,b)=>a+Number(b||0),0) : 0));
+    const raw = String(item.ket_qua || item.Ket_qua || item.ketqua || item.result || item.outcome || '').toLowerCase();
     let char = sum >= 11 ? 'T' : 'X';
-    if (raw.includes('tai') || raw === 't') char = 'T'; else if (raw.includes('xiu') || raw === 'x') char = 'X';
-    return { session: item.id ?? item.session ?? item.session_id ?? item.phien, sum, char, dice };
-  }).filter(i => i.session !== undefined && i.session !== null && i.session !== '');
+    if (raw.includes('tai') || raw.includes('tài') || raw === 't') char = 'T';
+    else if (raw.includes('xiu') || raw.includes('xỉu') || raw === 'x') char = 'X';
+    const session = pickSessionId(item);
+    return session != null ? { session, sum, char, dice } : null;
+  }).filter(Boolean);
+  return normalizeSessions(rows);
 }
 function parseFeedData(feed, data) {
   if (feed.parser === 'sunwin') return parseSunwin(data);
@@ -3513,7 +3640,7 @@ function parseMax789(data) {
     list.push({ session: phienTruoc, char: lastChar, sum, dice, isBao, vi: dice.join('-') });
   }
   // newest first
-  return list.reverse().filter(i => i.session !== undefined && i.session !== null && i.session !== '');
+  return normalizeSessions(list);
 }
 
 
@@ -3600,6 +3727,35 @@ function nextSessionNumber(session) {
   return null;
 }
 function sessionEquals(a, b) { return a !== null && a !== undefined && b !== null && b !== undefined && String(a) === String(b); }
+function sessionNum(s) {
+  const n = Number(String(s).replace(/[^\d]/g, ''));
+  return Number.isFinite(n) ? n : null;
+}
+/** Chuẩn hóa list phiên: unique + mới nhất TRƯỚC (session số lớn hơn = mới hơn) */
+function normalizeSessions(list) {
+  if (!Array.isArray(list) || !list.length) return [];
+  const map = new Map();
+  for (const item of list) {
+    if (!item || item.session === undefined || item.session === null || item.session === '') continue;
+    const key = String(item.session);
+    // giữ bản ghi có sum/dice đầy đủ hơn nếu trùng
+    const prev = map.get(key);
+    if (!prev || (item.sum != null && prev.sum == null) || (item.dice && !prev.dice)) map.set(key, item);
+  }
+  const arr = [...map.values()];
+  const allNum = arr.every(x => sessionNum(x.session) != null);
+  if (allNum) arr.sort((a, b) => sessionNum(b.session) - sessionNum(a.session));
+  return arr;
+}
+function pickSessionId(item) {
+  if (!item || typeof item !== 'object') return null;
+  const keys = ['phien','Phien','PHIEN','session','session_id','sessionId','id','round','round_id','period','phien_id','PhienId','game_round','issue'];
+  for (const k of keys) {
+    if (item[k] !== undefined && item[k] !== null && item[k] !== '') return item[k];
+  }
+  return null;
+}
+
 
 // Load trained state after dynamic feed definitions are ready.
 const savedState = loadJSON(STATE_FILE, null);
@@ -3694,10 +3850,21 @@ async function pollFeed(id) {
     const response = await fetch(f.url, { signal: ctrl.signal, headers: { accept: 'application/json' } });
     if (!response.ok) throw new Error('HTTP ' + response.status);
     const data = await response.json();
-    const list = parseFeedData(f, data);
+    let list = parseFeedData(f, data);
+    list = normalizeSessions(list);
     if (!list.length) throw new Error('API không trả về danh sách phiên phù hợp');
+    // list[0] = phiên MỚI NHẤT (số lớn nhất)
     const latest = list[0];
-    if (sessionEquals(f.lastSession, latest.session)) { f.lastError = null; return; }
+    f.lastPolledAt = Date.now();
+    // Nếu API trả phiên hiện tại (đang mở) riêng
+    const openSess = data && (data.phien_hien_tai ?? data.phienHienTai ?? data.current_session ?? data.currentSession);
+    if (openSess != null && openSess !== '') f.openSession = openSess;
+    else f.openSession = nextSessionNumber(latest.session);
+    if (sessionEquals(f.lastSession, latest.session)) {
+      f.lastError = null;
+      f.lastLive = f.history.find(h => sessionEquals(h.session, latest.session)) || { ...latest, ts: Date.now() };
+      return;
+    }
     const seen = new Set((f._seen || []).map(String));
     const chronological = [...list].reverse().filter(item => !seen.has(String(item.session)));
     for (const item of chronological) {
@@ -3761,7 +3928,8 @@ async function pollFeed(id) {
     else if (pr === 'BANKER' || pr === 'B' || pr === 'CAI') predicted = 'B';
     else if (pr === 'PLAYER' || pr === 'P' || pr === 'CON') predicted = 'P';
     else if (f.parser === 'baccarat') predicted = 'B';
-    f.pendingPred = { sourceSession: String(latest.session), targetSession: nextSessionNumber(latest.session), predicted, createdAt: Date.now() };
+    const target = f.openSession != null ? String(f.openSession) : nextSessionNumber(latest.session);
+    f.pendingPred = { sourceSession: String(latest.session), targetSession: target, predicted, createdAt: Date.now() };
     f.lastError = null;
   } catch (e) {
     f.lastError = e.message || String(e);
@@ -4132,7 +4300,7 @@ app.post('/api/baccarat/select', requireUser, async (req, res) => {
 });
 
 
-app.get('/api/games', requireUser, (req, res) => res.json({ games: gameConfigs.filter(g => g.enabled !== false && FEEDS[g.id]).map(g => ({ id: g.id, label: g.label, gameType: g.parser === 'baccarat' ? 'baccarat' : (g.group === 'sicbo' ? 'sicbo' : 'tx'), group: g.group || 'tx', icon: g.icon || '', brand: g.brand || g.id, brandLabel: g.brandLabel || g.label, variant: g.variant || '', playUrl: g.parser === 'baccarat' ? '' : (g.playUrl || '') })) }));
+app.get('/api/games', requireUser, (req, res) => res.json({ games: gameConfigs.filter(g => g.enabled !== false && FEEDS[g.id] && String(g.parser||'') !== 'baccarat' && String(g.group||'') !== 'baccarat').map(g => ({ id: g.id, label: g.label, gameType: g.group === 'sicbo' ? 'sicbo' : 'tx', group: g.group || 'tx', icon: g.icon || '', brand: g.brand || g.id, brandLabel: g.brandLabel || g.label, variant: g.variant || '', playUrl: g.playUrl || '' })) }));
 app.get('/api/me', requireUser, (req, res) => {
   const k = req.userKey;
   res.json({
@@ -4144,7 +4312,7 @@ app.get('/api/me', requireUser, (req, res) => {
     status: k.status || 'active'
   });
 });
-app.get('/api/predict', requireUser, (req, res) => {
+app.get('/api/predict', requireUser, async (req, res) => {
   const f = FEEDS[req.query.game];
   if (!f || !f.enabled) return res.status(400).json({ error: 'Game không tồn tại hoặc đang tắt.' });
   const mt = botSettings.maintenance || {};
@@ -4152,6 +4320,12 @@ app.get('/api/predict', requireUser, (req, res) => {
   if (mt.enabled && Array.isArray(mt.lockedGames) && mt.lockedGames.map(String).map(s=>s.toLowerCase()).includes(gid)) {
     return res.status(503).json({ error: mt.message || 'Game đang bảo trì.', maintenance: true });
   }
+  // Làm mới feed nếu quá 2.5s — tránh phiên robot lệch live
+  try {
+    if (!f.lastPolledAt || (Date.now() - f.lastPolledAt) > 2500) {
+      await pollFeed(String(req.query.game));
+    }
+  } catch (e) {}
   let ensemble = f.engine.getEnsemblePrediction();
   const cfg = gameConfigs.find(g => g.id === f.id) || {};
   if (cfg.group === 'sicbo' || f.group === 'sicbo') {
@@ -4172,7 +4346,8 @@ app.get('/api/predict', requireUser, (req, res) => {
     reason: ensemble.reason || ensemble.topReason,
     regime: ms.regime || null,
     trend: ms.trend || null,
-    nextSession: f.lastLive ? (Number.isFinite(Number(f.lastLive.session)) ? Number(f.lastLive.session) + 1 : (f.lastLive.session || null)) : null,
+    lastSession: f.lastLive ? f.lastLive.session : (f.lastSession || null),
+    nextSession: (f.openSession != null ? f.openSession : (f.lastLive && Number.isFinite(Number(f.lastLive.session)) ? Number(f.lastLive.session) + 1 : null)),
     live: f.lastLive || null,
     accuracy: f.total ? { correct: f.correct, total: f.total, pct: +(f.correct / f.total * 100).toFixed(1) } : null,
     feedError: f.lastError || null,
