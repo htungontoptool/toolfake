@@ -1,6 +1,6 @@
 /**
- * DUDOANTX — TOOL SOI CẦU CHIẾN THẦN (v8 - Full API Update)
- * Giao diện gắt gỏng, parse API đa năng, auto bám phiên 24/7
+ * DUDOANTX — TOOL SOI CẦU CHIẾN THẦN (v9 - Network Fix)
+ * Ép IPv4 cho Telegram, chống timeout, auto bám phiên 24/7
  */
 'use strict';
 
@@ -10,6 +10,10 @@ const fs = require('fs');
 const path = require('path');
 const http = require('http');
 const https = require('https');
+const dns = require('dns');
+
+// Fix triệt để lỗi IPv6 ENETUNREACH trên Render
+try { dns.setDefaultResultOrder('ipv4first'); } catch (e) {}
 
 const ROOT = __dirname;
 const DATA = path.join(ROOT, 'data');
@@ -47,15 +51,50 @@ function displayName(from) {
   return [from.first_name, from.last_name].filter(Boolean).join(' ') || from.username || 'Vô Danh';
 }
 
+/* ───────── Telegram API Call (Fix Timeout) ───────── */
 async function tg(method, body) {
   if (!BOT_TOKEN) return null;
-  const res = await fetch(`${TG}/${method}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body || {})
+  const url = `${TG}/${method}`;
+  return new Promise((resolve) => {
+    const u = new URL(url);
+    const data = JSON.stringify(body || {});
+    const options = {
+      hostname: u.hostname,
+      port: 443,
+      path: u.pathname + u.search,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(data)
+      },
+      family: 4, // Ép buộc dùng IPv4
+      timeout: 15000 // Timeout 15s
+    };
+
+    const req = https.request(options, (res) => {
+      let chunks = '';
+      res.on('data', c => chunks += c);
+      res.on('end', () => {
+        try { resolve(JSON.parse(chunks)); } catch { resolve(null); }
+      });
+    });
+
+    req.on('error', (err) => {
+      console.warn('TG_ERR', method, err.message);
+      resolve(null);
+    });
+
+    req.on('timeout', () => {
+      req.destroy();
+      console.warn('TG_TIMEOUT', method);
+      resolve(null);
+    });
+
+    req.write(data);
+    req.end();
   });
-  return await res.json().catch(() => null);
 }
+
 async function send(chatId, text, extra = {}) {
   return tg('sendMessage', { chat_id: chatId, text, parse_mode: 'HTML', disable_web_page_preview: true, ...extra });
 }
@@ -102,48 +141,27 @@ function grantVip(uid, hours) {
   return u.vipUntil;
 }
 
-/* ───────── Games (FULL API UPDATE) ───────── */
+/* ───────── Games ───────── */
 const DEFAULT_GAMES = [
-  // SUNWIN
   { id: 'sunwin_tx', brand: 'sunwin', brandLabel: 'SUNWIN', variant: 'Tài Xỉu', url: 'https://apitaixiu-6jjn.onrender.com/api/tx', group: 'tx', enabled: true },
   { id: 'sicbo_sunwin', brand: 'sunwin', brandLabel: 'SUNWIN', variant: 'Sicbo', url: 'https://apitaixiu-6jjn.onrender.com/api/sicbo/sunwin', group: 'sicbo', enabled: true },
-  
-  // HITCLUB
   { id: 'hitclub_tx', brand: 'hitclub', brandLabel: 'HITCLUB', variant: 'Tài Xỉu', url: 'https://apihitclubhihi.onrender.com/api/hitclub/hu', group: 'tx', enabled: true },
   { id: 'sicbo_hitclub', brand: 'hitclub', brandLabel: 'HITCLUB', variant: 'Sicbo', url: 'https://apitaixiu-6jjn.onrender.com/api/sicbo/hitclub', group: 'sicbo', enabled: true },
-
-  // MAX789
   { id: 'max789_tx', brand: 'max789', brandLabel: 'MAX789', variant: 'Tài Xỉu', url: 'https://apitaixiu-6jjn.onrender.com/max789/tx', group: 'tx', enabled: true },
   { id: 'max789_md5', brand: 'max789', brandLabel: 'MAX789', variant: 'MD5', url: 'https://apitaixiu-6jjn.onrender.com/max789/md5', group: 'md5', enabled: true },
   { id: 'max789_kubet', brand: 'max789', brandLabel: 'MAX789', variant: 'Kubet Live', url: 'https://apitaixiu-6jjn.onrender.com/max789/kubet', group: 'tx', enabled: true },
-
-  // LC79
   { id: 'lc79_tx', brand: 'lc79', brandLabel: 'LC79', variant: 'Tài Xỉu', url: 'https://apitaixiu-6jjn.onrender.com/lc79/tx', group: 'tx', enabled: true },
   { id: 'lc79_md5', brand: 'lc79', brandLabel: 'LC79', variant: 'MD5', url: 'https://apitaixiu-6jjn.onrender.com/lc79/md5', group: 'md5', enabled: true },
-
-  // BETVIP
   { id: 'betvip_tx', brand: 'betvip', brandLabel: 'BETVIP', variant: 'Tài Xỉu', url: 'https://apitaixiu-6jjn.onrender.com/betvip/tx', group: 'tx', enabled: true },
   { id: 'betvip_md5', brand: 'betvip', brandLabel: 'BETVIP', variant: 'MD5', url: 'https://apitaixiu-6jjn.onrender.com/betvip/md5', group: 'md5', enabled: true },
-
-  // B52
   { id: 'b52_tx', brand: 'b52', brandLabel: 'B52', variant: 'Tài Xỉu', url: 'https://apitaixiu-6jjn.onrender.com/api/ditmemayb52', group: 'tx', enabled: true },
-
-  // LUCK8
   { id: 'luck8_tx', brand: 'luck8', brandLabel: 'LUCK8', variant: 'Hũ', url: 'https://apitaixiu-6jjn.onrender.com/luck8-hu', group: 'tx', enabled: true },
   { id: 'luck8_md5', brand: 'luck8', brandLabel: 'LUCK8', variant: 'MD5', url: 'https://apitaixiu-6jjn.onrender.com/luck8-md5', group: 'md5', enabled: true },
-
-  // 789CLUB
   { id: 'sicbo_789', brand: '789club', brandLabel: '789CLUB', variant: 'Sicbo', url: 'https://apitaixiu-6jjn.onrender.com/api/sicbo/789', group: 'sicbo', enabled: true },
-
-  // XOCDIA88
   { id: 'xocdia88_tx', brand: 'xocdia88', brandLabel: 'XOCDIA88', variant: 'Tài Xỉu', url: 'https://apitaixiu-6jjn.onrender.com/xocdia88/tx', group: 'tx', enabled: true },
   { id: 'xocdia88_md5', brand: 'xocdia88', brandLabel: 'XOCDIA88', variant: 'MD5', url: 'https://apitaixiu-6jjn.onrender.com/xocdia88/md5', group: 'md5', enabled: true },
-
-  // SUMCLUB
   { id: 'sumclub_tx', brand: 'sumclub', brandLabel: 'SUMCLUB', variant: 'Tài Xỉu', url: 'https://apitaixiu-6jjn.onrender.com/sumclub/tx', group: 'tx', enabled: true },
   { id: 'sumclub_md5', brand: 'sumclub', brandLabel: 'SUMCLUB', variant: 'MD5', url: 'https://apitaixiu-6jjn.onrender.com/sumclub/md5', group: 'md5', enabled: true },
-
-  // 68GB
   { id: 'gb68_md5', brand: '68gb', brandLabel: '68GB', variant: 'MD5', url: 'https://apitaixiu-6jjn.onrender.com/68gb/md5', group: 'md5', enabled: true }
 ];
 
@@ -372,12 +390,11 @@ function isSicboGame(g) {
 const FEEDS = {};
 for (const g of games) FEEDS[g.id] = { id: g.id, engine: new Engine(g.id), lastSession: null, lastLive: null, lastError: null, lastPred: null };
 
-/* FIX: Parse API đa năng (Hỗ trợ mọi loại Key, mảng lịch sử) */
+/* FIX: Parse API đa năng */
 function parseLive(json) {
   if (!json) return null;
   let item = json;
 
-  // Bóc tách các lớp bọc mảng phổ biến
   if (json.Lich_su && Array.isArray(json.Lich_su) && json.Lich_su.length > 0) item = json.Lich_su[0];
   else if (json.history && Array.isArray(json.history) && json.history.length > 0) item = json.history[0];
   else if (Array.isArray(json) && json.length > 0) item = json[0];
@@ -386,7 +403,6 @@ function parseLive(json) {
 
   if (!item || typeof item !== 'object') return null;
 
-  // Hàm bắt Key không phân biệt hoa thường
   const getVal = (obj, keys) => {
     for (const k of keys) {
       if (obj[k] !== undefined && obj[k] !== null) return obj[k];
@@ -404,7 +420,6 @@ function parseLive(json) {
   let ket = getVal(item, ['Ket_qua', 'ket_qua', 'result', 'KetQua', 'kq']) || '';
   try { ket = decodeURIComponent(ket); } catch {}
   
-  // Xử lý mảng xúc xắc hoặc từng biến lẻ
   const xucxacArr = getVal(item, ['xuc_xac', 'Xuc_xac', 'dice']);
   let d1 = 0, d2 = 0, d3 = 0;
   if (Array.isArray(xucxacArr) && xucxacArr.length >= 3) {
@@ -423,7 +438,6 @@ function parseLive(json) {
 
   const k = String(ket).toLowerCase();
   let side = 'X';
-  // Check ký tự unicode hoặc tiếng việt không dấu
   if (k.includes('tài') || k.includes('tai') || k === 't' || k.includes('t\\u00e0i')) side = 'T';
   else if (k.includes('xỉu') || k.includes('xiu') || k === 'x' || k.includes('x\\u1ec9u')) side = 'X';
   else if (sum > 0) {
@@ -438,7 +452,7 @@ async function fetchJson(url, timeout = 8000) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeout);
   try {
-    const res = await fetch(url, { signal: ctrl.signal, headers: { 'User-Agent': 'Mozilla/5.0 DUDOANTX/8' } });
+    const res = await fetch(url, { signal: ctrl.signal, headers: { 'User-Agent': 'Mozilla/5.0 DUDOANTX/9' } });
     clearTimeout(t);
     if (!res.ok) throw new Error('HTTP ' + res.status);
     return await res.json();
@@ -828,7 +842,7 @@ async function loop() {
         try {
           if (u.callback_query) await onCallback(u.callback_query);
           else if (u.message) await onMessage(u.message);
-        } catch (e) { console.error('update', e); }
+        } catch (e) { console.error('update_err', e.message); }
       }
     }
   } catch (e) {
