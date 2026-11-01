@@ -1,17 +1,12 @@
 {
-  "name": "vip-oracle-backend",
+  "name": "dudoantx-bot",
   "version": "2.0.0",
-  "description": "Tool tưng tửng API, configurable game feeds, key licensing, and Telegram key-sales bot",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
-    "check": "node --check server.js"
-  },
-  "engines": {
-    "node": ">=18"
+    "start": "node server.js"
   },
   "dependencies": {
-    "cors": "^2.8.6",
-    "express": "^4.22.3"
+    "express": "^4.19.2",
+    "cors": "^2.8.5"
   }
 }
