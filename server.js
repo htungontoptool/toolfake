@@ -1,6 +1,6 @@
 /**
- * DUDOANTX — TOOL SOI CẦU CHIẾN THẦN (v6)
- * Giao diện gắt gỏng, bám phiên 24/7, tích hợp data cầu thật
+ * DUDOANTX — TOOL SOI CẦU CHIẾN THẦN (v7 - Ultimate Fix)
+ * Giao diện gắt gỏng, parse API đa năng, thuật toán tối ưu
  */
 'use strict';
 
@@ -112,7 +112,8 @@ const DEFAULT_GAMES = [
   { id: 'lc79_tx', brand: 'lc79', brandLabel: 'LC79', variant: 'Tài Xỉu', url: 'https://apitaixiu-6jjn.onrender.com/lc79/tx', group: 'tx', enabled: true },
   { id: 'betvip_tx', brand: 'betvip', brandLabel: 'BETVIP', variant: 'Tài Xỉu', url: 'https://apitaixiu-6jjn.onrender.com/betvip/tx', group: 'tx', enabled: true },
   { id: 'b52_tx', brand: 'b52', brandLabel: 'B52', variant: 'Tài Xỉu', url: 'https://apitaixiu-6jjn.onrender.com/api/ditmemayb52', group: 'tx', enabled: true },
-  { id: 'sicbo_b52', brand: 'b52', brandLabel: 'B52', variant: 'Sicbo', url: 'https://sicbob52-9zn5.onrender.com/api/sicbo/b52', group: 'sicbo', enabled: true }
+  { id: 'sicbo_b52', brand: 'b52', brandLabel: 'B52', variant: 'Sicbo', url: 'https://sicbob52-9zn5.onrender.com/api/sicbo/b52', group: 'sicbo', enabled: true },
+  { id: 'luck8_tx', brand: 'luck8', brandLabel: 'LUCK8', variant: 'Tài Xỉu', url: 'https://apitaixiu-6jjn.onrender.com/luck8-hu', group: 'tx', enabled: true }
 ];
 
 let games = loadJSON('games.json', null);
@@ -253,29 +254,29 @@ class Engine {
     const reasons = [];
     let confExtra = 0;
 
-    // 1. Dò Pattern DB
+    // 1. Dò Pattern DB (Ưu tiên tuyệt đối)
     let patternMatched = false;
     for (let len = Math.min(n, 8); len >= 2; len--) {
       const pat = h.slice(-len).join('');
       if (PATTERN_DB[pat]) {
         const pred = PATTERN_DB[pat];
-        if (pred === 'T') scoreT += 2.0; else scoreT -= 2.0;
+        if (pred === 'T') scoreT += 3.0; else scoreT -= 3.0;
         reasons.push(`Dính mẫu ${len} (${pred})`);
-        confExtra += 8;
+        confExtra += 15; // Tăng mạnh độ tin cậy nếu dính mẫu chuẩn
         patternMatched = true;
         break;
       }
     }
 
-    // 2. Markov
+    // 2. Markov (Chỉ dùng khi không dính mẫu DB)
     if (!patternMatched && m3n >= 3) {
       const p = (m3T + 1) / (m3n + 2);
       scoreT += 1.5 * Math.log(p / (1 - p));
       reasons.push(`Bám nhịp 3 tay`);
-      confExtra += 4;
+      confExtra += 5;
     }
 
-    // 3. Z-Score
+    // 3. Z-Score (Điểm tổng)
     const sums = this.sums.slice(-20);
     let zBoost = 0;
     if (sums.length >= 10) {
@@ -286,22 +287,22 @@ class Engine {
     }
     scoreT += zBoost;
 
-    // 4. Anti
-    if (isAlt) { scoreT = 0; reasons.length = 0; reasons.push('Cầu đan 1-1, đéo đuổi'); confExtra -= 5; }
+    // 4. Anti Cầu (Bẻ cầu)
+    if (isAlt && !patternMatched) { scoreT = 0; reasons.length = 0; reasons.push('Cầu đan 1-1, đéo đuổi'); confExtra -= 10; }
     if (is22 && !isAlt) { if (last === 'T') scoreT -= 0.5; else scoreT += 0.5; reasons.push('Cầu đôi 2-2'); }
 
     // 5. Bệt
-    if (streak >= 6) { if (last === 'T') scoreT -= 1.2; else scoreT += 1.2; reasons.push(`Bệt ${streak}, canh bẻ`); confExtra += 6; }
-    else if (streak >= 4) { if (last === 'T') scoreT -= 0.6; else scoreT += 0.6; reasons.push(`Bệt chuỗi ${streak}`); confExtra += 3; }
+    if (streak >= 6) { if (last === 'T') scoreT -= 1.2; else scoreT += 1.2; reasons.push(`Bệt ${streak}, canh bẻ`); confExtra += 5; }
+    else if (streak >= 4) { if (last === 'T') scoreT -= 0.6; else scoreT += 0.6; reasons.push(`Bệt chuỗi ${streak}`); confExtra += 2; }
 
-    // 6. Volatility
-    if (this.marketState.regime === 'volatile') { confExtra -= 5; scoreT *= 0.8; }
-    else if (this.marketState.regime === 'trending') { confExtra += 2; }
+    // 6. Volatility (Biến động)
+    if (this.marketState.regime === 'volatile') { confExtra -= 5; scoreT *= 0.9; }
+    else if (this.marketState.regime === 'trending') { confExtra += 3; }
 
-    // Chốt
-    const pT = 1 / (1 + Math.exp(-Math.max(-4, Math.min(4, scoreT))));
-    let conf = Math.round(55 + Math.abs(pT - 0.5) * 150 + confExtra);
-    conf = Math.min(95, Math.max(52, conf));
+    // Chốt kết quả
+    const pT = 1 / (1 + Math.exp(-Math.max(-5, Math.min(5, scoreT))));
+    let conf = Math.round(55 + Math.abs(pT - 0.5) * 160 + confExtra);
+    conf = Math.min(96, Math.max(52, conf));
 
     const side = pT >= 0.5 ? 'T' : 'X';
     const out = {
@@ -340,37 +341,60 @@ function isSicboGame(g) {
 const FEEDS = {};
 for (const g of games) FEEDS[g.id] = { id: g.id, engine: new Engine(g.id), lastSession: null, lastLive: null, lastError: null, lastPred: null };
 
+/* FIX: Parse API đa năng (Hỗ trợ mọi loại Key viết hoa/thường) */
 function parseLive(json) {
   if (!json) return null;
   let item = json;
   if (json.history && Array.isArray(json.history) && json.history.length > 0) item = json.history[0];
   else if (Array.isArray(json) && json.length > 0) item = json[0];
   else if (json.data && Array.isArray(json.data) && json.data.length > 0) item = json.data[0];
+  else if (json.data && typeof json.data === 'object') item = json.data;
 
-  if (!item || item.phien == null) return null;
+  if (!item || typeof item !== 'object') return null;
 
-  const phien = String(item.phien);
-  let ket = item.ket_qua || '';
+  // Hàm lấy giá trị không phân biệt hoa thường
+  const getVal = (obj, keys) => {
+    for (const k of keys) {
+      if (obj[k] !== undefined && obj[k] !== null) return obj[k];
+    }
+    const lowerKeys = keys.map(k => k.toLowerCase());
+    for (const key of Object.keys(obj)) {
+      if (lowerKeys.includes(key.toLowerCase())) return obj[key];
+    }
+    return null;
+  };
+
+  const phien = getVal(item, ['Phien', 'phien', 'session', 'id', 'Phien_hien_tai']);
+  if (phien == null) return null;
+
+  let ket = getVal(item, ['Ket_qua', 'ket_qua', 'result', 'KetQua', 'kq']) || '';
   try { ket = decodeURIComponent(ket); } catch {}
+  
+  const d1 = Number(getVal(item, ['Xuc_xac_1', 'xuc_xac_1', 'dice1', 'xucxac_1'])) || 0;
+  const d2 = Number(getVal(item, ['Xuc_xac_2', 'xuc_xac_2', 'dice2', 'xucxac_2'])) || 0;
+  const d3 = Number(getVal(item, ['Xuc_xac_3', 'xuc_xac_3', 'dice3', 'xucxac_3'])) || 0;
+  
+  let tong = getVal(item, ['Tong', 'tong', 'total', 'sum']);
+  let sum = Number(tong);
+  if (!Number.isFinite(sum) || sum <= 0) sum = d1 + d2 + d3;
+
   const k = String(ket).toLowerCase();
   let side = 'X';
   if (k.includes('tài') || k.includes('tai') || k === 't') side = 'T';
   else if (k.includes('xỉu') || k.includes('xiu') || k === 'x') side = 'X';
+  else if (sum > 0) {
+    if (sum >= 11) side = 'T';
+    else if (sum <= 10) side = 'X';
+  }
 
-  const d1 = Number(item.xuc_xac_1) || 0;
-  const d2 = Number(item.xuc_xac_2) || 0;
-  const d3 = Number(item.xuc_xac_3) || 0;
-  let sum = Number(item.tong);
-  if (!Number.isFinite(sum) || sum <= 0) sum = d1 + d2 + d3;
-
-  return { session: phien, side, sum, dice: [d1, d2, d3] };
+  return { session: String(phien), side, sum, dice: [d1, d2, d3] };
 }
 
 async function fetchJson(url, timeout = 8000) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeout);
   try {
-    const res = await fetch(url, { signal: ctrl.signal, headers: { 'User-Agent': 'DUDOANTX/6' } });
+    const res = await fetch(url, { signal: ctrl.signal, headers: { 'User-Agent': 'Mozilla/5.0 DUDOANTX/7' } });
     clearTimeout(t);
     if (!res.ok) throw new Error('HTTP ' + res.status);
     return await res.json();
@@ -387,7 +411,7 @@ async function pollGame(g) {
   try {
     const raw = await fetchJson(g.url, 8000);
     const live = parseLive(raw);
-    if (!live) throw new Error('parse');
+    if (!live) throw new Error('parse_failed');
     
     if (live.session && live.session !== f.lastSession) {
       f.engine.push(live.side, live.sum, live.dice, live.session);
@@ -464,7 +488,7 @@ async function showUserMenu(chatId, from) {
 }
 
 async function showBrandMenu(chatId) {
-  const brands = [['sunwin', 'SUNWIN'], ['hitclub', 'HITCLUB'], ['max789', 'MAX789'], ['lc79', 'LC79'], ['betvip', 'BETVIP'], ['b52', 'B52']];
+  const brands = [['sunwin', 'SUNWIN'], ['hitclub', 'HITCLUB'], ['max789', 'MAX789'], ['lc79', 'LC79'], ['betvip', 'BETVIP'], ['b52', 'B52'], ['luck8', 'LUCK8']];
   const rows = []; let row = []; let t = true;
   for (const [id, label] of brands) {
     row.push(btn(label, 'predbrand:' + id, t ? 'primary' : 'success'));
