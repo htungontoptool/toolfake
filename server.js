@@ -1,6 +1,6 @@
 /**
- * DUDOANTX — TOOL SOI CẦU CHIẾN THẦN (v7 - Ultimate Fix)
- * Giao diện gắt gỏng, parse API đa năng, thuật toán tối ưu
+ * DUDOANTX — TOOL SOI CẦU CHIẾN THẦN (v8 - Full API Update)
+ * Giao diện gắt gỏng, parse API đa năng, auto bám phiên 24/7
  */
 'use strict';
 
@@ -102,18 +102,49 @@ function grantVip(uid, hours) {
   return u.vipUntil;
 }
 
-/* ───────── Games ───────── */
+/* ───────── Games (FULL API UPDATE) ───────── */
 const DEFAULT_GAMES = [
-  { id: 'sunwin_tx', brand: 'sunwin', brandLabel: 'SUNWIN', variant: 'Tài Xỉu', url: 'https://well-summary-oclc-invisible.trycloudflare.com/api/tx', group: 'tx', enabled: true },
+  // SUNWIN
+  { id: 'sunwin_tx', brand: 'sunwin', brandLabel: 'SUNWIN', variant: 'Tài Xỉu', url: 'https://apitaixiu-6jjn.onrender.com/api/tx', group: 'tx', enabled: true },
   { id: 'sicbo_sunwin', brand: 'sunwin', brandLabel: 'SUNWIN', variant: 'Sicbo', url: 'https://apitaixiu-6jjn.onrender.com/api/sicbo/sunwin', group: 'sicbo', enabled: true },
+  
+  // HITCLUB
   { id: 'hitclub_tx', brand: 'hitclub', brandLabel: 'HITCLUB', variant: 'Tài Xỉu', url: 'https://apihitclubhihi.onrender.com/api/hitclub/hu', group: 'tx', enabled: true },
-  { id: 'hitclub_md5', brand: 'hitclub', brandLabel: 'HITCLUB', variant: 'MD5', url: 'https://apihitclubhihi.onrender.com/api/hitclub/md5', group: 'md5', enabled: true },
+  { id: 'sicbo_hitclub', brand: 'hitclub', brandLabel: 'HITCLUB', variant: 'Sicbo', url: 'https://apitaixiu-6jjn.onrender.com/api/sicbo/hitclub', group: 'sicbo', enabled: true },
+
+  // MAX789
   { id: 'max789_tx', brand: 'max789', brandLabel: 'MAX789', variant: 'Tài Xỉu', url: 'https://apitaixiu-6jjn.onrender.com/max789/tx', group: 'tx', enabled: true },
+  { id: 'max789_md5', brand: 'max789', brandLabel: 'MAX789', variant: 'MD5', url: 'https://apitaixiu-6jjn.onrender.com/max789/md5', group: 'md5', enabled: true },
+  { id: 'max789_kubet', brand: 'max789', brandLabel: 'MAX789', variant: 'Kubet Live', url: 'https://apitaixiu-6jjn.onrender.com/max789/kubet', group: 'tx', enabled: true },
+
+  // LC79
   { id: 'lc79_tx', brand: 'lc79', brandLabel: 'LC79', variant: 'Tài Xỉu', url: 'https://apitaixiu-6jjn.onrender.com/lc79/tx', group: 'tx', enabled: true },
+  { id: 'lc79_md5', brand: 'lc79', brandLabel: 'LC79', variant: 'MD5', url: 'https://apitaixiu-6jjn.onrender.com/lc79/md5', group: 'md5', enabled: true },
+
+  // BETVIP
   { id: 'betvip_tx', brand: 'betvip', brandLabel: 'BETVIP', variant: 'Tài Xỉu', url: 'https://apitaixiu-6jjn.onrender.com/betvip/tx', group: 'tx', enabled: true },
+  { id: 'betvip_md5', brand: 'betvip', brandLabel: 'BETVIP', variant: 'MD5', url: 'https://apitaixiu-6jjn.onrender.com/betvip/md5', group: 'md5', enabled: true },
+
+  // B52
   { id: 'b52_tx', brand: 'b52', brandLabel: 'B52', variant: 'Tài Xỉu', url: 'https://apitaixiu-6jjn.onrender.com/api/ditmemayb52', group: 'tx', enabled: true },
-  { id: 'sicbo_b52', brand: 'b52', brandLabel: 'B52', variant: 'Sicbo', url: 'https://sicbob52-9zn5.onrender.com/api/sicbo/b52', group: 'sicbo', enabled: true },
-  { id: 'luck8_tx', brand: 'luck8', brandLabel: 'LUCK8', variant: 'Tài Xỉu', url: 'https://apitaixiu-6jjn.onrender.com/luck8-hu', group: 'tx', enabled: true }
+
+  // LUCK8
+  { id: 'luck8_tx', brand: 'luck8', brandLabel: 'LUCK8', variant: 'Hũ', url: 'https://apitaixiu-6jjn.onrender.com/luck8-hu', group: 'tx', enabled: true },
+  { id: 'luck8_md5', brand: 'luck8', brandLabel: 'LUCK8', variant: 'MD5', url: 'https://apitaixiu-6jjn.onrender.com/luck8-md5', group: 'md5', enabled: true },
+
+  // 789CLUB
+  { id: 'sicbo_789', brand: '789club', brandLabel: '789CLUB', variant: 'Sicbo', url: 'https://apitaixiu-6jjn.onrender.com/api/sicbo/789', group: 'sicbo', enabled: true },
+
+  // XOCDIA88
+  { id: 'xocdia88_tx', brand: 'xocdia88', brandLabel: 'XOCDIA88', variant: 'Tài Xỉu', url: 'https://apitaixiu-6jjn.onrender.com/xocdia88/tx', group: 'tx', enabled: true },
+  { id: 'xocdia88_md5', brand: 'xocdia88', brandLabel: 'XOCDIA88', variant: 'MD5', url: 'https://apitaixiu-6jjn.onrender.com/xocdia88/md5', group: 'md5', enabled: true },
+
+  // SUMCLUB
+  { id: 'sumclub_tx', brand: 'sumclub', brandLabel: 'SUMCLUB', variant: 'Tài Xỉu', url: 'https://apitaixiu-6jjn.onrender.com/sumclub/tx', group: 'tx', enabled: true },
+  { id: 'sumclub_md5', brand: 'sumclub', brandLabel: 'SUMCLUB', variant: 'MD5', url: 'https://apitaixiu-6jjn.onrender.com/sumclub/md5', group: 'md5', enabled: true },
+
+  // 68GB
+  { id: 'gb68_md5', brand: '68gb', brandLabel: '68GB', variant: 'MD5', url: 'https://apitaixiu-6jjn.onrender.com/68gb/md5', group: 'md5', enabled: true }
 ];
 
 let games = loadJSON('games.json', null);
@@ -122,7 +153,7 @@ else {
   for (const d of DEFAULT_GAMES) if (!games.some(g => g.id === d.id)) games.push({ ...d });
 }
 
-/* ───────── PATTERN DATABASE (Full Data từ pattern8.json) ───────── */
+/* ───────── PATTERN DATABASE ───────── */
 const PATTERN_DB = {
   "TXXTTXTX":"X","XXTTXTXX":"X","XTTXTXXT":"X","TTXTXXTT":"X","TXTXXTTT":"X","XTXXTTTX":"T","TXXTTTXX":"X","XXTTTXXT":"T","XTTTXXTX":"T","TTTXXTXX":"X","TTXXTXXX":"X","TXXTXXXX":"X","XXTXXXXX":"X","XTXXXXXT":"T","TXXXXXTX":"T","XXXXXTXX":"X","XXXXTXXX":"T","XXXTXXXT":"T","XXTXXXTX":"X","XTXXXTXX":"T","TXXXTXXX":"T","XXXTXXXX":"X","XXTXXXXT":"X","XTXXXXTT":"X","TXXXXTTX":"X","XXXXTTXX":"X","XXXTTXXX":"T","XXTTXXXT":"T","XTTXXXTX":"T","TTXXXTXT":"T","TXXXTXTX":"T","XXXTXTXT":"X","XXTXTXTT":"T","XTXTXTTT":"X","TXTXTTTT":"T","XTXTTTTT":"X","TXTTTTTT":"X","XTTTTTTX":"X","TTTTTTXT":"X","TTTTTXTX":"X","TTTTXTXT":"X","TTTXTXTT":"X","TTXTXTTX":"X","TXTXTTXT":"X","XTXTTXTX":"T","TXTTXTXT":"T","XTTXTXTT":"X","TXTTXTXX":"X","XTTXTXXX":"X","TTXTXXXT":"T","TXTXXXTT":"X","XTXXXTTX":"T","TXXXTTXX":"T","XXXTTXXT":"X","XXTTXXTX":"T","XTTXXTXX":"X","TXXTXXXT":"X","XXTXXXTT":"T","XTXXXTTT":"T","TXXXTTTT":"X","XXXTTTTT":"T","XXTTTTTT":"X","TTTTTTXX":"X","TTTTTXXX":"T","TTTTXXXT":"X","TTTXXXTX":"X","TXXXTXTT":"X","XXXTXTTX":"X","XXTXTTXX":"T","XTXTTXXT":"T","TXTTXXTT":"T","XTTXXTTT":"X","TTXXTTTX":"T","TXXTTTXT":"X","XXTTTXTX":"T","XTTTXTXX":"X","TTTXTXXX":"X","XTXTTXXX":"X","TXTTXXXT":"X","TTXXXTXX":"X","TXXXTXXT":"T","XXXTXXTX":"X","XXTXXTXT":"X","XTXXTXTX":"T","TXXTXTXT":"X","XTXTXTTX":"X","XTXTTXTT":"T","TXTTXTTT":"T","XTTXTTTX":"X","TTXTTTXT":"X","TXTTTXTT":"X","XTTTXTTX":"T","TTTXTTXT":"X","TTXTTXTX":"T","TTXTXXTX":"T","TXTXXTXT":"X","XTXXTXTT":"T","TXXTXTTT":"T","XXTXTTTT":"X","TXTTTTTX":"T","XTTTTTXX":"T","TTTTXXXX":"T","TTTXXXXX":"X","TTXXXXXX":"X","TXXXXXXT":"T","XXXXXXTT":"X","XXXXXTTX":"X","XTTXXTXT":"X","TTXXTXTT":"T","XTXTTTTX":"T","TXTTTTXT":"X","XTTTTXTX":"T","TTTTXTXX":"X","TTTXTXXT":"T","TXTXTTTX":"T","XTXTTTXX":"T","TXTTTXXT":"T","XTTTXXTT":"T","TTTXXTTT":"T","TTXXTTTT":"X","TXXTTTTX":"T","XXTTTTXT":"X","TXTXTTXX":"X","TXTTXXXX":"T","XTTXXXXT":"X","TTXXXXTX":"X","TXXXXTXT":"X","XXXXTXTX":"T","TXTTTTXX":"T","XTTTTXXT":"T","TTTTXXTX":"T","XXXTXXTT":"T","XXTXXTTT":"X","XXTTTXTT":"X","TTTXTTXX":"T","TTXTTXXX":"X","XTTXXXXX":"T","TTXXXXXT":"T","TXXXXXTT":"T","XXXXXTTT":"X","XXXXTTTT":"T","XXXTTTTX":"T","XTTXTXTX":"T","TTXTXTXT":"X","TXTXTXTX":"X","XTXTXTXT":"X","XTXTXTXX":"X","TXTXTXXT":"X","XTXTXXTX":"T","XXTXTXTX":"X","TXTXTXTT":"X","TXTTTXXX":"T","XTTTXXXX":"X","TTTXXXXT":"X","TTXXXXTT":"X","XXXTXTXX":"T","XXTXTXXX":"X","XTXTXXXT":"X","XXTTXXTT":"T","TXXTTTTT":"X","TTTTTXTT":"X","TTTTXTTT":"T","TTTXTTTT":"X","TTXTTTTX":"X","XTXXTTTT":"T","XTTTTXTT":"T","XTTTTXXX":"X","TXXXXTTT":"X","XXXXTTTX":"T","XXXTTTXX":"X","TXTXTXXX":"X","XXTTTTXX":"X","TTTXXXTT":"T","TTXXXTTX":"T","TXXXTTXT":"X","XXXTTXTT":"T","XXTTXTTX":"X","XTTXTTXX":"X","TTXTTXXT":"T","TTTXXTXT":"X","TTXXTXTX":"X","TXTXXXTX":"X","TTTTXXTT":"T","XTTTTTTT":"T","TTTTTTTT":"X","TTTTTTTX":"T","TTTTTXXT":"T","TTTXXTTX":"T","TTXXTTXX":"T","TXXTTXXT":"X","TTXXTXXT":"T","TXXTXXTX":"T","XXTXXTXX":"X","XTXXTXXX":"X","XTXXXXTX":"T","XXXXTXTT":"T","XXXTXTTT":"X","TXXTXXTT":"T","XXXXXTXT":"T","XTTXXXTT":"T","XXTTXXXX":"X","TXTTXTTX":"T","XTTXTTXT":"X","TTXTTXTT":"T","XTTXTTTT":"X","TTXTTTTT":"X","TTTTXTTX":"X","TTXTXXXX":"T","TXTXXXXT":"T","XXTTTTTX":"X","XTTTTTXT":"T","TTTXTXTX":"X","TXTXXTXX":"X","XTXXTXXT":"T","XTXTXXXX":"T","TXXXXTXX":"T","TTXTXTXX":"X","XTXTXXTT":"T","TXXXTTTX":"X","XXXTTTXT":"X","XXTTTXXX":"T","XTTTXXXT":"X","TTXXXTTT":"X","TXXTXTTX":"T","TXTTXXTX":"X","XXTXTTTX":"X","XTXXXXXX":"T","TXXXXXXX":"X","XXXXXXXT":"X","XXXXTTXT":"T","XXXTTXTX":"X","TXTXXXXX":"X","XXXXTXXT":"X","TXXTXTXX":"T","XXTXTXXT":"T","TXTXXTTX":"X","XTXXTTXX":"X","TXXTTXXX":"X","XXTTXTTT":"T","TTXTTTXX":"T","XXXXXXTX":"X","TTTXTTTX":"X","XTTTXTTT":"T","TXTTTXTX":"X","XTXXXTXT":"X","XTTXXTTX":"T","TTXXTTXT":"X","XXTTXTXT":"X","XXTXXTTX":"X","TXTT":"X","TXTTT":"X","TXTTTX":"X","TXTTTXX":"X","XXTXTTXT":"X","TTXTXTTT":"X","XTXTTTXT":"T","XTTTXTXT":"X","XTXXTTXT":"X","TXXTTXTT":"X","XXTT":"T","XXTTT":"T","XXTTTT":"X","XXTTTTX":"X","XTXX":"T","XTXXT":"T","XTXXTT":"T","XTXXTTT":"T","XXXXXXXX":"T","TXXT":"T","TXXTT":"T","TXXTTT":"X","TXXTTTX":"T","XTTT":"X","XTTTX":"X","XTTTXX":"T","XTTTXXX":"T","TTXT":"X","TTXTX":"X","TTXTXX":"X","TTXTXXX":"X","XTTTXXT":"T","TXTTX":"T","TXTTXT":"T","TXTTXTT":"T","TXXX":"T","TXXXT":"T","TXXXTT":"T","TXXXTTT":"X","XXTX":"T","XXTXT":"X","XXTXTX":"X","XXTXTXX":"X"
 };
@@ -262,13 +293,13 @@ class Engine {
         const pred = PATTERN_DB[pat];
         if (pred === 'T') scoreT += 3.0; else scoreT -= 3.0;
         reasons.push(`Dính mẫu ${len} (${pred})`);
-        confExtra += 15; // Tăng mạnh độ tin cậy nếu dính mẫu chuẩn
+        confExtra += 15;
         patternMatched = true;
         break;
       }
     }
 
-    // 2. Markov (Chỉ dùng khi không dính mẫu DB)
+    // 2. Markov (Nếu không dính mẫu)
     if (!patternMatched && m3n >= 3) {
       const p = (m3T + 1) / (m3n + 2);
       scoreT += 1.5 * Math.log(p / (1 - p));
@@ -276,7 +307,7 @@ class Engine {
       confExtra += 5;
     }
 
-    // 3. Z-Score (Điểm tổng)
+    // 3. Z-Score
     const sums = this.sums.slice(-20);
     let zBoost = 0;
     if (sums.length >= 10) {
@@ -287,7 +318,7 @@ class Engine {
     }
     scoreT += zBoost;
 
-    // 4. Anti Cầu (Bẻ cầu)
+    // 4. Anti
     if (isAlt && !patternMatched) { scoreT = 0; reasons.length = 0; reasons.push('Cầu đan 1-1, đéo đuổi'); confExtra -= 10; }
     if (is22 && !isAlt) { if (last === 'T') scoreT -= 0.5; else scoreT += 0.5; reasons.push('Cầu đôi 2-2'); }
 
@@ -295,11 +326,11 @@ class Engine {
     if (streak >= 6) { if (last === 'T') scoreT -= 1.2; else scoreT += 1.2; reasons.push(`Bệt ${streak}, canh bẻ`); confExtra += 5; }
     else if (streak >= 4) { if (last === 'T') scoreT -= 0.6; else scoreT += 0.6; reasons.push(`Bệt chuỗi ${streak}`); confExtra += 2; }
 
-    // 6. Volatility (Biến động)
+    // 6. Volatility
     if (this.marketState.regime === 'volatile') { confExtra -= 5; scoreT *= 0.9; }
     else if (this.marketState.regime === 'trending') { confExtra += 3; }
 
-    // Chốt kết quả
+    // Chốt
     const pT = 1 / (1 + Math.exp(-Math.max(-5, Math.min(5, scoreT))));
     let conf = Math.round(55 + Math.abs(pT - 0.5) * 160 + confExtra);
     conf = Math.min(96, Math.max(52, conf));
@@ -341,18 +372,21 @@ function isSicboGame(g) {
 const FEEDS = {};
 for (const g of games) FEEDS[g.id] = { id: g.id, engine: new Engine(g.id), lastSession: null, lastLive: null, lastError: null, lastPred: null };
 
-/* FIX: Parse API đa năng (Hỗ trợ mọi loại Key viết hoa/thường) */
+/* FIX: Parse API đa năng (Hỗ trợ mọi loại Key, mảng lịch sử) */
 function parseLive(json) {
   if (!json) return null;
   let item = json;
-  if (json.history && Array.isArray(json.history) && json.history.length > 0) item = json.history[0];
+
+  // Bóc tách các lớp bọc mảng phổ biến
+  if (json.Lich_su && Array.isArray(json.Lich_su) && json.Lich_su.length > 0) item = json.Lich_su[0];
+  else if (json.history && Array.isArray(json.history) && json.history.length > 0) item = json.history[0];
   else if (Array.isArray(json) && json.length > 0) item = json[0];
   else if (json.data && Array.isArray(json.data) && json.data.length > 0) item = json.data[0];
   else if (json.data && typeof json.data === 'object') item = json.data;
 
   if (!item || typeof item !== 'object') return null;
 
-  // Hàm lấy giá trị không phân biệt hoa thường
+  // Hàm bắt Key không phân biệt hoa thường
   const getVal = (obj, keys) => {
     for (const k of keys) {
       if (obj[k] !== undefined && obj[k] !== null) return obj[k];
@@ -370,9 +404,18 @@ function parseLive(json) {
   let ket = getVal(item, ['Ket_qua', 'ket_qua', 'result', 'KetQua', 'kq']) || '';
   try { ket = decodeURIComponent(ket); } catch {}
   
-  const d1 = Number(getVal(item, ['Xuc_xac_1', 'xuc_xac_1', 'dice1', 'xucxac_1'])) || 0;
-  const d2 = Number(getVal(item, ['Xuc_xac_2', 'xuc_xac_2', 'dice2', 'xucxac_2'])) || 0;
-  const d3 = Number(getVal(item, ['Xuc_xac_3', 'xuc_xac_3', 'dice3', 'xucxac_3'])) || 0;
+  // Xử lý mảng xúc xắc hoặc từng biến lẻ
+  const xucxacArr = getVal(item, ['xuc_xac', 'Xuc_xac', 'dice']);
+  let d1 = 0, d2 = 0, d3 = 0;
+  if (Array.isArray(xucxacArr) && xucxacArr.length >= 3) {
+    d1 = Number(xucxacArr[0]) || 0;
+    d2 = Number(xucxacArr[1]) || 0;
+    d3 = Number(xucxacArr[2]) || 0;
+  } else {
+    d1 = Number(getVal(item, ['Xuc_xac_1', 'xuc_xac_1', 'dice1'])) || 0;
+    d2 = Number(getVal(item, ['Xuc_xac_2', 'xuc_xac_2', 'dice2'])) || 0;
+    d3 = Number(getVal(item, ['Xuc_xac_3', 'xuc_xac_3', 'dice3'])) || 0;
+  }
   
   let tong = getVal(item, ['Tong', 'tong', 'total', 'sum']);
   let sum = Number(tong);
@@ -380,8 +423,9 @@ function parseLive(json) {
 
   const k = String(ket).toLowerCase();
   let side = 'X';
-  if (k.includes('tài') || k.includes('tai') || k === 't') side = 'T';
-  else if (k.includes('xỉu') || k.includes('xiu') || k === 'x') side = 'X';
+  // Check ký tự unicode hoặc tiếng việt không dấu
+  if (k.includes('tài') || k.includes('tai') || k === 't' || k.includes('t\\u00e0i')) side = 'T';
+  else if (k.includes('xỉu') || k.includes('xiu') || k === 'x' || k.includes('x\\u1ec9u')) side = 'X';
   else if (sum > 0) {
     if (sum >= 11) side = 'T';
     else if (sum <= 10) side = 'X';
@@ -394,7 +438,7 @@ async function fetchJson(url, timeout = 8000) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeout);
   try {
-    const res = await fetch(url, { signal: ctrl.signal, headers: { 'User-Agent': 'Mozilla/5.0 DUDOANTX/7' } });
+    const res = await fetch(url, { signal: ctrl.signal, headers: { 'User-Agent': 'Mozilla/5.0 DUDOANTX/8' } });
     clearTimeout(t);
     if (!res.ok) throw new Error('HTTP ' + res.status);
     return await res.json();
@@ -488,7 +532,11 @@ async function showUserMenu(chatId, from) {
 }
 
 async function showBrandMenu(chatId) {
-  const brands = [['sunwin', 'SUNWIN'], ['hitclub', 'HITCLUB'], ['max789', 'MAX789'], ['lc79', 'LC79'], ['betvip', 'BETVIP'], ['b52', 'B52'], ['luck8', 'LUCK8']];
+  const brands = [
+    ['sunwin', 'SUNWIN'], ['hitclub', 'HITCLUB'], ['max789', 'MAX789'], ['lc79', 'LC79'],
+    ['betvip', 'BETVIP'], ['b52', 'B52'], ['luck8', 'LUCK8'], ['789club', '789CLUB'],
+    ['xocdia88', 'XOCDIA88'], ['sumclub', 'SUMCLUB'], ['68gb', '68GB']
+  ];
   const rows = []; let row = []; let t = true;
   for (const [id, label] of brands) {
     row.push(btn(label, 'predbrand:' + id, t ? 'primary' : 'success'));
@@ -691,7 +739,6 @@ async function onCallback(cq) {
   await delMsg(chatId, msgId);
   await answerCb(cq.id);
 
-  // Chặn đứng mọi hành động nếu chưa mua VIP (trừ vào Menu)
   if (!isVip(uid) && !isAdmin(uid) && data !== 'menu' && data !== 'adm:home') {
     return send(chatId, 
 `🤬 <b>ĐỊT CỤ MÀY!</b> 🤬
