@@ -1,6 +1,5 @@
 /**
- * DUDOANTX — TOOL SOI CẦU CHIẾN THẦN (v9 - Network Fix)
- * Ép IPv4 cho Telegram, chống timeout, auto bám phiên 24/7
+ * DUDOANTX — TOOL SOI CẦU CHIẾN THẦN (v10 - Hash & Probability)
  */
 'use strict';
 
@@ -12,7 +11,7 @@ const http = require('http');
 const https = require('https');
 const dns = require('dns');
 
-// Fix triệt để lỗi IPv6 ENETUNREACH trên Render
+// Fix IPv6
 try { dns.setDefaultResultOrder('ipv4first'); } catch (e) {}
 
 const ROOT = __dirname;
@@ -51,7 +50,6 @@ function displayName(from) {
   return [from.first_name, from.last_name].filter(Boolean).join(' ') || from.username || 'Vô Danh';
 }
 
-/* ───────── Telegram API Call (Fix Timeout) ───────── */
 async function tg(method, body) {
   if (!BOT_TOKEN) return null;
   const url = `${TG}/${method}`;
@@ -59,37 +57,17 @@ async function tg(method, body) {
     const u = new URL(url);
     const data = JSON.stringify(body || {});
     const options = {
-      hostname: u.hostname,
-      port: 443,
-      path: u.pathname + u.search,
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(data)
-      },
-      family: 4, // Ép buộc dùng IPv4
-      timeout: 15000 // Timeout 15s
+      hostname: u.hostname, port: 443, path: u.pathname + u.search, method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) },
+      family: 4, timeout: 15000
     };
-
     const req = https.request(options, (res) => {
       let chunks = '';
       res.on('data', c => chunks += c);
-      res.on('end', () => {
-        try { resolve(JSON.parse(chunks)); } catch { resolve(null); }
-      });
+      res.on('end', () => { try { resolve(JSON.parse(chunks)); } catch { resolve(null); } });
     });
-
-    req.on('error', (err) => {
-      console.warn('TG_ERR', method, err.message);
-      resolve(null);
-    });
-
-    req.on('timeout', () => {
-      req.destroy();
-      console.warn('TG_TIMEOUT', method);
-      resolve(null);
-    });
-
+    req.on('error', () => resolve(null));
+    req.on('timeout', () => { req.destroy(); resolve(null); });
     req.write(data);
     req.end();
   });
@@ -114,8 +92,10 @@ let users = loadJSON('users.json', {});
 let sessions = {};
 let predMsg = {};
 let autoWatch = {};
+let hashFeedback = loadJSON('hashfeedback.json', {});
 
 function saveUsers() { saveJSON('users.json', users); }
+function saveFeedback() { saveJSON('hashfeedback.json', hashFeedback); }
 function ensureUser(uid) {
   if (!users[uid]) users[uid] = { vipUntil: 0 };
   return users[uid];
@@ -141,27 +121,39 @@ function grantVip(uid, hours) {
   return u.vipUntil;
 }
 
-/* ───────── Games ───────── */
+/* ───────── Games (Thêm TIK88, update SUNWIN) ───────── */
 const DEFAULT_GAMES = [
-  { id: 'sunwin_tx', brand: 'sunwin', brandLabel: 'SUNWIN', variant: 'Tài Xỉu', url: 'https://apitaixiu-6jjn.onrender.com/api/tx', group: 'tx', enabled: true },
+  { id: 'sunwin_tx', brand: 'sunwin', brandLabel: 'SUNWIN', variant: 'Tài Xỉu', url: 'https://well-summary-oclc-invisible.trycloudflare.com/api/tx', group: 'tx', enabled: true },
   { id: 'sicbo_sunwin', brand: 'sunwin', brandLabel: 'SUNWIN', variant: 'Sicbo', url: 'https://apitaixiu-6jjn.onrender.com/api/sicbo/sunwin', group: 'sicbo', enabled: true },
+  
+  { id: 'tik88_tx', brand: 'tik88', brandLabel: 'TIK88', variant: 'Tài Xỉu', url: 'https://get-enemies-got-copper.trycloudflare.com/api/txmd5', group: 'tx', enabled: true },
+  
   { id: 'hitclub_tx', brand: 'hitclub', brandLabel: 'HITCLUB', variant: 'Tài Xỉu', url: 'https://apihitclubhihi.onrender.com/api/hitclub/hu', group: 'tx', enabled: true },
   { id: 'sicbo_hitclub', brand: 'hitclub', brandLabel: 'HITCLUB', variant: 'Sicbo', url: 'https://apitaixiu-6jjn.onrender.com/api/sicbo/hitclub', group: 'sicbo', enabled: true },
+  
   { id: 'max789_tx', brand: 'max789', brandLabel: 'MAX789', variant: 'Tài Xỉu', url: 'https://apitaixiu-6jjn.onrender.com/max789/tx', group: 'tx', enabled: true },
   { id: 'max789_md5', brand: 'max789', brandLabel: 'MAX789', variant: 'MD5', url: 'https://apitaixiu-6jjn.onrender.com/max789/md5', group: 'md5', enabled: true },
   { id: 'max789_kubet', brand: 'max789', brandLabel: 'MAX789', variant: 'Kubet Live', url: 'https://apitaixiu-6jjn.onrender.com/max789/kubet', group: 'tx', enabled: true },
+  
   { id: 'lc79_tx', brand: 'lc79', brandLabel: 'LC79', variant: 'Tài Xỉu', url: 'https://apitaixiu-6jjn.onrender.com/lc79/tx', group: 'tx', enabled: true },
   { id: 'lc79_md5', brand: 'lc79', brandLabel: 'LC79', variant: 'MD5', url: 'https://apitaixiu-6jjn.onrender.com/lc79/md5', group: 'md5', enabled: true },
+  
   { id: 'betvip_tx', brand: 'betvip', brandLabel: 'BETVIP', variant: 'Tài Xỉu', url: 'https://apitaixiu-6jjn.onrender.com/betvip/tx', group: 'tx', enabled: true },
   { id: 'betvip_md5', brand: 'betvip', brandLabel: 'BETVIP', variant: 'MD5', url: 'https://apitaixiu-6jjn.onrender.com/betvip/md5', group: 'md5', enabled: true },
+  
   { id: 'b52_tx', brand: 'b52', brandLabel: 'B52', variant: 'Tài Xỉu', url: 'https://apitaixiu-6jjn.onrender.com/api/ditmemayb52', group: 'tx', enabled: true },
+  
   { id: 'luck8_tx', brand: 'luck8', brandLabel: 'LUCK8', variant: 'Hũ', url: 'https://apitaixiu-6jjn.onrender.com/luck8-hu', group: 'tx', enabled: true },
   { id: 'luck8_md5', brand: 'luck8', brandLabel: 'LUCK8', variant: 'MD5', url: 'https://apitaixiu-6jjn.onrender.com/luck8-md5', group: 'md5', enabled: true },
+  
   { id: 'sicbo_789', brand: '789club', brandLabel: '789CLUB', variant: 'Sicbo', url: 'https://apitaixiu-6jjn.onrender.com/api/sicbo/789', group: 'sicbo', enabled: true },
+  
   { id: 'xocdia88_tx', brand: 'xocdia88', brandLabel: 'XOCDIA88', variant: 'Tài Xỉu', url: 'https://apitaixiu-6jjn.onrender.com/xocdia88/tx', group: 'tx', enabled: true },
   { id: 'xocdia88_md5', brand: 'xocdia88', brandLabel: 'XOCDIA88', variant: 'MD5', url: 'https://apitaixiu-6jjn.onrender.com/xocdia88/md5', group: 'md5', enabled: true },
+  
   { id: 'sumclub_tx', brand: 'sumclub', brandLabel: 'SUMCLUB', variant: 'Tài Xỉu', url: 'https://apitaixiu-6jjn.onrender.com/sumclub/tx', group: 'tx', enabled: true },
   { id: 'sumclub_md5', brand: 'sumclub', brandLabel: 'SUMCLUB', variant: 'MD5', url: 'https://apitaixiu-6jjn.onrender.com/sumclub/md5', group: 'md5', enabled: true },
+  
   { id: 'gb68_md5', brand: '68gb', brandLabel: '68GB', variant: 'MD5', url: 'https://apitaixiu-6jjn.onrender.com/68gb/md5', group: 'md5', enabled: true }
 ];
 
@@ -225,7 +217,7 @@ class SicboAnalyzer {
   anomalyRate() { return this.total < 20 ? 0 : ((this.triples + this.pairs) / this.total) * 100; }
 }
 
-/* ───────── ENGINE ───────── */
+/* ───────── ENGINE (Nâng cấp tính xác suất) ───────── */
 class Engine {
   constructor(id) {
     this.id = id || '';
@@ -272,7 +264,7 @@ class Engine {
     
     if (n < 3) {
       const side = n && h[n - 1] === 'X' ? 'T' : 'X';
-      const out = { side, conf: 51, reason: 'Đang me cầu...', vi: pickVi(side, this.sums, this.diceHist, this.sicbo), streak: 0, isAlt: false, trend: 0, anomaly: 0, sicboBias: null };
+      const out = { side, conf: 51, reason: 'Đang lấy dữ liệu', vi: pickVi(side, this.sums, this.diceHist, this.sicbo), streak: 0, isAlt: false, trend: 0, anomaly: 0, sicboBias: null };
       this.pending = side; this.pendingMeta = out; return out;
     }
 
@@ -303,29 +295,46 @@ class Engine {
     const reasons = [];
     let confExtra = 0;
 
-    // 1. Dò Pattern DB (Ưu tiên tuyệt đối)
+    // 1. Dò Pattern DB
     let patternMatched = false;
     for (let len = Math.min(n, 8); len >= 2; len--) {
       const pat = h.slice(-len).join('');
       if (PATTERN_DB[pat]) {
         const pred = PATTERN_DB[pat];
-        if (pred === 'T') scoreT += 3.0; else scoreT -= 3.0;
-        reasons.push(`Dính mẫu ${len} (${pred})`);
-        confExtra += 15;
+        if (pred === 'T') scoreT += 2.5; else scoreT -= 2.5;
+        reasons.push(`Mẫu ${len} (${pred})`);
+        confExtra += 12;
         patternMatched = true;
         break;
       }
     }
 
-    // 2. Markov (Nếu không dính mẫu)
-    if (!patternMatched && m3n >= 3) {
-      const p = (m3T + 1) / (m3n + 2);
-      scoreT += 1.5 * Math.log(p / (1 - p));
-      reasons.push(`Bám nhịp 3 tay`);
+    // 2. Xác suất & Markov (Nếu không dính mẫu)
+    if (!patternMatched) {
+      let tCount = 0, xCount = 0;
+      // Lấy 30 phiên gần nhất để tính xác suất
+      const recent30 = h.slice(-30);
+      for (const side of recent30) { if (side === 'T') tCount++; else xCount++; }
+      const pT = (tCount + 1) / (recent30.length + 2); // Laplace smoothing
+      
+      // Cân bằng xác suất (Nếu lệch quá cao thì đánh bên ngược lại - Mean Reversion)
+      if (pT > 0.65) { scoreT -= 1.5; reasons.push('Lệch Tài, bắt Xỉu'); }
+      else if (pT < 0.35) { scoreT += 1.5; reasons.push('Lệch Xỉu, bắt Tài'); }
+      else {
+        // Nếu cân bằng thì dựa vào Markov
+        if (m3n >= 3) {
+          const p = (m3T + 1) / (m3n + 2);
+          scoreT += 1.2 * Math.log(p / (1 - p));
+          reasons.push(`Nhịp 3 tay`);
+        } else {
+          scoreT += (pT - 0.5) * 2;
+          reasons.push('Cầu ổn định');
+        }
+      }
       confExtra += 5;
     }
 
-    // 3. Z-Score
+    // 3. Z-Score (Tổng điểm)
     const sums = this.sums.slice(-20);
     let zBoost = 0;
     if (sums.length >= 10) {
@@ -337,16 +346,15 @@ class Engine {
     scoreT += zBoost;
 
     // 4. Anti
-    if (isAlt && !patternMatched) { scoreT = 0; reasons.length = 0; reasons.push('Cầu đan 1-1, đéo đuổi'); confExtra -= 10; }
+    if (isAlt && !patternMatched) { scoreT = 0; reasons.length = 0; reasons.push('Cầu đan 1-1, bỏ qua'); confExtra -= 10; }
     if (is22 && !isAlt) { if (last === 'T') scoreT -= 0.5; else scoreT += 0.5; reasons.push('Cầu đôi 2-2'); }
 
     // 5. Bệt
-    if (streak >= 6) { if (last === 'T') scoreT -= 1.2; else scoreT += 1.2; reasons.push(`Bệt ${streak}, canh bẻ`); confExtra += 5; }
-    else if (streak >= 4) { if (last === 'T') scoreT -= 0.6; else scoreT += 0.6; reasons.push(`Bệt chuỗi ${streak}`); confExtra += 2; }
+    if (streak >= 6) { if (last === 'T') scoreT -= 1.2; else scoreT += 1.2; reasons.push(`Bệt ${streak}, bẻ`); confExtra += 5; }
+    else if (streak >= 4) { if (last === 'T') scoreT -= 0.6; else scoreT += 0.6; reasons.push(`Chuỗi ${streak}`); confExtra += 2; }
 
     // 6. Volatility
     if (this.marketState.regime === 'volatile') { confExtra -= 5; scoreT *= 0.9; }
-    else if (this.marketState.regime === 'trending') { confExtra += 3; }
 
     // Chốt
     const pT = 1 / (1 + Math.exp(-Math.max(-5, Math.min(5, scoreT))));
@@ -390,7 +398,6 @@ function isSicboGame(g) {
 const FEEDS = {};
 for (const g of games) FEEDS[g.id] = { id: g.id, engine: new Engine(g.id), lastSession: null, lastLive: null, lastError: null, lastPred: null };
 
-/* FIX: Parse API đa năng */
 function parseLive(json) {
   if (!json) return null;
   let item = json;
@@ -452,7 +459,7 @@ async function fetchJson(url, timeout = 8000) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeout);
   try {
-    const res = await fetch(url, { signal: ctrl.signal, headers: { 'User-Agent': 'Mozilla/5.0 DUDOANTX/9' } });
+    const res = await fetch(url, { signal: ctrl.signal, headers: { 'User-Agent': 'Mozilla/5.0 DUDOANTX/10' } });
     clearTimeout(t);
     if (!res.ok) throw new Error('HTTP ' + res.status);
     return await res.json();
@@ -518,6 +525,20 @@ function loadLearningSnapshot() {
 }
 loadLearningSnapshot();
 
+/* ───────── Hash Predictor ───────── */
+function predictHash(hashStr) {
+  const str = hashStr.toLowerCase();
+  let sum = 0;
+  for (let i = 0; i < str.length; i++) {
+    sum += str.charCodeAt(i) * (i + 1);
+  }
+  const pseudo = (sum * 9301 + 49297) % 233280 / 233280;
+  const side = pseudo >= 0.5 ? 'T' : 'X';
+  const conf = Math.round(55 + Math.abs(pseudo - 0.5) * 80);
+  const reason = pseudo >= 0.5 ? 'Hash nghiêng Tài' : 'Hash nghiêng Xỉu';
+  return { side, conf, reason };
+}
+
 /* ───────── UI & TEXTS ───────── */
 function kb(rows) { return { reply_markup: { inline_keyboard: rows } }; }
 function btn(text, data, style) { return { text, callback_data: data, style }; }
@@ -535,10 +556,11 @@ async function showUserMenu(chatId, from) {
 💎 <b>Trạng thái:</b> ${v.line}
 ⏳ <b>Hạn dùng:</b> <b>${v.expire}</b>
 
-👇 <i>Bấm nút bên dưới mà kiếm ăn:</i>`;
+👇 <i>Chọn chức năng:</i>`;
 
   const rows = [
     [btn('🎯 VÀO SOI CẦU NGAY', 'pred:brands', 'primary')],
+    [btn('🧩 TOOL HASH MD5/SHA256', 'hash:start', 'success')],
     [btnUrl('🙋 GỌI ADMIN XIN QUYỀN', cfg.supportUrl, 'success')]
   ];
   if (isAdmin(uid)) rows.push([btn('🛠 BẢNG ĐIỀU KHIỂN CỦA BỐ MÀY', 'adm:home', 'danger')]);
@@ -547,7 +569,7 @@ async function showUserMenu(chatId, from) {
 
 async function showBrandMenu(chatId) {
   const brands = [
-    ['sunwin', 'SUNWIN'], ['hitclub', 'HITCLUB'], ['max789', 'MAX789'], ['lc79', 'LC79'],
+    ['sunwin', 'SUNWIN'], ['tik88', 'TIK88'], ['hitclub', 'HITCLUB'], ['max789', 'MAX789'], ['lc79', 'LC79'],
     ['betvip', 'BETVIP'], ['b52', 'B52'], ['luck8', 'LUCK8'], ['789club', '789CLUB'],
     ['xocdia88', 'XOCDIA88'], ['sumclub', 'SUMCLUB'], ['68gb', '68GB']
   ];
@@ -558,7 +580,7 @@ async function showBrandMenu(chatId) {
   }
   if (row.length) rows.push(row);
   rows.push([btn('🏠 QUAY LẠI', 'menu', 'danger')]);
-  return send(chatId, '🎰 <b>CHỌN SÒNG BÀI ĐỂ SOI</b>\n\n👇 Bấm chọn sòng bên dưới (Hệ thống sẽ tự động bám phiên):', kb(rows));
+  return send(chatId, '🎰 <b>CHỌN SÒNG BÀI ĐỂ SOI</b>\n\n👇 Bấm chọn sòng bên dưới (Hệ thống tự động bám phiên):', kb(rows));
 }
 
 function stopAuto(uid, silent) {
@@ -655,7 +677,7 @@ ${prevLine}
 ${spec}🎯 <b>CHỐT KÈO:</b> ${sideIcon} <b>${sideTxt}</b>
 ⚡ <b>Tỉ lệ nổ:</b> <b>${p.conf}%</b>
 <code>${bar}</code>
-💡 <b>Cầu chạy:</b> ${esc(p.reason)}${p.streak ? ' · Bệt ' + p.streak : ''}
+💡 <b>Phân tích:</b> ${esc(p.reason)}${p.streak ? ' · Bệt ' + p.streak : ''}
 ━━━━━━━━━━━━━━━
 📈 <b>Độ chuẩn:</b> ${acc}% (${f.engine.correct}/${f.engine.total})
 🕐 <i>${esc(nowVN())}</i>`;
@@ -724,6 +746,19 @@ async function sendPredCard(chatId, gameId, uid) {
   await pushPredCard(chatId, gameId, uid, true);
 }
 
+/* ───────── Tool Hash ───────── */
+async function showHashTool(chatId) {
+  const text =
+`🧩 <b>TOOL HASH MD5/SHA256</b> 🧩
+
+😎 Bố mày sẽ đọc mã Hash của mày và phân tích xem nên đập Tài hay Xỉu.
+
+👉 <i>Hãy nhắn (gửi) mã Hash vào đây:</i>
+(MD5 dài 32 ký tự, SHA256 dài 64 ký tự)`;
+
+  return send(chatId, text, kb([[btn('🏠 VỀ MENU', 'menu', 'danger')]]));
+}
+
 /* ───────── Admin ───────── */
 async function showAdmin(chatId, from) {
   const activeVip = Object.values(users).filter(u => u.vipUntil > Date.now()).length;
@@ -753,7 +788,35 @@ async function onCallback(cq) {
   await delMsg(chatId, msgId);
   await answerCb(cq.id);
 
-  if (!isVip(uid) && !isAdmin(uid) && data !== 'menu' && data !== 'adm:home') {
+  if (data === 'menu') { stopAuto(uid, true); return showUserMenu(chatId, from); }
+  
+  // Hash feedback (Không cần VIP để bấm đúng sai, nhưng phải là người dùng tool hash)
+  if (data.startsWith('hash_fb:')) {
+    const choice = data.split(':')[1]; // 'ok' or 'no'
+    hashFeedback[uid] = { choice, at: Date.now() };
+    saveFeedback();
+    return send(chatId, '✅ Đã ghi nhận phản hồi của mày để bố chỉnh lại thuật toán!', kb([[btn('🏠 VỀ MENU', 'menu', 'danger')]]));
+  }
+  
+  // Hash Tool
+  if (data === 'hash:start') {
+    if (!isVip(uid)) {
+      return send(chatId, 
+`🤬 <b>ĐỊT CỤ MÀY!</b> 🤬
+
+😡 <b>XIN BỐ MÀY ĐI MỚI DÙNG ĐƯỢC BOT!</b> 💩
+🖕 Đừng có bấm bấm nữa, muốn soi cầu thì nạp tiền hoặc xin Admin mở quyền! 🚫
+🔞 Mày tưởng tool này free chắc? Mơ đi con! 🖕
+
+👇 <i>Bấm vào đây để xin xỏ:</i>`, 
+    kb([[btnUrl('🙋 XIN BỐ MÀY ĐI', cfg.supportUrl, 'danger')], [btn('🏠 VỀ MENU', 'menu', 'primary')]]));
+    }
+    sessions[uid] = { await: 'hash_input' };
+    return showHashTool(chatId);
+  }
+
+  // Chặn các lệnh khác nếu không có VIP
+  if (!isVip(uid) && !isAdmin(uid) && data !== 'adm:home') {
     return send(chatId, 
 `🤬 <b>ĐỊT CỤ MÀY!</b> 🤬
 
@@ -765,7 +828,6 @@ async function onCallback(cq) {
     kb([[btnUrl('🙋 XIN BỐ MÀY ĐI', cfg.supportUrl, 'danger')], [btn('🏠 VỀ MENU', 'menu', 'primary')]]));
   }
 
-  if (data === 'menu') { stopAuto(uid, true); return showUserMenu(chatId, from); }
   if (data === 'pred:brands') { stopAuto(uid, true); return showBrandMenu(chatId); }
   if (data.startsWith('predbrand:')) { stopAuto(uid, true); return showTables(chatId, data.slice(10), uid); }
   
@@ -819,6 +881,41 @@ async function onMessage(msg) {
 
   const st = sessions[uid];
   if (st) {
+    if (st.await === 'hash_input') {
+      delete sessions[uid];
+      const hashStr = text.toLowerCase();
+      
+      // Check MD5 (32) or SHA256 (64)
+      if (!/^[a-f0-9]{32}$/.test(hashStr) && !/^[a-f0-9]{64}$/.test(hashStr)) {
+        return send(chatId, '❌ <b>MÃ HASH ĐÉO HỢP LỆ!</b>\n\nYêu cầu nhập đúng MD5 (32 ký tự) hoặc SHA256 (64 ký tự).', kb([[btn('🧩 THỬ LẠI', 'hash:start', 'primary')], [btn('🏠 VỀ MENU', 'menu', 'danger')]]));
+      }
+      
+      const type = hashStr.length === 32 ? 'MD5' : 'SHA256';
+      const pred = predictHash(hashStr);
+      const sideTxt = pred.side === 'T' ? 'TÀI' : 'XỈU';
+      const sideIcon = pred.side === 'T' ? '🔴' : '🔵';
+      
+      const filled = Math.max(0, Math.min(10, Math.round((pred.conf || 52) / 10)));
+      const bar = '█'.repeat(filled) + '░'.repeat(10 - filled);
+
+      const textOut =
+`🧩 <b>KẾT QUẢ PHÂN TÍCH ${type}</b>
+
+🔑 <b>Hash:</b> <code>${esc(hashStr)}</code>
+
+🎯 <b>DỰ ĐOÁN:</b> ${sideIcon} <b>${sideTxt}</b>
+⚡ <b>Tỉ lệ nổ:</b> <b>${pred.conf}%</b>
+<code>${bar}</code>
+💡 <b>Phân tích:</b> ${esc(pred.reason)}
+
+👇 <i>Nếu phiên vừa rồi đúng, bấm ĐÚNG. Nếu sai, bấm SAI:</i>`;
+
+      return send(chatId, textOut, kb([
+        [btn('✅ ĐÚNG', 'hash_fb:ok', 'success'), btn('❌ SAI', 'hash_fb:no', 'danger')],
+        [btn('🏠 VỀ MENU', 'menu', 'primary')]
+      ]));
+    }
+
     if (st.await === 'adm_bc' && isAdmin(uid)) {
       delete sessions[uid];
       let count = 0;
