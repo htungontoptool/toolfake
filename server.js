@@ -1,6 +1,6 @@
 /**
- * DUDOANTX — ULTIMATE PREDICTION TOOL (v12)
- * UI chuyên nghiệp, Lịch sử 20 phiên, Đánh giá Vị Sicbo
+ * DUDOANTX — ULTIMATE PREDICTION TOOL (v12.1)
+ * Full API Support (TIK88, B52, Hitclub, Max789...)
  */
 'use strict';
 
@@ -153,24 +153,52 @@ function grantVip(uid, hours) {
   return u.vipUntil;
 }
 
-/* ───────── Games ───────── */
+/* ───────── Games (FULL API UPDATE) ───────── */
 const DEFAULT_GAMES = [
+  // SUNWIN
   { id: 'sunwin_tx', brand: 'sunwin', brandLabel: 'SUNWIN', variant: 'Tài Xỉu', url: 'https://well-summary-oclc-invisible.trycloudflare.com/api/tx', group: 'tx', enabled: true },
   { id: 'sicbo_sunwin', brand: 'sunwin', brandLabel: 'SUNWIN', variant: 'Sicbo', url: 'https://apitaixiu-6jjn.onrender.com/api/sicbo/sunwin', group: 'sicbo', enabled: true },
+  
+  // TIK88
   { id: 'tik88_tx', brand: 'tik88', brandLabel: 'TIK88', variant: 'Tài Xỉu', url: 'https://get-enemies-got-copper.trycloudflare.com/api/txmd5', group: 'tx', enabled: true },
+  
+  // HITCLUB
   { id: 'hitclub_tx', brand: 'hitclub', brandLabel: 'HITCLUB', variant: 'Tài Xỉu', url: 'https://apihitclubhihi.onrender.com/api/hitclub/hu', group: 'tx', enabled: true },
+  { id: 'hitclub_md5', brand: 'hitclub', brandLabel: 'HITCLUB', variant: 'MD5', url: 'https://apihitclubhihi.onrender.com/api/hitclub/md5', group: 'md5', enabled: true },
   { id: 'sicbo_hitclub', brand: 'hitclub', brandLabel: 'HITCLUB', variant: 'Sicbo', url: 'https://apitaixiu-6jjn.onrender.com/api/sicbo/hitclub', group: 'sicbo', enabled: true },
+  
+  // MAX789
   { id: 'max789_tx', brand: 'max789', brandLabel: 'MAX789', variant: 'Tài Xỉu', url: 'https://apitaixiu-6jjn.onrender.com/max789/tx', group: 'tx', enabled: true },
   { id: 'max789_md5', brand: 'max789', brandLabel: 'MAX789', variant: 'MD5', url: 'https://apitaixiu-6jjn.onrender.com/max789/md5', group: 'md5', enabled: true },
+  { id: 'max789_kubet', brand: 'max789', brandLabel: 'MAX789', variant: 'Kubet Live', url: 'https://apitaixiu-6jjn.onrender.com/max789/kubet', group: 'tx', enabled: true },
+  
+  // LC79
   { id: 'lc79_tx', brand: 'lc79', brandLabel: 'LC79', variant: 'Tài Xỉu', url: 'https://apitaixiu-6jjn.onrender.com/lc79/tx', group: 'tx', enabled: true },
   { id: 'lc79_md5', brand: 'lc79', brandLabel: 'LC79', variant: 'MD5', url: 'https://apitaixiu-6jjn.onrender.com/lc79/md5', group: 'md5', enabled: true },
+  
+  // BETVIP
   { id: 'betvip_tx', brand: 'betvip', brandLabel: 'BETVIP', variant: 'Tài Xỉu', url: 'https://apitaixiu-6jjn.onrender.com/betvip/tx', group: 'tx', enabled: true },
+  { id: 'betvip_md5', brand: 'betvip', brandLabel: 'BETVIP', variant: 'MD5', url: 'https://apitaixiu-6jjn.onrender.com/betvip/md5', group: 'md5', enabled: true },
+  
+  // B52
   { id: 'b52_tx', brand: 'b52', brandLabel: 'B52', variant: 'Tài Xỉu', url: 'https://apitaixiu-6jjn.onrender.com/api/ditmemayb52', group: 'tx', enabled: true },
+  
+  // LUCK8
   { id: 'luck8_tx', brand: 'luck8', brandLabel: 'LUCK8', variant: 'Hũ', url: 'https://apitaixiu-6jjn.onrender.com/luck8-hu', group: 'tx', enabled: true },
   { id: 'luck8_md5', brand: 'luck8', brandLabel: 'LUCK8', variant: 'MD5', url: 'https://apitaixiu-6jjn.onrender.com/luck8-md5', group: 'md5', enabled: true },
+  
+  // 789CLUB
   { id: 'sicbo_789', brand: '789club', brandLabel: '789CLUB', variant: 'Sicbo', url: 'https://apitaixiu-6jjn.onrender.com/api/sicbo/789', group: 'sicbo', enabled: true },
+  
+  // XOCDIA88
   { id: 'xocdia88_tx', brand: 'xocdia88', brandLabel: 'XOCDIA88', variant: 'Tài Xỉu', url: 'https://apitaixiu-6jjn.onrender.com/xocdia88/tx', group: 'tx', enabled: true },
+  { id: 'xocdia88_md5', brand: 'xocdia88', brandLabel: 'XOCDIA88', variant: 'MD5', url: 'https://apitaixiu-6jjn.onrender.com/xocdia88/md5', group: 'md5', enabled: true },
+  
+  // SUMCLUB
   { id: 'sumclub_tx', brand: 'sumclub', brandLabel: 'SUMCLUB', variant: 'Tài Xỉu', url: 'https://apitaixiu-6jjn.onrender.com/sumclub/tx', group: 'tx', enabled: true },
+  { id: 'sumclub_md5', brand: 'sumclub', brandLabel: 'SUMCLUB', variant: 'MD5', url: 'https://apitaixiu-6jjn.onrender.com/sumclub/md5', group: 'md5', enabled: true },
+  
+  // 68GB
   { id: 'gb68_md5', brand: '68gb', brandLabel: '68GB', variant: 'MD5', url: 'https://apitaixiu-6jjn.onrender.com/68gb/md5', group: 'md5', enabled: true }
 ];
 
@@ -425,6 +453,7 @@ function isSicboGame(g) {
 const FEEDS = {};
 for (const g of games) FEEDS[g.id] = { id: g.id, engine: new Engine(g.id), lastSession: null, lastLive: null, lastError: null, lastPred: null };
 
+/* ───────── PARSER (Đa năng vạn năng) ───────── */
 function parseLive(json) {
   if (!json) return null;
   let item = json;
@@ -450,6 +479,7 @@ function parseLive(json) {
   let ket = getVal(item, ['Ket_qua', 'ket_qua', 'result', 'KetQua', 'kq']) || '';
   try { ket = decodeURIComponent(ket); } catch {}
   
+  // Xử lý Xúc xắc dạng mảng hoặc 3 biến rời
   const xucxacArr = getVal(item, ['xuc_xac', 'Xuc_xac', 'dice']);
   let d1 = 0, d2 = 0, d3 = 0;
   if (Array.isArray(xucxacArr) && xucxacArr.length >= 3) {
@@ -464,6 +494,7 @@ function parseLive(json) {
   let sum = Number(tong);
   if (!Number.isFinite(sum) || sum <= 0) sum = d1 + d2 + d3;
 
+  // Xử lý Unicode Tiếng Việt
   const k = String(ket).toLowerCase();
   let side = 'X';
   if (k.includes('tài') || k.includes('tai') || k === 't' || k.includes('t\\u00e0i')) side = 'T';
