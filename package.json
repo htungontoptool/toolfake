@@ -1,7 +1,7 @@
 {
-  "name": "dudoantx",
-  "version": "14.3.0",
-  "description": "ĐỊT CHẾT CỤ NHÀ CÁI",
+  "name": "tool-htungg",
+  "version": "15.4.0",
+  "description": "Tool soi cầu HTUNGG - Tài Xỉu & Sicbo",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
