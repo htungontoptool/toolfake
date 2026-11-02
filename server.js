@@ -1,5 +1,6 @@
 /**
- * DUDOANTX — TOOL SOI CẦU CHIẾN THẦN (v10 - Hash & Probability)
+ * DUDOANTX — ULTIMATE PREDICTION TOOL (v12)
+ * UI chuyên nghiệp, Lịch sử 20 phiên, Đánh giá Vị Sicbo
  */
 'use strict';
 
@@ -11,7 +12,6 @@ const http = require('http');
 const https = require('https');
 const dns = require('dns');
 
-// Fix IPv6
 try { dns.setDefaultResultOrder('ipv4first'); } catch (e) {}
 
 const ROOT = __dirname;
@@ -83,6 +83,38 @@ async function delMsg(chatId, messageId) {
 async function answerCb(id, text) {
   return tg('answerCallbackQuery', { callback_query_id: id, text: text || '', show_alert: false });
 }
+async function sendDocument(chatId, filePath, caption) {
+  if (!BOT_TOKEN) return null;
+  const url = `${TG}/sendDocument`;
+  const boundary = '----WebKitFormBoundary' + Math.random().toString(36).substring(2);
+  const fileBuffer = fs.readFileSync(filePath);
+  const fileName = path.basename(filePath);
+
+  let pre = `--${boundary}\r\nContent-Disposition: form-data; name="chat_id"\r\n\r\n${chatId}\r\n`;
+  if (caption) pre += `--${boundary}\r\nContent-Disposition: form-data; name="caption"\r\n\r\n${caption}\r\n`;
+  pre += `--${boundary}\r\nContent-Disposition: form-data; name="document"; filename="${fileName}"\r\nContent-Type="text/plain"\r\n\r\n`;
+  const post = `\r\n--${boundary}--\r\n`;
+  
+  const data = Buffer.concat([Buffer.from(pre), fileBuffer, Buffer.from(post)]);
+
+  return new Promise((resolve) => {
+    const u = new URL(url);
+    const options = {
+      hostname: u.hostname, port: 443, path: u.pathname + u.search, method: 'POST',
+      headers: { 'Content-Type': `multipart/form-data; boundary=${boundary}`, 'Content-Length': data.length },
+      family: 4, timeout: 20000
+    };
+    const req = https.request(options, (res) => {
+      let chunks = '';
+      res.on('data', c => chunks += c);
+      res.on('end', () => { try { resolve(JSON.parse(chunks)); } catch { resolve(null); } });
+    });
+    req.on('error', () => resolve(null));
+    req.on('timeout', () => { req.destroy(); resolve(null); });
+    req.write(data);
+    req.end();
+  });
+}
 
 /* ───────── Store ───────── */
 const DEFAULT_CFG = { supportUrl: 'https://t.me/SunNetWin' };
@@ -106,12 +138,12 @@ function isVip(uid) {
   return Number(u.vipUntil || 0) > Date.now();
 }
 function vipText(uid) {
-  if (isAdmin(uid)) return { active: true, line: '👑 BỐ MÀY LÀ ADMIN (Vĩnh viễn)', expire: 'Không giới hạn' };
+  if (isAdmin(uid)) return { active: true, line: '👑 ADMIN (Vĩnh viễn)', expire: 'Không giới hạn' };
   const u = ensureUser(uid);
   if (Number(u.vipUntil || 0) > Date.now()) {
-    return { active: true, line: '💎 ĐÃ CÓ QUYỀN', expire: new Date(u.vipUntil).toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' }) };
+    return { active: true, line: '💎 ĐÃ CÓ QUYỀN VIP', expire: new Date(u.vipUntil).toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' }) };
   }
-  return { active: false, line: '🔒 ĐÉO CÓ QUYỀN DÙNG', expire: '—' };
+  return { active: false, line: '🔒 CHƯA CÓ QUYỀN', expire: '—' };
 }
 function grantVip(uid, hours) {
   const u = ensureUser(uid);
@@ -121,39 +153,24 @@ function grantVip(uid, hours) {
   return u.vipUntil;
 }
 
-/* ───────── Games (Thêm TIK88, update SUNWIN) ───────── */
+/* ───────── Games ───────── */
 const DEFAULT_GAMES = [
   { id: 'sunwin_tx', brand: 'sunwin', brandLabel: 'SUNWIN', variant: 'Tài Xỉu', url: 'https://well-summary-oclc-invisible.trycloudflare.com/api/tx', group: 'tx', enabled: true },
   { id: 'sicbo_sunwin', brand: 'sunwin', brandLabel: 'SUNWIN', variant: 'Sicbo', url: 'https://apitaixiu-6jjn.onrender.com/api/sicbo/sunwin', group: 'sicbo', enabled: true },
-  
   { id: 'tik88_tx', brand: 'tik88', brandLabel: 'TIK88', variant: 'Tài Xỉu', url: 'https://get-enemies-got-copper.trycloudflare.com/api/txmd5', group: 'tx', enabled: true },
-  
   { id: 'hitclub_tx', brand: 'hitclub', brandLabel: 'HITCLUB', variant: 'Tài Xỉu', url: 'https://apihitclubhihi.onrender.com/api/hitclub/hu', group: 'tx', enabled: true },
   { id: 'sicbo_hitclub', brand: 'hitclub', brandLabel: 'HITCLUB', variant: 'Sicbo', url: 'https://apitaixiu-6jjn.onrender.com/api/sicbo/hitclub', group: 'sicbo', enabled: true },
-  
   { id: 'max789_tx', brand: 'max789', brandLabel: 'MAX789', variant: 'Tài Xỉu', url: 'https://apitaixiu-6jjn.onrender.com/max789/tx', group: 'tx', enabled: true },
   { id: 'max789_md5', brand: 'max789', brandLabel: 'MAX789', variant: 'MD5', url: 'https://apitaixiu-6jjn.onrender.com/max789/md5', group: 'md5', enabled: true },
-  { id: 'max789_kubet', brand: 'max789', brandLabel: 'MAX789', variant: 'Kubet Live', url: 'https://apitaixiu-6jjn.onrender.com/max789/kubet', group: 'tx', enabled: true },
-  
   { id: 'lc79_tx', brand: 'lc79', brandLabel: 'LC79', variant: 'Tài Xỉu', url: 'https://apitaixiu-6jjn.onrender.com/lc79/tx', group: 'tx', enabled: true },
   { id: 'lc79_md5', brand: 'lc79', brandLabel: 'LC79', variant: 'MD5', url: 'https://apitaixiu-6jjn.onrender.com/lc79/md5', group: 'md5', enabled: true },
-  
   { id: 'betvip_tx', brand: 'betvip', brandLabel: 'BETVIP', variant: 'Tài Xỉu', url: 'https://apitaixiu-6jjn.onrender.com/betvip/tx', group: 'tx', enabled: true },
-  { id: 'betvip_md5', brand: 'betvip', brandLabel: 'BETVIP', variant: 'MD5', url: 'https://apitaixiu-6jjn.onrender.com/betvip/md5', group: 'md5', enabled: true },
-  
   { id: 'b52_tx', brand: 'b52', brandLabel: 'B52', variant: 'Tài Xỉu', url: 'https://apitaixiu-6jjn.onrender.com/api/ditmemayb52', group: 'tx', enabled: true },
-  
   { id: 'luck8_tx', brand: 'luck8', brandLabel: 'LUCK8', variant: 'Hũ', url: 'https://apitaixiu-6jjn.onrender.com/luck8-hu', group: 'tx', enabled: true },
   { id: 'luck8_md5', brand: 'luck8', brandLabel: 'LUCK8', variant: 'MD5', url: 'https://apitaixiu-6jjn.onrender.com/luck8-md5', group: 'md5', enabled: true },
-  
   { id: 'sicbo_789', brand: '789club', brandLabel: '789CLUB', variant: 'Sicbo', url: 'https://apitaixiu-6jjn.onrender.com/api/sicbo/789', group: 'sicbo', enabled: true },
-  
   { id: 'xocdia88_tx', brand: 'xocdia88', brandLabel: 'XOCDIA88', variant: 'Tài Xỉu', url: 'https://apitaixiu-6jjn.onrender.com/xocdia88/tx', group: 'tx', enabled: true },
-  { id: 'xocdia88_md5', brand: 'xocdia88', brandLabel: 'XOCDIA88', variant: 'MD5', url: 'https://apitaixiu-6jjn.onrender.com/xocdia88/md5', group: 'md5', enabled: true },
-  
   { id: 'sumclub_tx', brand: 'sumclub', brandLabel: 'SUMCLUB', variant: 'Tài Xỉu', url: 'https://apitaixiu-6jjn.onrender.com/sumclub/tx', group: 'tx', enabled: true },
-  { id: 'sumclub_md5', brand: 'sumclub', brandLabel: 'SUMCLUB', variant: 'MD5', url: 'https://apitaixiu-6jjn.onrender.com/sumclub/md5', group: 'md5', enabled: true },
-  
   { id: 'gb68_md5', brand: '68gb', brandLabel: '68GB', variant: 'MD5', url: 'https://apitaixiu-6jjn.onrender.com/68gb/md5', group: 'md5', enabled: true }
 ];
 
@@ -217,7 +234,7 @@ class SicboAnalyzer {
   anomalyRate() { return this.total < 20 ? 0 : ((this.triples + this.pairs) / this.total) * 100; }
 }
 
-/* ───────── ENGINE (Nâng cấp tính xác suất) ───────── */
+/* ───────── ENGINE ───────── */
 class Engine {
   constructor(id) {
     this.id = id || '';
@@ -234,7 +251,24 @@ class Engine {
       this.total++;
       const ok = this.pending === s;
       if (ok) this.correct++;
-      this.log.push({ session: session || '', pred: this.pending, actual: s, ok, conf: (this.pendingMeta && this.pendingMeta.conf) || 0, sum: Number(sum) || 0 });
+      
+      let okVi = null;
+      if (this.pendingMeta && this.pendingMeta.vi && Array.isArray(dice) && dice.length === 3) {
+        const dices = dice.map(Number).sort((a,b)=>a-b);
+        const viSorted = this.pendingMeta.vi.slice().sort((a,b)=>a-b);
+        okVi = dices.every((val, idx) => val === viSorted[idx]);
+      }
+
+      this.log.push({ 
+        session: session || '', 
+        pred: this.pending, 
+        actual: s, 
+        ok, 
+        okVi, 
+        conf: (this.pendingMeta && this.pendingMeta.conf) || 0, 
+        sum: Number(sum) || 0,
+        dice: Array.isArray(dice) ? dice.map(Number) : []
+      });
       if (this.log.length > 500) this.log.shift();
       this.pending = null; this.pendingMeta = null;
     }
@@ -309,19 +343,16 @@ class Engine {
       }
     }
 
-    // 2. Xác suất & Markov (Nếu không dính mẫu)
+    // 2. Xác suất & Markov
     if (!patternMatched) {
       let tCount = 0, xCount = 0;
-      // Lấy 30 phiên gần nhất để tính xác suất
       const recent30 = h.slice(-30);
       for (const side of recent30) { if (side === 'T') tCount++; else xCount++; }
-      const pT = (tCount + 1) / (recent30.length + 2); // Laplace smoothing
+      const pT = (tCount + 1) / (recent30.length + 2);
       
-      // Cân bằng xác suất (Nếu lệch quá cao thì đánh bên ngược lại - Mean Reversion)
       if (pT > 0.65) { scoreT -= 1.5; reasons.push('Lệch Tài, bắt Xỉu'); }
       else if (pT < 0.35) { scoreT += 1.5; reasons.push('Lệch Xỉu, bắt Tài'); }
       else {
-        // Nếu cân bằng thì dựa vào Markov
         if (m3n >= 3) {
           const p = (m3T + 1) / (m3n + 2);
           scoreT += 1.2 * Math.log(p / (1 - p));
@@ -334,7 +365,7 @@ class Engine {
       confExtra += 5;
     }
 
-    // 3. Z-Score (Tổng điểm)
+    // 3. Z-Score
     const sums = this.sums.slice(-20);
     let zBoost = 0;
     if (sums.length >= 10) {
@@ -345,18 +376,14 @@ class Engine {
     }
     scoreT += zBoost;
 
-    // 4. Anti
+    // 4. Anti & Bệt
     if (isAlt && !patternMatched) { scoreT = 0; reasons.length = 0; reasons.push('Cầu đan 1-1, bỏ qua'); confExtra -= 10; }
     if (is22 && !isAlt) { if (last === 'T') scoreT -= 0.5; else scoreT += 0.5; reasons.push('Cầu đôi 2-2'); }
-
-    // 5. Bệt
     if (streak >= 6) { if (last === 'T') scoreT -= 1.2; else scoreT += 1.2; reasons.push(`Bệt ${streak}, bẻ`); confExtra += 5; }
     else if (streak >= 4) { if (last === 'T') scoreT -= 0.6; else scoreT += 0.6; reasons.push(`Chuỗi ${streak}`); confExtra += 2; }
 
-    // 6. Volatility
     if (this.marketState.regime === 'volatile') { confExtra -= 5; scoreT *= 0.9; }
 
-    // Chốt
     const pT = 1 / (1 + Math.exp(-Math.max(-5, Math.min(5, scoreT))));
     let conf = Math.round(55 + Math.abs(pT - 0.5) * 160 + confExtra);
     conf = Math.min(96, Math.max(52, conf));
@@ -411,13 +438,9 @@ function parseLive(json) {
   if (!item || typeof item !== 'object') return null;
 
   const getVal = (obj, keys) => {
-    for (const k of keys) {
-      if (obj[k] !== undefined && obj[k] !== null) return obj[k];
-    }
+    for (const k of keys) { if (obj[k] !== undefined && obj[k] !== null) return obj[k]; }
     const lowerKeys = keys.map(k => k.toLowerCase());
-    for (const key of Object.keys(obj)) {
-      if (lowerKeys.includes(key.toLowerCase())) return obj[key];
-    }
+    for (const key of Object.keys(obj)) { if (lowerKeys.includes(key.toLowerCase())) return obj[key]; }
     return null;
   };
 
@@ -430,9 +453,7 @@ function parseLive(json) {
   const xucxacArr = getVal(item, ['xuc_xac', 'Xuc_xac', 'dice']);
   let d1 = 0, d2 = 0, d3 = 0;
   if (Array.isArray(xucxacArr) && xucxacArr.length >= 3) {
-    d1 = Number(xucxacArr[0]) || 0;
-    d2 = Number(xucxacArr[1]) || 0;
-    d3 = Number(xucxacArr[2]) || 0;
+    d1 = Number(xucxacArr[0]) || 0; d2 = Number(xucxacArr[1]) || 0; d3 = Number(xucxacArr[2]) || 0;
   } else {
     d1 = Number(getVal(item, ['Xuc_xac_1', 'xuc_xac_1', 'dice1'])) || 0;
     d2 = Number(getVal(item, ['Xuc_xac_2', 'xuc_xac_2', 'dice2'])) || 0;
@@ -447,10 +468,7 @@ function parseLive(json) {
   let side = 'X';
   if (k.includes('tài') || k.includes('tai') || k === 't' || k.includes('t\\u00e0i')) side = 'T';
   else if (k.includes('xỉu') || k.includes('xiu') || k === 'x' || k.includes('x\\u1ec9u')) side = 'X';
-  else if (sum > 0) {
-    if (sum >= 11) side = 'T';
-    else if (sum <= 10) side = 'X';
-  }
+  else if (sum > 0) { if (sum >= 11) side = 'T'; else if (sum <= 10) side = 'X'; }
 
   return { session: String(phien), side, sum, dice: [d1, d2, d3] };
 }
@@ -459,7 +477,7 @@ async function fetchJson(url, timeout = 8000) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeout);
   try {
-    const res = await fetch(url, { signal: ctrl.signal, headers: { 'User-Agent': 'Mozilla/5.0 DUDOANTX/10' } });
+    const res = await fetch(url, { signal: ctrl.signal, headers: { 'User-Agent': 'Mozilla/5.0 DUDOANTX/12' } });
     clearTimeout(t);
     if (!res.ok) throw new Error('HTTP ' + res.status);
     return await res.json();
@@ -529,14 +547,57 @@ loadLearningSnapshot();
 function predictHash(hashStr) {
   const str = hashStr.toLowerCase();
   let sum = 0;
-  for (let i = 0; i < str.length; i++) {
-    sum += str.charCodeAt(i) * (i + 1);
-  }
+  for (let i = 0; i < str.length; i++) sum += str.charCodeAt(i) * (i + 1);
   const pseudo = (sum * 9301 + 49297) % 233280 / 233280;
   const side = pseudo >= 0.5 ? 'T' : 'X';
   const conf = Math.round(55 + Math.abs(pseudo - 0.5) * 80);
   const reason = pseudo >= 0.5 ? 'Hash nghiêng Tài' : 'Hash nghiêng Xỉu';
   return { side, conf, reason };
+}
+
+/* ───────── Export History ───────── */
+async function exportHistory(chatId, gameId) {
+  const g = games.find(x => x.id === gameId);
+  const f = FEEDS[gameId];
+  if (!g || !f) return send(chatId, '❌ Éo tìm thấy bàn.');
+
+  const sicbo = isSicboGame(g);
+  const logs = f.engine.log.slice(-20).reverse();
+  
+  let lines = [];
+  lines.push(`=== LỊCH SỬ 20 PHIÊN GẦN NHẤT ===`);
+  lines.push(`Bàn: ${g.brandLabel} - ${g.variant}`);
+  lines.push(`Thời gian: ${nowVN()}`);
+  lines.push(`Độ chuẩn: ${f.engine.accuracy()}% (${f.engine.correct}/${f.engine.total})`);
+  lines.push(`==================================================`);
+  lines.push(`#Phiên | Kết quả | Tổng | Xúc xắc | Dự đoán | Tin cậy | Kết quả`);
+  
+  if (!logs.length) {
+    lines.push('Chưa có dữ liệu phiên nào!');
+  } else {
+    for (const log of logs) {
+      const sess = log.session || '-';
+      const act = log.actual === 'T' ? 'TÀI ' : 'XỈU ';
+      const sum = log.sum || '-';
+      const dice = log.dice && log.dice.length ? log.dice.join('-') : '-';
+      const pred = log.pred === 'T' ? 'TÀI ' : 'XỈU ';
+      const conf = log.conf + '%';
+      let resStr = log.ok ? '✅ ĐÚNG' : '❌ SAI ';
+      
+      if (sicbo && log.okVi !== undefined && log.okVi !== null) {
+        resStr += log.okVi ? ' (✅ Vị)' : ' (❌ Vị)';
+      }
+      
+      lines.push(`${sess.padEnd(8)} | ${act} | ${String(sum).padEnd(4)} | ${dice.padEnd(7)} | ${pred} | ${conf.padEnd(4)} | ${resStr}`);
+    }
+  }
+
+  const tmpDir = path.join(DATA, 'export');
+  if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
+  const fp = path.join(tmpDir, `History_${g.id}_${Date.now()}.txt`);
+  fs.writeFileSync(fp, lines.join('\n'), 'utf8');
+  
+  await sendDocument(chatId, fp, `📜 Lịch sử 20 phiên - ${g.brandLabel} ${g.variant}`);
 }
 
 /* ───────── UI & TEXTS ───────── */
@@ -569,25 +630,28 @@ async function showUserMenu(chatId, from) {
 
 async function showBrandMenu(chatId) {
   const brands = [
-    ['sunwin', 'SUNWIN'], ['tik88', 'TIK88'], ['hitclub', 'HITCLUB'], ['max789', 'MAX789'], ['lc79', 'LC79'],
-    ['betvip', 'BETVIP'], ['b52', 'B52'], ['luck8', 'LUCK8'], ['789club', '789CLUB'],
-    ['xocdia88', 'XOCDIA88'], ['sumclub', 'SUMCLUB'], ['68gb', '68GB']
+    ['sunwin', 'Sunwin'], ['789club', '789 Club'], 
+    ['b52', 'B52'], ['hitclub', 'Hitclub'],
+    ['xocdia88', 'Xóc Đĩa 88'], ['max789', 'Max789'],
+    ['lc79', 'LC79'], ['betvip', 'Betvip'],
+    ['sumclub', 'Sumclub'], ['luck8', 'Luck8'],
+    ['tik88', 'TIK88'], ['68gb', '68GB Bàn Xanh']
   ];
-  const rows = []; let row = []; let t = true;
-  for (const [id, label] of brands) {
-    row.push(btn(label, 'predbrand:' + id, t ? 'primary' : 'success'));
-    t = !t; if (row.length === 2) { rows.push(row); row = []; }
+  const rows = []; let row = [];
+  for (let i = 0; i < brands.length; i++) {
+    row.push(btn(`🎲 ${brands[i][1]}`, 'predbrand:' + brands[i][0], 'primary'));
+    if (row.length === 2) { rows.push(row); row = []; }
   }
   if (row.length) rows.push(row);
-  rows.push([btn('🏠 QUAY LẠI', 'menu', 'danger')]);
-  return send(chatId, '🎰 <b>CHỌN SÒNG BÀI ĐỂ SOI</b>\n\n👇 Bấm chọn sòng bên dưới (Hệ thống tự động bám phiên):', kb(rows));
+  rows.push([btn('🏠 VỀ MENU', 'menu', 'danger')]);
+  return send(chatId, '📊 <b>TX • DANH SÁCH SÀNH</b>\n\n👇 Chọn game muốn xem phiên và bật cập nhật tự động.', kb(rows));
 }
 
 function stopAuto(uid, silent) {
   const w = autoWatch[uid]; if (!w) return;
   if (w.timer) clearInterval(w.timer);
   delete autoWatch[uid];
-  if (!silent && w.chatId) send(w.chatId, '⏹ <b>Đã tắt bám phiên.</b> Muốn cày tiếp thì vào lại.', kb([[btn('🏠 VỀ MENU', 'menu', 'danger')]])).catch(() => {});
+  if (!silent && w.chatId) send(w.chatId, '⏹ <b>Đã tắt bám phiên.</b>', kb([[btn('🏠 VỀ MENU', 'menu', 'danger')]])).catch(() => {});
 }
 
 function startAuto(uid, chatId, gameId) {
@@ -638,15 +702,17 @@ async function pushPredCard(chatId, gameId, uid, fromAuto) {
   
   const lastLog = f.engine.log.slice(-1)[0];
   let lastResult = '⏳ Chưa có';
+  let viResult = '';
   if (lastLog) {
-    const okStr = lastLog.ok ? '✅ NỔ' : '❌ XỊT';
+    const okStr = lastLog.ok ? '✅ ĐÚNG' : '❌ SAI';
     const predTxt = lastLog.pred === 'T' ? 'TÀI' : 'XỈU';
     const actTxt = lastLog.actual === 'T' ? 'TÀI' : 'XỈU';
-    lastResult = `${okStr} <i>(Đoán: ${predTxt} - Ra: ${actTxt})</i>`;
+    lastResult = `${okStr} <i>(Dự: ${predTxt} - Ra: ${actTxt})</i>`;
+    
+    if (sicbo && lastLog.okVi !== undefined && lastLog.okVi !== null) {
+      viResult = lastLog.okVi ? ' | ✅ TRÚNG VỊ' : ' | ❌ TRƯỢT VỊ';
+    }
   }
-
-  const filled = Math.max(0, Math.min(10, Math.round((p.conf || 52) / 10)));
-  const bar = '█'.repeat(filled) + '░'.repeat(10 - filled);
 
   let nextSession = '—';
   if (live.session != null && live.session !== '') {
@@ -663,28 +729,32 @@ async function pushPredCard(chatId, gameId, uid, fromAuto) {
 
   let spec = '';
   if (sicbo) {
-    const vi = (p.vi || []).join(' · ');
-    spec = `🎲 <b>Vị gợi ý:</b> ${esc(vi)}\n<i>(Khung ${p.side === 'T' ? '11–17' : '4–10'} · tránh 3/18)</i>\n\n`;
+    const vi = (p.vi || []).join(' - ');
+    spec = `🎲 <b>Dự đoán Sicbo:</b> ${sideIcon} <b>${sideTxt}</b>\n🎯 <b>Vị gợi ý:</b> ${esc(vi)}\n<i>(Khung ${p.side === 'T' ? '11–17' : '4–10'})</i>\n\n`;
+  } else {
+    spec = `📈 <b>Dự đoán:</b> ${sideIcon} <b>${sideTxt}</b>\n`;
   }
 
   const text =
-`${fromAuto ? '🔄 <b>[BÁM PHIÊN]</b> <i>Tao đang canh me...</i>\n' : ''}🎰 <b>${esc(g.brandLabel)} · ${esc(g.variant)}</b>
+`${fromAuto ? '🔄 <i>Auto cập nhật...</i>\n' : ''}🔺🟩 <b>${esc(g.brandLabel)} | ${esc(g.variant)}</b> 🔺🟩
 ━━━━━━━━━━━━━━━
-🔮 <b>Phiên kế:</b> <code>#${esc(nextSession)}</code>
-${prevLine}
-⚖️ <b>Phiên trước:</b> ${lastResult}
+📦 <b>Phiên hiện tại:</b> <code>#${esc(nextSession)}</code>
+${spec}📊 <b>Độ tin cậy:</b> <b>${p.conf}%</b>
 ━━━━━━━━━━━━━━━
-${spec}🎯 <b>CHỐT KÈO:</b> ${sideIcon} <b>${sideTxt}</b>
-⚡ <b>Tỉ lệ nổ:</b> <b>${p.conf}%</b>
-<code>${bar}</code>
-💡 <b>Phân tích:</b> ${esc(p.reason)}${p.streak ? ' · Bệt ' + p.streak : ''}
+📦 <b>Phiên trước:</b> <code>#${esc(live.session || '---')}</code>
+⚖️ <b>Kết quả:</b> ${lastResult}${viResult}
+🎲 <b>Xúc xắc:</b> ${live.dice ? live.dice.join(' - ') : '---'}
 ━━━━━━━━━━━━━━━
-📈 <b>Độ chuẩn:</b> ${acc}% (${f.engine.correct}/${f.engine.total})
+💡 <b>Thuật toán:</b> ${esc(p.reason)}${p.streak ? ' · Bệt ' + p.streak : ''}
+📈 <b>Tỉ lệ chuẩn:</b> ${acc}% (${f.engine.correct}/${f.engine.total})
 🕐 <i>${esc(nowVN())}</i>`;
 
-  const rows = [[btn('🔄 CẬP NHẬT', 'pred:' + gameId, 'success')]];
-  if (g.playUrl) rows.push([btnUrl('🎮 VÀO BÀN CÀY', g.playUrl, 'success')]);
-  rows.push([btn('⏹ NGHỈ CHƠI', 'pred:stop:' + g.id, 'danger'), btn('🏠 VỀ MENU', 'menu', 'primary')]);
+  const rows = [
+    [btn('🔄 LÀM MỚI', 'pred:' + gameId, 'success'), btn('📜 LỊCH SỬ', 'predhist:' + gameId, 'primary')]
+  ];
+  if (g.playUrl) rows.push([btnUrl('🎮 VÀO BÀN CHƠI', g.playUrl, 'success')]);
+  rows.push([btn('⏹ DỪNG CẬP NHẬT', 'pred:stop:' + g.id, 'danger')]);
+  rows.push([btn('🎲 CHỌN GAME KHÁC', 'pred:brands', 'primary')]);
 
   const key = uid + ':' + gameId;
   if (predMsg[key]) await delMsg(chatId, predMsg[key]);
@@ -715,9 +785,9 @@ async function showTables(chatId, brand, uid) {
     t = !t; if (row.length === 2) { rows.push(row); row = []; }
   }
   if (row.length) rows.push(row);
-  rows.push([btn('◀️ CHỌN SÒNG KHÁC', 'pred:brands', 'primary'), btn('🏠 VỀ MENU', 'menu', 'danger')]);
+  rows.push([btn('◀️ CHỌN SÀNH KHÁC', 'pred:brands', 'primary'), btn('🏠 VỀ MENU', 'menu', 'danger')]);
   
-  return send(chatId, `🎰 <b>SÒNG ${esc(brand.toUpperCase())}</b>\n👇 Chọn bàn mà cày:`, kb(rows));
+  return send(chatId, `🎰 <b>SÀNH ${esc(brand.toUpperCase())}</b>\n👇 Chọn bàn mà cày:`, kb(rows));
 }
 
 async function sendPredCard(chatId, gameId, uid) {
@@ -754,9 +824,10 @@ async function showHashTool(chatId) {
 😎 Bố mày sẽ đọc mã Hash của mày và phân tích xem nên đập Tài hay Xỉu.
 
 👉 <i>Hãy nhắn (gửi) mã Hash vào đây:</i>
-(MD5 dài 32 ký tự, SHA256 dài 64 ký tự)`;
+(MD5 dài 32 ký tự, SHA256 dài 64 ký tự)
+Gửi liên tục nhiều mã đều được, không cần bấm nút!`;
 
-  return send(chatId, text, kb([[btn('🏠 VỀ MENU', 'menu', 'danger')]]));
+  return send(chatId, text, kb([[btn('🏠 THOÁT TOOL HASH', 'menu', 'danger')]]));
 }
 
 /* ───────── Admin ───────── */
@@ -788,17 +859,19 @@ async function onCallback(cq) {
   await delMsg(chatId, msgId);
   await answerCb(cq.id);
 
-  if (data === 'menu') { stopAuto(uid, true); return showUserMenu(chatId, from); }
+  if (data === 'menu') { 
+    stopAuto(uid, true); 
+    delete sessions[uid];
+    return showUserMenu(chatId, from); 
+  }
   
-  // Hash feedback (Không cần VIP để bấm đúng sai, nhưng phải là người dùng tool hash)
   if (data.startsWith('hash_fb:')) {
-    const choice = data.split(':')[1]; // 'ok' or 'no'
+    const choice = data.split(':')[1];
     hashFeedback[uid] = { choice, at: Date.now() };
     saveFeedback();
     return send(chatId, '✅ Đã ghi nhận phản hồi của mày để bố chỉnh lại thuật toán!', kb([[btn('🏠 VỀ MENU', 'menu', 'danger')]]));
   }
   
-  // Hash Tool
   if (data === 'hash:start') {
     if (!isVip(uid)) {
       return send(chatId, 
@@ -815,7 +888,6 @@ async function onCallback(cq) {
     return showHashTool(chatId);
   }
 
-  // Chặn các lệnh khác nếu không có VIP
   if (!isVip(uid) && !isAdmin(uid) && data !== 'adm:home') {
     return send(chatId, 
 `🤬 <b>ĐỊT CỤ MÀY!</b> 🤬
@@ -831,9 +903,14 @@ async function onCallback(cq) {
   if (data === 'pred:brands') { stopAuto(uid, true); return showBrandMenu(chatId); }
   if (data.startsWith('predbrand:')) { stopAuto(uid, true); return showTables(chatId, data.slice(10), uid); }
   
+  if (data.startsWith('predhist:')) {
+    const gameId = data.slice(9);
+    return exportHistory(chatId, gameId);
+  }
+
   if (data.startsWith('pred:stop:')) {
     stopAuto(uid, true);
-    return send(chatId, '⏹ <b>Đã nghỉ chơi.</b>', kb([[btn('🏠 VỀ MENU', 'menu', 'danger')]]));
+    return send(chatId, '⏹ <b>Đã dừng cập nhật.</b>', kb([[btn('🎲 CHỌN GAME KHÁC', 'pred:brands', 'primary')], [btn('🏠 VỀ MENU', 'menu', 'danger')]]));
   }
   if (data.startsWith('pred:off:')) return send(chatId, '🔴 Bàn này đéo chạy được, chọn bàn khác.', kb([[btn('◀️', 'pred:brands', 'primary')]]));
   if (data.startsWith('pred:') && data !== 'pred:brands') return sendPredCard(chatId, data.slice(5), uid);
@@ -859,6 +936,7 @@ async function onMessage(msg) {
 
   if (text === '/start' || text === '/menu') {
     ensureUser(uid); saveUsers();
+    delete sessions[uid];
     return showUserMenu(chatId, from);
   }
   if (text === '/admin' && isAdmin(uid)) return showAdmin(chatId, from);
@@ -882,12 +960,10 @@ async function onMessage(msg) {
   const st = sessions[uid];
   if (st) {
     if (st.await === 'hash_input') {
-      delete sessions[uid];
       const hashStr = text.toLowerCase();
       
-      // Check MD5 (32) or SHA256 (64)
       if (!/^[a-f0-9]{32}$/.test(hashStr) && !/^[a-f0-9]{64}$/.test(hashStr)) {
-        return send(chatId, '❌ <b>MÃ HASH ĐÉO HỢP LỆ!</b>\n\nYêu cầu nhập đúng MD5 (32 ký tự) hoặc SHA256 (64 ký tự).', kb([[btn('🧩 THỬ LẠI', 'hash:start', 'primary')], [btn('🏠 VỀ MENU', 'menu', 'danger')]]));
+        return send(chatId, '❌ <b>MÃ HASH ĐÉO HỢP LỆ!</b>\n\nYêu cầu nhập đúng MD5 (32 ký tự) hoặc SHA256 (64 ký tự).', kb([[btn('🏠 VỀ MENU', 'menu', 'danger')]]));
       }
       
       const type = hashStr.length === 32 ? 'MD5' : 'SHA256';
@@ -908,11 +984,12 @@ async function onMessage(msg) {
 <code>${bar}</code>
 💡 <b>Phân tích:</b> ${esc(pred.reason)}
 
-👇 <i>Nếu phiên vừa rồi đúng, bấm ĐÚNG. Nếu sai, bấm SAI:</i>`;
+👇 <i>Nếu phiên vừa rồi đúng, bấm ĐÚNG. Nếu sai, bấm SAI:</i>
+<i>(Không bắt buộc, mày có thể gửi mã mới liên tục)</i>`;
 
       return send(chatId, textOut, kb([
         [btn('✅ ĐÚNG', 'hash_fb:ok', 'success'), btn('❌ SAI', 'hash_fb:no', 'danger')],
-        [btn('🏠 VỀ MENU', 'menu', 'primary')]
+        [btn('🏠 THOÁT TOOL HASH', 'menu', 'danger')]
       ]));
     }
 
