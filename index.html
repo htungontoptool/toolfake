@@ -130,6 +130,9 @@
 </div>
 
 <script>
+// 🔒 ĐƯỜNG DẪN BÍ MẬT (Phải giống hệt với bên server.js)
+const SECRET_PATH = '/admin-htungg-2026';
+
 let gameDangChon = null;
 let vongLapGame = null; 
 let vongLapChiTiet = null; 
@@ -137,7 +140,7 @@ let lastHash = '';
 
 async function taiDanhSachGame() {
   try {
-    const res = await fetch('/api/games');
+    const res = await fetch(SECRET_PATH + '/api/games');
     const json = await res.json();
     const list = json.games || [];
     
@@ -197,7 +200,7 @@ function quayLai() {
 async function taiChiTiet() {
   if (!gameDangChon) return;
   try {
-    const res = await fetch('/api/data', {
+    const res = await fetch(SECRET_PATH + '/api/data', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ apiId: gameDangChon })
@@ -255,7 +258,7 @@ async function taiChiTiet() {
 async function resetLearn() {
   if (!gameDangChon) return alert('Vui lòng chọn game trước!');
   if (!confirm('Reset dữ liệu học máy của game này?')) return;
-  await fetch('/reset-learn', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ apiId: gameDangChon }) });
+  await fetch(SECRET_PATH + '/reset-learn', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ apiId: gameDangChon }) });
   lastHash = '';
   taiChiTiet();
 }
