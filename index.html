@@ -97,7 +97,7 @@
   <div class="thanh-tren">
     <div class="logo">
       <span class="lg-main">TOOL HTUNGG</span>
-      <span class="credit">v15.4</span>
+      <span class="credit">v15.5</span>
     </div>
     <div>
       <button class="nut reset" onclick="resetLearn()">RESET</button>
@@ -130,8 +130,6 @@
 </div>
 
 <script>
-const SECRET_PATH = '/admin-htungg-2026';
-
 let gameDangChon = null;
 let vongLapGame = null; 
 let vongLapChiTiet = null; 
@@ -139,7 +137,7 @@ let lastHash = '';
 
 async function taiDanhSachGame() {
   try {
-    const res = await fetch(SECRET_PATH + '/api/games');
+    const res = await fetch('/api/games');
     const json = await res.json();
     const list = json.games || [];
     
@@ -199,7 +197,7 @@ function quayLai() {
 async function taiChiTiet() {
   if (!gameDangChon) return;
   try {
-    const res = await fetch(SECRET_PATH + '/api/data', {
+    const res = await fetch('/api/data', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ apiId: gameDangChon })
@@ -257,7 +255,7 @@ async function taiChiTiet() {
 async function resetLearn() {
   if (!gameDangChon) return alert('Vui lòng chọn game trước!');
   if (!confirm('Reset dữ liệu học máy của game này?')) return;
-  await fetch(SECRET_PATH + '/reset-learn', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ apiId: gameDangChon }) });
+  await fetch('/reset-learn', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ apiId: gameDangChon }) });
   lastHash = '';
   taiChiTiet();
 }
