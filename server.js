@@ -1,6 +1,6 @@
 /**
- * TOOL HTUNGG — ULTIMATE PREDICTION TOOL (v15.4)
- * Full Bot Telegram + Web Dashboard (Ẩn Link)
+ * TOOL HTUNGG — ULTIMATE PREDICTION TOOL (v15.5)
+ * Full Bot Telegram + Web Dashboard
  */
 'use strict';
 
@@ -26,9 +26,6 @@ const ADMIN_IDS = String(process.env.TELEGRAM_ADMIN_IDS || process.env.ADMIN_IDS
 const PUBLIC_URL = (process.env.PUBLIC_URL || process.env.WEB_URL || '').replace(/\/$/, '');
 const POLL_MS = Number(process.env.POLL_MS || 5000);
 const TRIAL_HOURS = 2;
-
-// 🔒 ĐƯỜNG DẪN BÍ MẬT (Không cần pass, link này là vào được)
-const SECRET_PATH = '/admin-htungg-2026';
 
 const TG = `https://api.telegram.org/bot${BOT_TOKEN}`;
 
@@ -514,7 +511,7 @@ async function lc79Connect(uid, chatId, data) {
   });
 }
 
-/* ═══════════════ BOT TELEGRAM UI & LOGIC ═══════════════ */
+/* ═══════════════ BOT TELEGRAM UI ═══════════════ */
 function kb(rows) { return { reply_markup: { inline_keyboard: rows } }; }
 function btn(text, data, style) { return { text, callback_data: data, style }; }
 function btnUrl(text, url, style) { return { text, url, style }; }
@@ -684,24 +681,16 @@ async function onMessage(msg) {
   }
 }
 
-/* ═══════════════ WEB SERVER (FIXED) ═══════════════ */
+/* ═══════════════ WEB SERVER (LINK GỐC) ═══════════════ */
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// 1. Route chính cho trang bí mật (trả về file HTML)
-app.get(SECRET_PATH, (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
-});
-app.get(SECRET_PATH + '/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
-});
+// Phục vụ file tĩnh (index.html) ngay tại link gốc
+app.use(express.static(path.join(__dirname, 'public')));
 
-// 2. Route cho file tĩnh (nếu có)
-app.use(SECRET_PATH, express.static(path.join(__dirname, 'public')));
-
-// 3. API
-app.get(`${SECRET_PATH}/api/games`, (req, res) => {
+// API lấy danh sách game
+app.get('/api/games', (req, res) => {
   const list = games.map(g => {
     const f = FEEDS[g.id], p = f.lastPred || {};
     return { id: g.id, name: `${g.brandLabel} - ${g.variant}`, group: g.group, pred: p.side ? (p.side === 'T' ? 'TÀI' : 'XỈU') : 'Đang lấy...', conf: p.conf || 0, acc: f.engine.accuracy() };
@@ -709,7 +698,8 @@ app.get(`${SECRET_PATH}/api/games`, (req, res) => {
   res.json({ games: list });
 });
 
-app.post(`${SECRET_PATH}/api/data`, (req, res) => {
+// API lấy dữ liệu chi tiết
+app.post('/api/data', (req, res) => {
   const { apiId } = req.body;
   const g = games.find(x => x.id === apiId), feed = FEEDS[apiId];
   if (!g || !feed) return res.json({ rows: [] });
@@ -732,24 +722,22 @@ app.post(`${SECRET_PATH}/api/data`, (req, res) => {
   res.json({ rows });
 });
 
-app.post(`${SECRET_PATH}/reset-learn`, (req, res) => {
+// API Reset
+app.post('/reset-learn', (req, res) => {
   const { apiId } = req.body;
   if (FEEDS[apiId]) { FEEDS[apiId].engine = new Engine(apiId); FEEDS[apiId].lastSession = null; }
   res.json({ ok: true });
 });
 
-app.get('/health', (_, res) => res.json({ ok: true, bot: 'HTUNGG v15.4', games: games.length }));
-
-app.get('*', (req, res) => {
-  res.status(404).send('<h1>404 Not Found</h1><p>Trang bạn tìm kiếm không tồn tại.</p>');
-});
+// Health check cho Render
+app.get('/health', (_, res) => res.json({ ok: true, bot: 'HTUNGG v15.5', games: games.length }));
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log('🔥 TOOL HTUNGG running on port', PORT);
-  console.log(`🔒 Link Web Bí Mật: https://[domain]${SECRET_PATH}`);
+  console.log(`🌐 Web Dashboard: http://localhost:${PORT}/`);
 });
 
-/* ═══════════════ TG POLLING ═══════════════ */
+/* ═══════════════ TELEGRAM POLLING ═══════════════ */
 let offset = 0;
 async function loop() {
   if (!BOT_TOKEN) return;
