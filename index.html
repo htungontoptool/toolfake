@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>ToolGame — HTUNGG</title>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; -webkit-font-smoothing: antialiased; }
+  :root {
+    --primary: #0062FF; --secondary: #00C2FF; --accent: #7C3AED;
+    --text-main: #0F172A; --text-muted: #64748B; --border: #E2E8F0;
+    --bg-main: #F5F8FD; --bg-soft: #F8FAFC; --ok-bg: #D1FAE5; --err-bg: #FEE2E2;
+    --font-head: 'Plus Jakarta Sans', sans-serif; --font-body: 'Inter', sans-serif;
+    --font-mono: 'JetBrains Mono', monospace;
+  }
+  body { font-family: var(--font-body); background: var(--bg-main); color: var(--text-main); height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+  .khung { display: flex; flex-direction: column; height: 100vh; position: relative; z-index: 1; }
+  
+  .thanh-tren { background: #fff; padding: 12px 16px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); z-index: 20; }
+  .logo { display: flex; align-items: center; gap: 8px; font-family: var(--font-head); font-weight: 800; }
+  .lg-main { font-size: 14px; color: var(--primary); }
+  .credit { font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+  .nut { background: var(--primary); color: #fff; border: none; padding: 8px 14px; border-radius: 8px; font-family: var(--font-head); font-size: 11px; font-weight: 700; cursor: pointer; }
+  .nut.reset { background: #EF4444; }
+
+  .info-bar { background: linear-gradient(135deg, var(--primary), var(--secondary)); color: #fff; padding: 14px 16px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 4px 16px rgba(0, 98, 255, 0.2); z-index: 15; }
+  .info-game .ten-game { font-family: var(--font-head); font-weight: 800; font-size: 14px; }
+  .info-game .phien { font-family: var(--font-mono); font-size: 10px; opacity: 0.9; }
+  .info-stats { display: flex; gap: 8px; }
+  .thong-ke { background: rgba(255, 255, 255, 0.2); border-radius: 8px; padding: 6px 10px; text-align: center; min-width: 55px; }
+  .thong-ke .so { font-family: var(--font-head); font-size: 16px; font-weight: 800; line-height: 1; }
+  .thong-ke .nhan { font-size: 8px; font-weight: 700; margin-top: 2px; }
+
+  .vung-bang { flex: 1; overflow-y: auto; padding: 10px; background: var(--bg-main); }
+  .table-wrap { background: #fff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.03); border: 1px solid var(--border); }
+  
+  table { width: 100%; border-collapse: collapse; text-align: center; font-size: 11px; }
+  th { background: var(--bg-soft); color: var(--primary); font-family: var(--font-head); font-weight: 800; padding: 12px 4px; font-size: 9px; text-transform: uppercase; border-bottom: 1px solid var(--border); }
+  td { padding: 10px 4px; border-bottom: 1px solid #F1F5F9; font-weight: 600; color: #334155; font-variant-numeric: tabular-nums; }
+  
+  th:nth-child(1) { width: 15%; }
+  th:nth-child(2) { width: 15%; }
+  th:nth-child(3) { width: 16%; }
+  th:nth-child(4) { width: 22%; }
+  th:nth-child(5) { width: 16%; }
+  th:nth-child(6) { width: 16%; }
+
+  .pill { display: inline-block; padding: 4px 8px; border-radius: 6px; font-family: var(--font-head); font-size: 9.5px; font-weight: 800; white-space: normal; line-height: 1.2; }
+  .pill.tai { background: #DCFCE7; color: #166534; }
+  .pill.xiu { background: #FEE2E2; color: #991B1B; }
+  .verify { display: inline-block; padding: 4px 6px; border-radius: 6px; font-size: 9px; font-weight: 800; white-space: normal; line-height: 1.2; }
+  .verify.dung { background: var(--ok-bg); color: #059669; }
+  .verify.sai { background: var(--err-bg); color: #DC2626; }
+  
+  .hang-tiep { background: #EFF6FF; }
+  .hang-tiep td { font-weight: 800; animation: sang 2s infinite; }
+  @keyframes sang { 0%, 100% { background: transparent; } 50% { background: rgba(0, 98, 255, 0.05); } }
+  .cho { color: var(--primary); font-style: italic; animation: blink 1.5s infinite; }
+  @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+
+  /* MODAL CHỌN GAME */
+  .overlay { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.6); backdrop-filter: blur(4px); display: flex; justify-content: center; align-items: center; z-index: 9999; padding: 20px; }
+  .the { width: 100%; max-width: 400px; max-height: 85vh; background: #fff; border-radius: 16px; display: flex; flex-direction: column; overflow: hidden; }
+  .the-header { padding: 16px; border-bottom: 1px solid var(--border); text-align: center; }
+  .the-header h3 { color: var(--primary); font-family: var(--font-head); font-size: 18px; }
+  
+  .ds-game { padding: 12px; overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 8px; }
+  .phan-loai { font-family: var(--font-head); font-size: 10px; color: var(--primary); font-weight: 800; margin: 8px 0 2px 4px; text-transform: uppercase; }
+  .o-game { border: 1px solid var(--border); padding: 12px; border-radius: 10px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; transition: 0.2s; background: #fff; }
+  .o-game:hover { border-color: var(--primary); background: var(--bg-soft); }
+  .o-game .left { display: flex; flex-direction: column; gap: 4px; }
+  .o-game .name { font-family: var(--font-head); font-size: 12px; font-weight: 700; color: var(--text-main); }
+  .o-game .pred-mini { font-size: 10px; font-weight: 600; display: flex; gap: 6px; align-items: center; }
+  .o-game .tag-tai { color: #166534; background: #DCFCE7; padding: 2px 6px; border-radius: 4px; }
+  .o-game .tag-xiu { color: #991B1B; background: #FEE2E2; padding: 2px 6px; border-radius: 4px; }
+  .o-game .winrate { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); }
+</style>
+</head>
+<body>
+
+<!-- MODAL CHỌN GAME -->
+<div class="overlay" id="modal-chon">
+  <div class="the">
+    <div class="the-header">
+      <h3>⚡ TOOL HTUNGG</h3>
+      <div style="font-size:10px; color:#64748B; margin-top:4px;">Auto Update Real-time</div>
+    </div>
+    <div class="ds-game" id="ds-game">
+      <div style="text-align:center; padding:20px; color:#64748B;">Đang tải danh sách...</div>
+    </div>
+  </div>
+</div>
+
+<!-- MAIN VIEW -->
+<div class="khung">
+  <div class="thanh-tren">
+    <div class="logo">
+      <span class="lg-main">TOOL HTUNGG</span>
+      <span class="credit">v15.4</span>
+    </div>
+    <div>
+      <button class="nut reset" onclick="resetLearn()">RESET</button>
+      <button class="nut" onclick="quayLai()">ĐỔI GAME</button>
+    </div>
+  </div>
+
+  <div class="info-bar" id="info-bar" style="display:none">
+    <div class="info-game">
+      <div class="ten-game" id="info-ten">—</div>
+      <div class="phien" id="info-phien">Phiên: —</div>
+    </div>
+    <div class="info-stats">
+      <div class="thong-ke"><div class="so" id="stat-thang">0</div><div class="nhan">THẮNG</div></div>
+      <div class="thong-ke"><div class="so" id="stat-thua">0</div><div class="nhan">THUA</div></div>
+      <div class="thong-ke"><div class="so" id="stat-tile">0%</div><div class="nhan">TỈ LỆ</div></div>
+    </div>
+  </div>
+
+  <div class="vung-bang">
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>GAME</th><th>PHIÊN</th><th>THỜI GIAN</th><th>DỰ ĐOÁN</th><th>KẾT QUẢ</th><th>XÁC MINH</th></tr></thead>
+        <tbody id="bang-du-lieu">
+          <tr><td colspan="6" style="text-align:center; padding:40px;">Chọn game để bắt đầu...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+let gameDangChon = null;
+let vongLapGame = null; 
+let vongLapChiTiet = null; 
+let lastHash = '';
+
+async function taiDanhSachGame() {
+  try {
+    const res = await fetch('/api/games');
+    const json = await res.json();
+    const list = json.games || [];
+    
+    const groups = { tx: [], sicbo: [], md5: [] };
+    for (const g of list) {
+      if (g.group === 'sicbo') groups.sicbo.push(g);
+      else if (g.group === 'md5') groups.md5.push(g);
+      else groups.tx.push(g);
+    }
+
+    let html = '';
+    const renderGroup = (title, arr) => {
+      if (!arr.length) return;
+      html += `<div class="phan-loai">${title}</div>`;
+      for (const g of arr) {
+        let predClass = g.pred === 'TÀI' ? 'tag-tai' : 'tag-xiu';
+        html += `
+          <div class="o-game" onclick="chonGame('${g.id}', '${g.name}')">
+            <div class="left">
+              <span class="name">${g.name}</span>
+              <span class="pred-mini">Dự đoán: <span class="${predClass}">${g.pred}</span> (${g.conf}%)</span>
+            </div>
+            <div class="winrate">Win: ${g.acc}%</div>
+          </div>
+        `;
+      }
+    };
+
+    renderGroup('🔴 TÀI XỈU', groups.tx);
+    renderGroup('🎲 SICBO (CÓ VỊ)', groups.sicbo);
+    renderGroup('🔐 MD5', groups.md5);
+
+    document.getElementById('ds-game').innerHTML = html;
+  } catch (e) { console.error('Lỗi tải danh sách', e); }
+}
+
+function chonGame(id, name) {
+  gameDangChon = id;
+  document.getElementById('modal-chon').style.display = 'none';
+  document.getElementById('info-bar').style.display = 'flex';
+  document.getElementById('info-ten').innerText = name;
+  document.getElementById('bang-du-lieu').innerHTML = '<tr><td colspan="6" style="text-align:center; padding:20px;">Đang tải dữ liệu...</td></tr>';
+  lastHash = '';
+  if (vongLapChiTiet) clearInterval(vongLapChiTiet);
+  taiChiTiet();
+  vongLapChiTiet = setInterval(taiChiTiet, 3000);
+}
+
+function quayLai() {
+  if (vongLapChiTiet) { clearInterval(vongLapChiTiet); vongLapChiTiet = null; }
+  document.getElementById('modal-chon').style.display = 'flex';
+  document.getElementById('info-bar').style.display = 'none';
+  document.getElementById('bang-du-lieu').innerHTML = '<tr><td colspan="6" style="text-align:center; padding:20px;">Chọn game...</td></tr>';
+  taiDanhSachGame();
+}
+
+async function taiChiTiet() {
+  if (!gameDangChon) return;
+  try {
+    const res = await fetch('/api/data', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ apiId: gameDangChon })
+    });
+    const json = await res.json();
+    if (!json.rows || json.rows.length === 0) return;
+
+    const hash = json.rows.map(r => r.phien + r.result + r.verify).join('|');
+    if (hash === lastHash) return;
+    lastHash = hash;
+
+    let html = '';
+    let thang = 0, thua = 0;
+
+    for (const r of json.rows) {
+      if (r.isNext) {
+        document.getElementById('info-phien').innerText = 'Phiên: #' + r.phien;
+        const predClass = r.prediction.includes('Tài') ? 'tai' : 'xiu';
+        html += `<tr class="hang-tiep">
+          <td><span style="color:var(--primary);font-weight:800;">${r.game}</span></td>
+          <td style="font-family:var(--font-mono);">#${r.phien}</td>
+          <td style="font-size:10px;color:#94a3b8;">${r.time}</td>
+          <td><span class="pill ${predClass}">${r.prediction}</span></td>
+          <td class="cho">Chờ...</td>
+          <td class="cho">⏳</td>
+        </tr>`;
+      } else {
+        if (r.isCorrect === true) thang++;
+        else if (r.isCorrect === false) thua++;
+        
+        const predClass = r.prediction.includes('Tài') ? 'tai' : 'xiu';
+        const resClass = r.result.includes('Tài') ? 'tai' : 'xiu';
+        const verClass = r.isCorrect ? 'dung' : 'sai';
+        
+        html += `<tr>
+          <td><span style="color:var(--primary);font-weight:800;">${r.game}</span></td>
+          <td style="font-family:var(--font-mono);">#${r.phien}</td>
+          <td style="font-size:10px;color:#94a3b8;">${r.time}</td>
+          <td><span class="pill ${predClass}">${r.prediction}</span></td>
+          <td><span class="pill ${resClass}">${r.result}</span></td>
+          <td><span class="verify ${verClass}">${r.verify}</span></td>
+        </tr>`;
+      }
+    }
+    
+    document.getElementById('bang-du-lieu').innerHTML = html;
+    
+    const total = thang + thua;
+    document.getElementById('stat-thang').innerText = thang;
+    document.getElementById('stat-thua').innerText = thua;
+    document.getElementById('stat-tile').innerText = total ? ((thang/total)*100).toFixed(0)+'%' : '0%';
+  } catch (e) { console.error(e); }
+}
+
+async function resetLearn() {
+  if (!gameDangChon) return alert('Vui lòng chọn game trước!');
+  if (!confirm('Reset dữ liệu học máy của game này?')) return;
+  await fetch('/reset-learn', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ apiId: gameDangChon }) });
+  lastHash = '';
+  taiChiTiet();
+}
+
+taiDanhSachGame();
+vongLapGame = setInterval(() => {
+  if (document.getElementById('modal-chon').style.display !== 'none') {
+    taiDanhSachGame();
+  }
+}, 5000);
+</script>
+</body>
+</html>
