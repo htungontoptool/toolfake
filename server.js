@@ -26,6 +26,9 @@ const PUBLIC_URL = (process.env.PUBLIC_URL || process.env.WEB_URL || '').replace
 const POLL_MS = Number(process.env.POLL_MS || 5000);
 const TRIAL_HOURS = 2;
 
+// 🔒 ĐƯỜNG DẪN BÍ MẬT ĐỂ VÀO WEB (Không cần pass)
+const SECRET_PATH = '/admin-htungg-2026';
+
 const TG = `https://api.telegram.org/bot${BOT_TOKEN}`;
 
 /* ═══════════════ HELPERS ═══════════════ */
@@ -85,11 +88,8 @@ async function answerCb(id, text) {
 }
 
 /* ═══════════════ STORE ═══════════════ */
-const DEFAULT_CFG = { supportUrl: 'https://t.me/SunNetWin' };
 let users = loadJSON('users.json', {});
 let sessions = {};
-let predMsg = {};
-let autoWatch = {};
 
 function saveUsers() { saveJSON('users.json', users); }
 function ensureUser(uid) {
@@ -511,49 +511,44 @@ async function lc79Connect(uid, chatId, data) {
   });
 }
 
-/* ═══════════════ WEB & API SERVER (BẢO MẬT) ═══════════════ */
-const WEB_USER = process.env.WEB_USER || 'admin';
-const WEB_PASS = process.env.WEB_PASS || 'htungg2026';
-
-function basicAuth(req, res, next) {
-  const auth = req.headers.authorization;
-  if (!auth || !auth.startsWith('Basic ')) {
-    res.setHeader('WWW-Authenticate', 'Basic realm="HTUNGG Tool - Admin Only"');
-    return res.status(401).send('🔒 Khu vực riêng tư. Cần đăng nhập!');
-  }
-  const base64 = auth.split(' ')[1];
-  const [user, pass] = Buffer.from(base64, 'base64').toString().split(':');
-  if (user === WEB_USER && pass === WEB_PASS) return next();
-  res.setHeader('WWW-Authenticate', 'Basic realm="HTUNGG Tool - Admin Only"');
-  return res.status(401).send('❌ Sai tài khoản hoặc mật khẩu!');
-}
-
+/* ═══════════════ WEB & API SERVER (ẨN LINK) ═══════════════ */
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-app.use((req, res, next) => {
-  if (req.path === '/health') return next();
-  return basicAuth(req, res, next);
+// Phục vụ giao diện Web tại đường link bí mật
+app.use(SECRET_PATH, express.static(path.join(__dirname, 'public')));
+
+// Nếu ai đó vào trang chủ (/) hoặc các đường dẫn khác, trả về 404
+app.get('/', (req, res) => {
+  res.status(404).send('<h1>404 Not Found</h1><p>Trang bạn tìm kiếm không tồn tại.</p>');
 });
 
-app.use(express.static(path.join(__dirname, 'public')));
-
-app.get('/api/games', (req, res) => {
+// Các API cũng được giấu vào đường dẫn bí mật
+app.get(`${SECRET_PATH}/api/games`, (req, res) => {
   const list = games.map(g => {
     const f = FEEDS[g.id];
     const p = f.lastPred || {};
-    return { id: g.id, name: `${g.brandLabel} - ${g.variant}`, group: g.group, pred: p.side ? (p.side === 'T' ? 'TÀI' : 'XỈU') : 'Đang lấy...', conf: p.conf || 0, acc: f.engine.accuracy() };
+    return { 
+      id: g.id, 
+      name: `${g.brandLabel} - ${g.variant}`, 
+      group: g.group, 
+      pred: p.side ? (p.side === 'T' ? 'TÀI' : 'XỈU') : 'Đang lấy...', 
+      conf: p.conf || 0, 
+      acc: f.engine.accuracy() 
+    };
   });
   res.json({ games: list });
 });
 
-app.post('/api/data', (req, res) => {
+app.post(`${SECRET_PATH}/api/data`, (req, res) => {
   const { apiId } = req.body;
   const g = games.find(x => x.id === apiId);
   const feed = FEEDS[apiId];
   if (!g || !feed) return res.json({ rows: [] });
-  const eng = feed.engine; const rows = [];
+  
+  const eng = feed.engine;
+  const rows = [];
 
   if (eng.pending && feed.lastLive) {
     let predTxt = eng.pending === 'T' ? 'Tài' : 'Xỉu';
@@ -565,16 +560,19 @@ app.post('/api/data', (req, res) => {
   for (const log of logs) {
     let predTxt = log.pred === 'T' ? 'Tài' : 'Xỉu';
     if (log.predVi) predTxt += ` (${log.predVi.join('-')})`;
+    
     let resTxt = log.actual === 'T' ? 'Tài' : 'Xỉu';
     if (log.dice && log.dice.length === 3) resTxt += ` (${log.dice.join('-')})`;
+
     let verifyTxt = log.ok ? '✅ ĐÚNG' : '❌ SAI';
     if (log.okVi !== undefined && log.okVi !== null) verifyTxt += log.okVi ? ' 🎯' : ' ⚠️';
+
     rows.push({ game: g.brandLabel, phien: log.session || '---', time: log.time, prediction: predTxt, result: resTxt, verify: verifyTxt, isCorrect: log.ok });
   }
   res.json({ rows });
 });
 
-app.post('/reset-learn', (req, res) => {
+app.post(`${SECRET_PATH}/reset-learn`, (req, res) => {
   const { apiId } = req.body;
   if (FEEDS[apiId]) { FEEDS[apiId].engine = new Engine(apiId); FEEDS[apiId].lastSession = null; }
   res.json({ ok: true });
@@ -582,7 +580,10 @@ app.post('/reset-learn', (req, res) => {
 
 app.get('/health', (_, res) => res.json({ ok: true, bot: 'HTUNGG v15.4', games: games.length }));
 
-app.listen(PORT, '0.0.0.0', () => console.log('🔥 TOOL HTUNGG running on port', PORT));
+app.listen(PORT, '0.0.0.0', () => {
+  console.log('🔥 TOOL HTUNGG running on port', PORT);
+  console.log(`🔒 Link quản trị bí mật: https://[domain-cua-ban]${SECRET_PATH}`);
+});
 
 
 /* ═══════════════ TELEGRAM BOT (POLLING) ═══════════════ */
