@@ -3,7 +3,9 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-<title>TOOL TX BY FEE</title>
+<meta name="theme-color" content="#4F46E5" />
+<meta name="description" content="TOOL TX BY FEE — TX, MD5 và Sicbo realtime" />
+<title>TOOL TX BY FEE — ADMIN</title>
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=Inter:wght@500;600;700&family=JetBrains+Mono:wght@600;700&display=swap" rel="stylesheet">
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; -webkit-font-smoothing: antialiased; -webkit-tap-highlight-color: transparent; }
@@ -42,9 +44,10 @@
 
   /* Header */
   .topbar {
-    background: rgba(255,255,255,0.9);
-    backdrop-filter: blur(12px);
-    padding: 12px 16px;
+    background: rgba(255,255,255,0.92);
+    backdrop-filter: blur(16px);
+    padding: 13px 16px;
+    gap: 12px;
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -102,11 +105,12 @@
   .table-card {
     background: var(--card);
     border-radius: var(--radius);
-    overflow: hidden;
+    overflow-x: auto;
+    overflow-y: hidden;
     box-shadow: var(--shadow);
     border: 1px solid var(--border);
   }
-  table { width: 100%; border-collapse: collapse; text-align: center; font-size: 12px; }
+  table { width: 100%; min-width: 640px; border-collapse: collapse; text-align: center; font-size: 12px; }
   th {
     background: #F8FAFC;
     color: var(--primary);
@@ -173,17 +177,44 @@
     box-shadow: 0 25px 50px -12px rgba(0,0,0,0.25);
   }
   .modal-head {
-    padding: 18px 18px 14px;
+    padding: 20px 18px 16px;
     text-align: center;
-    border-bottom: 1px solid var(--border);
+    color: #fff;
+    background: linear-gradient(135deg, #3730A3, #4F46E5 56%, #0891B2);
+    border-bottom: 1px solid rgba(255,255,255,0.18);
+    position: relative;
+    overflow: hidden;
+  }
+  .modal-head::after {
+    content: "";
+    position: absolute;
+    width: 170px; height: 170px;
+    right: -72px; top: -112px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.12);
+    pointer-events: none;
+  }
+  .modal-kicker {
+    font-size: 9px; font-weight: 800; letter-spacing: 1.6px;
+    opacity: .78; margin-bottom: 7px;
+  }
+  .feature-chips {
+    display: flex; justify-content: center; flex-wrap: wrap;
+    gap: 6px; margin-top: 12px;
+  }
+  .feature-chips span {
+    border: 1px solid rgba(255,255,255,.24);
+    background: rgba(255,255,255,.13);
+    border-radius: 999px; padding: 5px 9px;
+    font-size: 9px; font-weight: 800; letter-spacing: .25px;
   }
   .modal-head h3 {
     font-family: var(--font-h);
-    font-size: 19px;
+    font-size: 20px;
     font-weight: 800;
-    letter-spacing: -0.3px;
+    letter-spacing: -0.45px;
   }
-  .modal-head p { font-size: 12px; color: var(--muted); margin-top: 3px; }
+  .modal-head p { font-size: 11px; color: rgba(255,255,255,.82); margin-top: 4px; }
   .game-list {
     padding: 12px;
     overflow-y: auto;
@@ -217,6 +248,17 @@
     border-color: var(--primary);
     background: #F8FAFC;
   }
+  .game-item:hover { border-color: #A5B4FC; box-shadow: 0 5px 16px rgba(79,70,229,.08); }
+  .game-item .name { letter-spacing: -.15px; }
+  @media (max-width: 420px) {
+    .topbar { padding: 10px 11px; }
+    .brand-name { font-size: 14px; }
+    .actions { gap: 5px; }
+    .btn { padding: 8px 9px; font-size: 10px; }
+    .content { padding: 9px; }
+    .modal { max-height: 88vh; border-radius: 18px; }
+    .game-item { padding: 12px; }
+  }
   .game-item .left { display: flex; flex-direction: column; gap: 4px; }
   .game-item .name { font-family: var(--font-h); font-size: 14px; font-weight: 800; }
   .game-item .pred {
@@ -235,14 +277,57 @@
     border-radius: 8px;
   }
   .empty { text-align: center; padding: 36px 16px; color: var(--muted); font-size: 14px; }
+
+  /* Private admin console + file vault */
+  .login-overlay { position:fixed; inset:0; z-index:20000; display:flex; align-items:center; justify-content:center; padding:22px; background:linear-gradient(135deg,#111827 0%,#312e81 55%,#0e7490 100%); }
+  .login-card { width:100%; max-width:390px; padding:26px; border-radius:24px; background:rgba(255,255,255,.97); box-shadow:0 28px 80px rgba(0,0,0,.3); }
+  .login-mark { width:48px;height:48px;display:grid;place-items:center;border-radius:15px;color:#fff;font-weight:900;background:linear-gradient(135deg,#4f46e5,#06b6d4);margin-bottom:16px; }
+  .login-card h2 {font:800 21px var(--font-h);color:#0f172a}.login-card p {font-size:12px;line-height:1.6;color:#64748b;margin:8px 0 18px}
+  .login-card input {width:100%;padding:14px 13px;border:1px solid #cbd5e1;border-radius:12px;font:600 14px var(--font-b);outline:none;margin-bottom:10px}
+  .login-card input:focus {border-color:#6366f1;box-shadow:0 0 0 3px rgba(99,102,241,.13)}
+  .login-error {min-height:18px;color:#dc2626;font-size:11px;margin:7px 0}
+  .login-submit {width:100%;border:0;border-radius:12px;padding:13px;background:linear-gradient(135deg,#4f46e5,#0891b2);color:#fff;font:800 13px var(--font-h)}
+  .admin-nav {display:flex;gap:8px;padding:10px 14px;background:rgba(255,255,255,.82);border-bottom:1px solid var(--border);overflow-x:auto}
+  .nav-tab {white-space:nowrap;border:1px solid var(--border);border-radius:10px;padding:9px 13px;background:#fff;color:#475569;font:800 11px var(--font-h)}
+  .nav-tab.active {background:#4f46e5;color:#fff;border-color:#4f46e5}
+  .admin-page {flex:1;overflow:auto;padding:14px;-webkit-overflow-scrolling:touch}
+  .admin-card {background:#fff;border:1px solid var(--border);border-radius:17px;padding:16px;box-shadow:var(--shadow);margin-bottom:13px}
+  .admin-card h3 {font:800 15px var(--font-h);margin-bottom:6px;color:#0f172a}
+  .admin-muted {font-size:11px;color:#64748b;line-height:1.55}
+  .upload-row {display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:14px}
+  .upload-row input[type=file] {width:100%;max-width:100%;padding:10px;border:1px dashed #a5b4fc;border-radius:12px;background:#f8fafc;font-size:11px}
+  .admin-action {border:0;border-radius:10px;padding:10px 13px;font:800 11px var(--font-h);color:#fff;background:#4f46e5}
+  .admin-action.green {background:#059669}.admin-action.red {background:#dc2626}.admin-action.gray {background:#64748b}
+  .data-list {display:flex;flex-direction:column;gap:9px;margin-top:13px}
+  .data-row {border:1px solid var(--border);border-radius:13px;padding:12px;display:flex;gap:10px;justify-content:space-between;align-items:center;background:#fff}
+  .data-row-main {min-width:0;flex:1}.data-row-title {font:800 12px var(--font-h);overflow-wrap:anywhere;color:#0f172a}.data-row-sub {font-size:10px;color:#64748b;margin-top:4px;line-height:1.5}
+  .row-actions {display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}.mini-action {border:0;border-radius:8px;padding:8px 9px;font:800 10px var(--font-h);background:#eef2ff;color:#4338ca}.mini-action.danger {background:#fee2e2;color:#b91c1c}.mini-action.good {background:#d1fae5;color:#047857}
+  .status-pill {display:inline-block;padding:4px 7px;border-radius:999px;font:800 9px var(--font-h);background:#fef3c7;color:#92400e}.status-pill.paid {background:#d1fae5;color:#047857}.status-pill.rejected,.status-pill.cancelled {background:#fee2e2;color:#b91c1c}
+  .admin-empty {padding:22px;text-align:center;color:#94a3b8;font-size:12px;background:#f8fafc;border-radius:12px}
+  .admin-toast {position:fixed;left:50%;bottom:22px;z-index:25000;transform:translateX(-50%);padding:11px 15px;border-radius:12px;background:#0f172a;color:#fff;font:700 11px var(--font-h);box-shadow:0 8px 30px #0003;display:none;max-width:90vw;text-align:center}
+  @media(max-width:420px){.topbar{gap:6px}.brand-name{font-size:13px}.admin-nav{padding:8px}.nav-tab{padding:8px 10px;font-size:10px}.admin-page{padding:10px}.admin-card{padding:13px}.data-row{align-items:flex-start;flex-direction:column}.row-actions{justify-content:flex-start}}
+
 </style>
 </head>
 <body>
-<div class="overlay" id="modal">
+<div class="login-overlay" id="login-overlay">
+  <div class="login-card">
+    <div class="login-mark">TX</div>
+    <h2>ADMIN CONTROL CENTER</h2>
+    <p>Trang quản trị riêng. Người mua chỉ sử dụng bot Telegram, không cần truy cập trang này.</p>
+    <input id="admin-password" type="password" autocomplete="current-password" placeholder="Nhập mật khẩu admin" onkeydown="if(event.key==='Enter')loginAdmin()" />
+    <div class="login-error" id="login-error"></div>
+    <button class="login-submit" onclick="loginAdmin()">ĐĂNG NHẬP QUẢN TRỊ</button>
+  </div>
+</div>
+<div class="admin-toast" id="admin-toast"></div>
+<div class="overlay" id="modal" style="display:none">
   <div class="modal">
     <div class="modal-head">
+      <div class="modal-kicker">LIVE CONTROL CENTER</div>
       <h3>TOOL TX BY FEE</h3>
-      <p>Tài Xỉu • MD5 • Sicbo • Real-time</p>
+      <p>Chọn sảnh để xem dữ liệu và lịch sử phiên</p>
+      <div class="feature-chips"><span>⚡ REALTIME</span><span>🧩 MD5</span><span>🎲 SICBO</span></div>
     </div>
     <div class="game-list" id="game-list">
       <div class="empty">Đang tải danh sách...</div>
@@ -256,15 +341,23 @@
       <div class="logo">TX</div>
       <div class="brand-text">
         <span class="brand-name">TOOL TX BY FEE</span>
-        <span class="brand-ver">v16.0</span>
+        <span class="brand-ver">ADMIN • PRIVATE CONSOLE</span>
       </div>
     </div>
     <div class="actions">
-      <button class="btn btn-danger" onclick="resetLearn()">RESET</button>
-      <button class="btn btn-ghost" onclick="backToList()">ĐỔI GAME</button>
+      <button class="btn btn-danger" id="reset-game-btn" onclick="resetLearn()">RESET</button>
+      <button class="btn btn-ghost" id="change-game-btn" onclick="backToList()">ĐỔI GAME</button>
+      <button class="btn btn-danger" onclick="logoutAdmin()">THOÁT</button>
     </div>
   </div>
 
+  <div class="admin-nav">
+    <button class="nav-tab active" id="tab-games" onclick="switchAdminTab('games')">📊 THEO DÕI GAME</button>
+    <button class="nav-tab" id="tab-files" onclick="switchAdminTab('files')">📦 KHO FILE</button>
+    <button class="nav-tab" id="tab-orders" onclick="switchAdminTab('orders')">🧾 ĐƠN HÀNG</button>
+  </div>
+
+  <div id="game-page" style="display:flex;flex-direction:column;flex:1;min-height:0">
   <div class="infobar" id="infobar">
     <div>
       <div class="game-title" id="info-name">—</div>
@@ -296,16 +389,156 @@
       </table>
     </div>
   </div>
+  </div>
+
+  <section class="admin-page" id="files-page" style="display:none">
+    <div class="admin-card">
+      <h3>📦 QUẢN LÝ KHO FILE BÁN TRÊN BOT</h3>
+      <p class="admin-muted">Tải file sản phẩm lên đây. File mới tải lên sẽ được đặt làm file đang bán cho gói FULL SCR AUTOCUOCLC79 — 10.000đ. Khi admin xác nhận đơn, bot sẽ gửi file trực tiếp cho người mua.</p>
+      <div class="upload-row">
+        <input id="store-file-input" type="file" />
+        <button class="admin-action green" onclick="uploadStoreFile()">⬆ TẢI FILE LÊN KHO</button>
+        <button class="admin-action gray" onclick="loadStoreFiles()">LÀM MỚI</button>
+      </div>
+      <p class="admin-muted" style="margin-top:9px">Giới hạn tệp: 45 MB. Hãy bật Railway Volume tại thư mục ứng dụng nếu muốn giữ file qua các lần deploy.</p>
+    </div>
+    <div class="admin-card">
+      <h3>FILE ĐANG LƯU</h3>
+      <div class="data-list" id="store-file-list"><div class="admin-empty">Đang tải danh sách file...</div></div>
+    </div>
+  </section>
+
+  <section class="admin-page" id="orders-page" style="display:none">
+    <div class="admin-card">
+      <h3>🧾 ĐƠN MUA FULL SCR AUTOCUOCLC79</h3>
+      <p class="admin-muted">Giá 10.000đ • Nội dung chuyển khoản <b>lc79napvip123</b>. Khi người dùng bấm “Tôi đã chuyển”, đơn sẽ xuất hiện ở đây. Chỉ bấm xác nhận sau khi đã kiểm tra tiền vào tài khoản.</p>
+      <div class="upload-row"><button class="admin-action gray" onclick="loadStoreOrders()">LÀM MỚI ĐƠN HÀNG</button></div>
+      <div class="data-list" id="store-order-list"><div class="admin-empty">Đang tải đơn hàng...</div></div>
+    </div>
+  </section>
 </div>
 
 <script>
 let currentId = null;
 let timer = null;
 let lastHash = '';
+let adminToken = localStorage.getItem('tooltx_admin_token') || '';
+
+function toast(message) {
+  const el = document.getElementById('admin-toast');
+  el.textContent = message; el.style.display = 'block';
+  clearTimeout(toast._timer); toast._timer = setTimeout(() => el.style.display = 'none', 2600);
+}
+function htmlEscape(value) {
+  return String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+async function adminFetch(url, options = {}) {
+  const headers = new Headers(options.headers || {});
+  if (adminToken) headers.set('Authorization', 'Bearer ' + adminToken);
+  const res = await fetch(url, { ...options, headers });
+  if (res.status === 401) {
+    adminToken = ''; localStorage.removeItem('tooltx_admin_token');
+    document.getElementById('login-overlay').style.display = 'flex';
+  }
+  return res;
+}
+async function loginAdmin() {
+  const pass = document.getElementById('admin-password').value;
+  const error = document.getElementById('login-error'); error.textContent = '';
+  try {
+    const res = await fetch('/api/admin/login', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({password:pass}) });
+    const data = await res.json();
+    if (!res.ok || !data.ok) { error.textContent = data.error || 'Đăng nhập thất bại.'; return; }
+    adminToken = data.token; localStorage.setItem('tooltx_admin_token', adminToken);
+    document.getElementById('admin-password').value = '';
+    document.getElementById('login-overlay').style.display = 'none';
+    await initializeAdmin();
+  } catch (e) { error.textContent = 'Không kết nối được máy chủ.'; }
+}
+function logoutAdmin() {
+  adminToken = ''; localStorage.removeItem('tooltx_admin_token');
+  document.getElementById('login-overlay').style.display = 'flex';
+  document.getElementById('admin-password').focus();
+}
+async function initializeAdmin() {
+  const res = await adminFetch('/api/admin/session');
+  if (!res.ok) return;
+  document.getElementById('login-overlay').style.display = 'none';
+  loadGames(); loadStoreFiles(); loadStoreOrders();
+}
+function switchAdminTab(tab) {
+  for (const name of ['games','files','orders']) {
+    document.getElementById(name + '-page').style.display = name === tab ? (name === 'games' ? 'flex' : 'block') : 'none';
+    const nav = document.getElementById('tab-' + name); if (nav) nav.classList.toggle('active', name === tab);
+  }
+  document.getElementById('modal').style.display = tab === 'games' && !currentId ? 'flex' : 'none';
+  document.getElementById('reset-game-btn').style.display = tab === 'games' ? '' : 'none';
+  document.getElementById('change-game-btn').style.display = tab === 'games' ? '' : 'none';
+  if (tab === 'games') loadGames();
+  if (tab === 'files') loadStoreFiles();
+  if (tab === 'orders') loadStoreOrders();
+}
+function fmtDate(ms) { return ms ? new Date(ms).toLocaleString('vi-VN') : '—'; }
+function fmtSize(bytes) { return (Number(bytes || 0) / (1024*1024)).toFixed(2) + ' MB'; }
+async function loadStoreFiles() {
+  const host = document.getElementById('store-file-list'); if (!host || !adminToken) return;
+  try {
+    const res = await adminFetch('/api/admin/files'); const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data.error || 'Không tải được kho file');
+    if (!data.files.length) { host.innerHTML = '<div class="admin-empty">Kho đang trống. Hãy tải file sản phẩm lên.</div>'; return; }
+    host.innerHTML = data.files.map(f => `<div class="data-row"><div class="data-row-main"><div class="data-row-title">${htmlEscape(f.originalName)} ${f.active ? '<span class="status-pill paid">ĐANG BÁN</span>' : ''}</div><div class="data-row-sub">${fmtSize(f.size)} • ${fmtDate(f.uploadedAt)} • ${f.exists ? 'Có trên máy chủ' : 'Thiếu dữ liệu file'}</div></div><div class="row-actions">${f.active ? '' : `<button class="mini-action good" onclick="activateStoreFile('${f.id}')">Đặt bán</button>`}<button class="mini-action danger" onclick="deleteStoreFile('${f.id}')">Xoá</button></div></div>`).join('');
+  } catch (e) { host.innerHTML = `<div class="admin-empty">${htmlEscape(e.message)}</div>`; }
+}
+async function uploadStoreFile() {
+  const input = document.getElementById('store-file-input');
+  if (!input.files || !input.files[0]) return toast('Chọn file trước khi tải lên.');
+  if (input.files[0].size > 45 * 1024 * 1024) return toast('File vượt quá 45 MB.');
+  const form = new FormData(); form.append('file', input.files[0]);
+  const btn = document.querySelector('#files-page .admin-action.green'); btn.disabled = true; btn.textContent = 'ĐANG TẢI...';
+  try {
+    const res = await adminFetch('/api/admin/files', { method:'POST', body:form }); const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data.error || 'Tải file thất bại.');
+    input.value = ''; toast('Đã thêm file và đặt làm sản phẩm đang bán.'); await loadStoreFiles();
+  } catch (e) { toast(e.message); }
+  finally { btn.disabled = false; btn.textContent = '⬆ TẢI FILE LÊN KHO'; }
+}
+async function activateStoreFile(id) {
+  try { const res = await adminFetch('/api/admin/files/' + encodeURIComponent(id) + '/activate', {method:'POST'}); const data=await res.json(); if(!res.ok||!data.ok) throw new Error(data.error||'Không thể chọn file'); toast('Đã đổi file đang bán.'); await loadStoreFiles(); }
+  catch(e){toast(e.message)}
+}
+async function deleteStoreFile(id) {
+  if (!confirm('Xoá file này khỏi kho?')) return;
+  try { const res=await adminFetch('/api/admin/files/'+encodeURIComponent(id),{method:'DELETE'}); const data=await res.json(); if(!res.ok||!data.ok) throw new Error(data.error||'Không thể xoá'); toast('Đã xoá file.'); await loadStoreFiles(); }
+  catch(e){toast(e.message)}
+}
+async function loadStoreOrders() {
+  const host=document.getElementById('store-order-list'); if(!host||!adminToken)return;
+  try {
+    const res=await adminFetch('/api/admin/orders'); const data=await res.json(); if(!res.ok||!data.ok)throw new Error(data.error||'Không tải được đơn hàng');
+    if(!data.orders.length){host.innerHTML='<div class="admin-empty">Chưa có đơn mua kho file.</div>';return;}
+    host.innerHTML=data.orders.map(o=>{
+      const status = ({pending:'Chờ thanh toán',checking:'Chờ admin duyệt',delivering:'Đang gửi file',paid:'Đã gửi file',rejected:'Từ chối',cancelled:'Đã huỷ'}[o.status]||o.status);
+      const cls=o.status==='paid'?'paid':(['rejected','cancelled'].includes(o.status)?'rejected':'');
+      const actions=['pending','checking'].includes(o.status)?`<button class="mini-action good" onclick="approveStoreOrder('${o.id}')">Xác nhận + gửi file</button><button class="mini-action danger" onclick="rejectStoreOrder('${o.id}')">Từ chối</button>`:'';
+      return `<div class="data-row"><div class="data-row-main"><div class="data-row-title">${htmlEscape(o.id)} <span class="status-pill ${cls}">${htmlEscape(status)}</span></div><div class="data-row-sub">User: ${htmlEscape(o.uid)} • ${Number(o.amount||0).toLocaleString('vi-VN')}đ<br>Nội dung: ${htmlEscape(o.addInfo)} • ${fmtDate(o.created)}${o.deliveryError?'<br>Lỗi gửi: '+htmlEscape(o.deliveryError):''}</div></div><div class="row-actions">${actions}</div></div>`;
+    }).join('');
+  } catch(e){host.innerHTML=`<div class="admin-empty">${htmlEscape(e.message)}</div>`;}
+}
+async function approveStoreOrder(id) {
+  if(!confirm('Đã kiểm tra tiền vào tài khoản và muốn gửi file cho khách?'))return;
+  try{const res=await adminFetch('/api/admin/orders/'+encodeURIComponent(id)+'/approve',{method:'POST'});const data=await res.json();if(!res.ok||!data.ok)throw new Error(data.message||'Không gửi được file');toast(data.message||'Đã duyệt đơn.');await loadStoreOrders();}
+  catch(e){toast(e.message);await loadStoreOrders();}
+}
+async function rejectStoreOrder(id) {
+  if(!confirm('Từ chối đơn này?'))return;
+  try{const res=await adminFetch('/api/admin/orders/'+encodeURIComponent(id)+'/reject',{method:'POST'});const data=await res.json();if(!res.ok||!data.ok)throw new Error(data.message||'Không thể từ chối');toast(data.message||'Đã từ chối đơn.');await loadStoreOrders();}
+  catch(e){toast(e.message);}
+}
+
 
 async function loadGames() {
   try {
-    const res = await fetch('/api/games');
+    const res = await adminFetch('/api/games');
     const json = await res.json();
     const list = json.games || [];
     const groups = { tx: [], md5: [], sicbo: [] };
@@ -358,6 +591,7 @@ function selectGame(id, name) {
 }
 
 function backToList() {
+  switchAdminTab('games');
   if (timer) { clearInterval(timer); timer = null; }
   document.getElementById('modal').style.display = 'flex';
   document.getElementById('infobar').classList.remove('show');
@@ -378,7 +612,7 @@ function cleanText(t) {
 async function fetchData() {
   if (!currentId) return;
   try {
-    const res = await fetch('/api/data', {
+    const res = await adminFetch('/api/data', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ apiId: currentId })
@@ -438,7 +672,7 @@ async function fetchData() {
 async function resetLearn() {
   if (!currentId) return alert('Vui lòng chọn game trước!');
   if (!confirm('Reset dữ liệu học máy của game này?')) return;
-  await fetch('/reset-learn', {
+  await adminFetch('/reset-learn', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ apiId: currentId })
@@ -447,10 +681,13 @@ async function resetLearn() {
   fetchData();
 }
 
-loadGames();
+// Restore admin session when a valid token is already saved on this device.
+if (adminToken) initializeAdmin();
 setInterval(() => {
-  if (document.getElementById('modal').style.display !== 'none') loadGames();
-}, 5000);
+  if (adminToken && document.getElementById('game-page').style.display !== 'none' && document.getElementById('modal').style.display !== 'none') loadGames();
+  if (adminToken && document.getElementById('files-page').style.display !== 'none') loadStoreFiles();
+  if (adminToken && document.getElementById('orders-page').style.display !== 'none') loadStoreOrders();
+}, 15000);
 </script>
 </body>
 </html>
