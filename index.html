@@ -3,486 +3,278 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-<title>ToolGame — HTUNGG</title>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<title>TOOL HTUNGG — Tài Xỉu</title>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500;600;700&display=swap" rel="stylesheet">
 <style>
-  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; -webkit-font-smoothing: antialiased; }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; -webkit-font-smoothing: antialiased; -webkit-tap-highlight-color: transparent; }
   :root {
     --primary: #0062FF;
-    --primary-dark: #0047C7;
-    --secondary: #00C2FF;
-    --accent: #7C3AED;
-    --text-main: #0F172A;
-    --text-muted: #64748B;
+    --primary-dark: #004FCC;
+    --secondary: #00B4FF;
+    --text: #0F172A;
+    --muted: #64748B;
     --border: #E2E8F0;
-    --bg-main: #F1F5F9;
-    --bg-soft: #F8FAFC;
+    --bg: #F1F5F9;
+    --card: #FFFFFF;
+    --ok: #059669;
     --ok-bg: #D1FAE5;
+    --err: #DC2626;
     --err-bg: #FEE2E2;
-    --font-head: 'Plus Jakarta Sans', sans-serif;
-    --font-body: 'Inter', sans-serif;
-    --font-mono: 'JetBrains Mono', monospace;
-    --shadow: 0 4px 20px rgba(0, 0, 0, 0.06);
+    --font-h: 'Plus Jakarta Sans', sans-serif;
+    --font-b: 'Inter', sans-serif;
+    --font-m: 'JetBrains Mono', monospace;
     --radius: 14px;
+    --shadow: 0 4px 24px rgba(0, 98, 255, 0.08);
   }
-
   body {
-    font-family: var(--font-body);
-    background: var(--bg-main);
-    color: var(--text-main);
+    font-family: var(--font-b);
+    background: var(--bg);
+    color: var(--text);
     height: 100vh;
     display: flex;
     flex-direction: column;
     overflow: hidden;
   }
-
-  .khung {
-    display: flex;
-    flex-direction: column;
-    height: 100vh;
-    position: relative;
-    z-index: 1;
-  }
+  .wrap { display: flex; flex-direction: column; height: 100vh; }
 
   /* Header */
-  .thanh-tren {
+  .topbar {
     background: #fff;
-    padding: 14px 16px;
+    padding: 12px 16px;
     display: flex;
     justify-content: space-between;
     align-items: center;
     border-bottom: 1px solid var(--border);
     z-index: 20;
-    box-shadow: 0 1px 0 rgba(0,0,0,0.03);
   }
-
+  .brand { display: flex; align-items: center; gap: 10px; }
   .logo {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-
-  .logo-icon {
-    width: 32px;
-    height: 32px;
+    width: 34px; height: 34px;
     background: linear-gradient(135deg, var(--primary), var(--secondary));
     border-radius: 10px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: #fff;
-    font-weight: 800;
-    font-size: 14px;
-    font-family: var(--font-head);
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; font-weight: 800; font-size: 13px; font-family: var(--font-h);
   }
-
-  .logo-text {
-    display: flex;
-    flex-direction: column;
+  .brand-text { display: flex; flex-direction: column; }
+  .brand-name { font-family: var(--font-h); font-weight: 800; font-size: 15px; line-height: 1.1; }
+  .brand-ver { font-size: 10px; color: var(--muted); font-weight: 500; }
+  .actions { display: flex; gap: 8px; }
+  .btn {
+    border: none; border-radius: 10px; padding: 9px 14px;
+    font-family: var(--font-h); font-size: 12px; font-weight: 700;
+    cursor: pointer; transition: 0.15s;
   }
-
-  .lg-main {
-    font-family: var(--font-head);
-    font-weight: 800;
-    font-size: 15px;
-    color: var(--text-main);
-    line-height: 1.1;
-  }
-
-  .credit {
-    font-size: 10px;
-    color: var(--text-muted);
-    font-weight: 500;
-  }
-
-  .btn-group {
-    display: flex;
-    gap: 8px;
-  }
-
-  .nut {
-    background: var(--primary);
-    color: #fff;
-    border: none;
-    padding: 9px 14px;
-    border-radius: 10px;
-    font-family: var(--font-head);
-    font-size: 12px;
-    font-weight: 700;
-    cursor: pointer;
-    transition: all 0.2s ease;
-  }
-
-  .nut:active {
-    transform: scale(0.96);
-  }
-
-  .nut.reset {
-    background: #EF4444;
-  }
-
-  .nut.secondary {
-    background: #F1F5F9;
-    color: var(--text-main);
-    border: 1px solid var(--border);
-  }
+  .btn:active { transform: scale(0.96); }
+  .btn-primary { background: var(--primary); color: #fff; }
+  .btn-danger { background: #EF4444; color: #fff; }
+  .btn-ghost { background: #F1F5F9; color: var(--text); border: 1px solid var(--border); }
 
   /* Info bar */
-  .info-bar {
-    background: linear-gradient(135deg, var(--primary), #0090FF);
+  .infobar {
+    background: linear-gradient(135deg, #0062FF, #0090FF);
     color: #fff;
-    padding: 16px;
-    display: flex;
+    padding: 14px 16px;
+    display: none;
     justify-content: space-between;
     align-items: center;
-    box-shadow: 0 6px 20px rgba(0, 98, 255, 0.25);
-    z-index: 15;
+    box-shadow: 0 6px 20px rgba(0, 98, 255, 0.22);
   }
-
-  .info-game .ten-game {
-    font-family: var(--font-head);
-    font-weight: 800;
-    font-size: 15px;
-    letter-spacing: -0.2px;
-  }
-
-  .info-game .phien {
-    font-family: var(--font-mono);
-    font-size: 11px;
-    opacity: 0.85;
-    margin-top: 2px;
-  }
-
-  .info-stats {
-    display: flex;
-    gap: 8px;
-  }
-
-  .thong-ke {
-    background: rgba(255, 255, 255, 0.18);
-    backdrop-filter: blur(4px);
+  .infobar.show { display: flex; }
+  .game-title { font-family: var(--font-h); font-weight: 800; font-size: 15px; }
+  .game-phien { font-family: var(--font-m); font-size: 11px; opacity: 0.9; margin-top: 2px; }
+  .stats { display: flex; gap: 8px; }
+  .stat {
+    background: rgba(255,255,255,0.18);
     border-radius: 10px;
-    padding: 7px 12px;
+    padding: 6px 11px;
     text-align: center;
-    min-width: 58px;
+    min-width: 54px;
   }
+  .stat .num { font-family: var(--font-h); font-size: 16px; font-weight: 800; line-height: 1; }
+  .stat .lbl { font-size: 9px; font-weight: 700; margin-top: 2px; opacity: 0.9; letter-spacing: 0.3px; }
 
-  .thong-ke .so {
-    font-family: var(--font-head);
-    font-size: 17px;
-    font-weight: 800;
-    line-height: 1;
-  }
-
-  .thong-ke .nhan {
-    font-size: 9px;
-    font-weight: 700;
-    margin-top: 3px;
-    letter-spacing: 0.3px;
-    opacity: 0.9;
-  }
-
-  /* Table area */
-  .vung-bang {
-    flex: 1;
-    overflow-y: auto;
-    padding: 12px;
-    background: var(--bg-main);
-    -webkit-overflow-scrolling: touch;
-  }
-
-  .table-wrap {
-    background: #fff;
+  /* Table */
+  .content { flex: 1; overflow-y: auto; padding: 12px; -webkit-overflow-scrolling: touch; }
+  .table-card {
+    background: var(--card);
     border-radius: var(--radius);
     overflow: hidden;
     box-shadow: var(--shadow);
     border: 1px solid var(--border);
   }
-
-  table {
-    width: 100%;
-    border-collapse: collapse;
-    text-align: center;
-    font-size: 12px;
-  }
-
+  table { width: 100%; border-collapse: collapse; text-align: center; font-size: 12px; }
   th {
     background: #F8FAFC;
     color: var(--primary);
-    font-family: var(--font-head);
+    font-family: var(--font-h);
     font-weight: 800;
-    padding: 13px 6px;
+    padding: 12px 4px;
     font-size: 10px;
     text-transform: uppercase;
     letter-spacing: 0.4px;
     border-bottom: 1px solid var(--border);
   }
-
   td {
-    padding: 12px 6px;
+    padding: 11px 4px;
     border-bottom: 1px solid #F1F5F9;
     font-weight: 600;
     color: #334155;
     font-variant-numeric: tabular-nums;
   }
-
-  tr:last-child td {
-    border-bottom: none;
-  }
-
+  tr:last-child td { border-bottom: none; }
   th:nth-child(1) { width: 18%; }
   th:nth-child(2) { width: 16%; }
-  th:nth-child(3) { width: 16%; }
-  th:nth-child(4) { width: 20%; }
-  th:nth-child(5) { width: 15%; }
-  th:nth-child(6) { width: 15%; }
+  th:nth-child(3) { width: 18%; }
+  th:nth-child(4) { width: 16%; }
+  th:nth-child(5) { width: 16%; }
+  th:nth-child(6) { width: 16%; }
 
   .pill {
     display: inline-block;
     padding: 5px 9px;
     border-radius: 8px;
-    font-family: var(--font-head);
+    font-family: var(--font-h);
     font-size: 11px;
     font-weight: 800;
-    white-space: nowrap;
   }
+  .pill.tai { background: #DCFCE7; color: #166534; }
+  .pill.xiu { background: #FEE2E2; color: #991B1B; }
 
-  .pill.tai {
-    background: #DCFCE7;
-    color: #166534;
-  }
-
-  .pill.xiu {
-    background: #FEE2E2;
-    color: #991B1B;
-  }
-
-  .verify {
+  .badge {
     display: inline-block;
     padding: 5px 8px;
     border-radius: 8px;
     font-size: 11px;
     font-weight: 800;
   }
+  .badge.ok { background: var(--ok-bg); color: var(--ok); }
+  .badge.err { background: var(--err-bg); color: var(--err); }
 
-  .verify.dung {
-    background: var(--ok-bg);
-    color: #059669;
-  }
+  .row-next { background: linear-gradient(90deg, #EFF6FF, #F0F9FF); }
+  .row-next td { font-weight: 800; }
+  .waiting { color: var(--primary); font-style: italic; font-weight: 700; }
 
-  .verify.sai {
-    background: var(--err-bg);
-    color: #DC2626;
-  }
-
-  .hang-tiep {
-    background: linear-gradient(90deg, #EFF6FF, #F0F9FF);
-  }
-
-  .hang-tiep td {
-    font-weight: 800;
-  }
-
-  .cho {
-    color: var(--primary);
-    font-style: italic;
-    font-weight: 700;
-  }
-
-  /* Modal chọn game */
+  /* Modal */
   .overlay {
-    position: fixed;
-    inset: 0;
+    position: fixed; inset: 0;
     background: rgba(15, 23, 42, 0.55);
     backdrop-filter: blur(6px);
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    z-index: 9999;
-    padding: 20px;
+    display: flex; justify-content: center; align-items: center;
+    z-index: 9999; padding: 18px;
   }
-
-  .the {
-    width: 100%;
-    max-width: 420px;
-    max-height: 82vh;
-    background: #fff;
-    border-radius: 20px;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+  .modal {
+    width: 100%; max-width: 420px; max-height: 82vh;
+    background: #fff; border-radius: 20px;
+    display: flex; flex-direction: column; overflow: hidden;
+    box-shadow: 0 25px 50px -12px rgba(0,0,0,0.25);
   }
-
-  .the-header {
-    padding: 20px 20px 16px;
+  .modal-head {
+    padding: 18px 18px 14px;
     text-align: center;
     border-bottom: 1px solid var(--border);
   }
-
-  .the-header h3 {
-    color: var(--text-main);
-    font-family: var(--font-head);
-    font-size: 20px;
+  .modal-head h3 {
+    font-family: var(--font-h);
+    font-size: 19px;
     font-weight: 800;
     letter-spacing: -0.3px;
   }
-
-  .the-header .sub {
-    font-size: 12px;
-    color: var(--text-muted);
-    margin-top: 4px;
-    font-weight: 500;
-  }
-
-  .ds-game {
-    padding: 14px;
+  .modal-head p { font-size: 12px; color: var(--muted); margin-top: 3px; }
+  .game-list {
+    padding: 12px;
     overflow-y: auto;
     flex: 1;
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 9px;
   }
-
-  .phan-loai {
-    font-family: var(--font-head);
+  .section {
+    font-family: var(--font-h);
     font-size: 11px;
     color: var(--primary);
     font-weight: 800;
-    margin: 6px 0 2px 4px;
+    margin: 4px 0 2px 4px;
     text-transform: uppercase;
     letter-spacing: 0.5px;
   }
-
-  .o-game {
+  .game-item {
     border: 1.5px solid var(--border);
-    padding: 14px 16px;
+    padding: 13px 14px;
     border-radius: 12px;
     cursor: pointer;
     display: flex;
     justify-content: space-between;
     align-items: center;
-    transition: all 0.2s ease;
+    transition: 0.15s;
     background: #fff;
   }
-
-  .o-game:active {
+  .game-item:active {
     transform: scale(0.985);
     border-color: var(--primary);
     background: #F8FAFC;
   }
-
-  .o-game .left {
-    display: flex;
-    flex-direction: column;
-    gap: 5px;
+  .game-item .left { display: flex; flex-direction: column; gap: 4px; }
+  .game-item .name { font-family: var(--font-h); font-size: 13.5px; font-weight: 700; }
+  .game-item .pred {
+    font-size: 12px; font-weight: 600;
+    display: flex; gap: 7px; align-items: center;
   }
-
-  .o-game .name {
-    font-family: var(--font-head);
-    font-size: 14px;
-    font-weight: 700;
-    color: var(--text-main);
-  }
-
-  .o-game .pred-mini {
+  .tag-tai { color: #166534; background: #DCFCE7; padding: 2px 7px; border-radius: 6px; font-weight: 700; font-size: 11px; }
+  .tag-xiu { color: #991B1B; background: #FEE2E2; padding: 2px 7px; border-radius: 6px; font-weight: 700; font-size: 11px; }
+  .acc {
+    font-family: var(--font-m);
     font-size: 12px;
-    font-weight: 600;
-    display: flex;
-    gap: 8px;
-    align-items: center;
-  }
-
-  .o-game .tag-tai {
-    color: #166534;
-    background: #DCFCE7;
-    padding: 3px 8px;
-    border-radius: 6px;
-    font-weight: 700;
-    font-size: 11px;
-  }
-
-  .o-game .tag-xiu {
-    color: #991B1B;
-    background: #FEE2E2;
-    padding: 3px 8px;
-    border-radius: 6px;
-    font-weight: 700;
-    font-size: 11px;
-  }
-
-  .o-game .winrate {
-    font-family: var(--font-mono);
-    font-size: 13px;
     font-weight: 700;
     color: var(--primary);
     background: #EFF6FF;
-    padding: 6px 10px;
+    padding: 5px 9px;
     border-radius: 8px;
   }
-
-  .empty-state {
-    text-align: center;
-    padding: 40px 20px;
-    color: var(--text-muted);
-    font-size: 14px;
-  }
+  .empty { text-align: center; padding: 36px 16px; color: var(--muted); font-size: 14px; }
 </style>
 </head>
 <body>
-
-<!-- MODAL CHỌN GAME -->
-<div class="overlay" id="modal-chon">
-  <div class="the">
-    <div class="the-header">
+<div class="overlay" id="modal">
+  <div class="modal">
+    <div class="modal-head">
       <h3>TOOL HTUNGG</h3>
-      <div class="sub">Dự đoán Tài Xỉu • Real-time</div>
+      <p>Dự đoán Tài Xỉu • Real-time</p>
     </div>
-    <div class="ds-game" id="ds-game">
-      <div class="empty-state">Đang tải danh sách...</div>
+    <div class="game-list" id="game-list">
+      <div class="empty">Đang tải danh sách...</div>
     </div>
   </div>
 </div>
 
-<!-- MAIN VIEW -->
-<div class="khung">
-  <div class="thanh-tren">
-    <div class="logo">
-      <div class="logo-icon">TX</div>
-      <div class="logo-text">
-        <span class="lg-main">TOOL HTUNGG</span>
-        <span class="credit">v15.5</span>
+<div class="wrap">
+  <div class="topbar">
+    <div class="brand">
+      <div class="logo">TX</div>
+      <div class="brand-text">
+        <span class="brand-name">TOOL HTUNGG</span>
+        <span class="brand-ver">v15.8 API</span>
       </div>
     </div>
-    <div class="btn-group">
-      <button class="nut reset" onclick="resetLearn()">RESET</button>
-      <button class="nut secondary" onclick="quayLai()">ĐỔI GAME</button>
-    </div>
-  </div>
-
-  <div class="info-bar" id="info-bar" style="display:none">
-    <div class="info-game">
-      <div class="ten-game" id="info-ten">—</div>
-      <div class="phien" id="info-phien">Phiên: —</div>
-    </div>
-    <div class="info-stats">
-      <div class="thong-ke">
-        <div class="so" id="stat-thang">0</div>
-        <div class="nhan">THẮNG</div>
-      </div>
-      <div class="thong-ke">
-        <div class="so" id="stat-thua">0</div>
-        <div class="nhan">THUA</div>
-      </div>
-      <div class="thong-ke">
-        <div class="so" id="stat-tile">0%</div>
-        <div class="nhan">TỈ LỆ</div>
-      </div>
+    <div class="actions">
+      <button class="btn btn-danger" onclick="resetLearn()">RESET</button>
+      <button class="btn btn-ghost" onclick="backToList()">ĐỔI GAME</button>
     </div>
   </div>
 
-  <div class="vung-bang">
-    <div class="table-wrap">
+  <div class="infobar" id="infobar">
+    <div>
+      <div class="game-title" id="info-name">—</div>
+      <div class="game-phien" id="info-phien">Phiên: —</div>
+    </div>
+    <div class="stats">
+      <div class="stat"><div class="num" id="s-win">0</div><div class="lbl">THẮNG</div></div>
+      <div class="stat"><div class="num" id="s-lose">0</div><div class="lbl">THUA</div></div>
+      <div class="stat"><div class="num" id="s-rate">0%</div><div class="lbl">TỈ LỆ</div></div>
+    </div>
+  </div>
+
+  <div class="content">
+    <div class="table-card">
       <table>
         <thead>
           <tr>
@@ -494,12 +286,8 @@
             <th>XÁC MINH</th>
           </tr>
         </thead>
-        <tbody id="bang-du-lieu">
-          <tr>
-            <td colspan="6" style="text-align:center; padding:48px; color:#94a3b8;">
-              Chọn game để bắt đầu...
-            </td>
-          </tr>
+        <tbody id="tbody">
+          <tr><td colspan="6" style="text-align:center;padding:48px;color:#94a3b8">Chọn game để bắt đầu...</td></tr>
         </tbody>
       </table>
     </div>
@@ -507,158 +295,157 @@
 </div>
 
 <script>
-let gameDangChon = null;
-let vongLapChiTiet = null;
+let currentId = null;
+let timer = null;
 let lastHash = '';
 
-async function taiDanhSachGame() {
+async function loadGames() {
   try {
     const res = await fetch('/api/games');
     const json = await res.json();
     const list = json.games || [];
-
-    // Chỉ lấy game Tài Xỉu (không lấy sicbo vị, md5...)
-    const txGames = list.filter(g => g.group === 'tx' || !g.group || g.group === 'taixiu');
-
-    let html = '';
-    if (txGames.length === 0) {
-      html = '<div class="empty-state">Không có game nào</div>';
-    } else {
-      html += `<div class="phan-loai">TÀI XỈU</div>`;
-      for (const g of txGames) {
-        const predClass = g.pred === 'TÀI' ? 'tag-tai' : 'tag-xiu';
-        html += `
-          <div class="o-game" onclick="chonGame('${g.id}', '${g.name}')">
-            <div class="left">
-              <span class="name">${g.name}</span>
-              <span class="pred-mini">
-                Dự đoán: <span class="${predClass}">${g.pred}</span>
-                <span style="color:#94a3b8; font-size:11px;">(${g.conf}%)</span>
-              </span>
-            </div>
-            <div class="winrate">${g.acc}%</div>
-          </div>
-        `;
-      }
+    const groups = { tx: [], md5: [], sicbo: [] };
+    for (const g of list) {
+      if (g.group === 'sicbo') groups.sicbo.push(g);
+      else if (g.group === 'md5') groups.md5.push(g);
+      else groups.tx.push(g);
     }
 
-    document.getElementById('ds-game').innerHTML = html;
+    let html = '';
+    const render = (title, arr) => {
+      if (!arr.length) return;
+      html += `<div class="section">${title}</div>`;
+      for (const g of arr) {
+        const cls = (g.pred || '').includes('TÀI') || (g.pred || '').includes('Tài') ? 'tag-tai' : 'tag-xiu';
+        html += `
+          <div class="game-item" onclick="selectGame('${g.id}','${g.name.replace(/'/g,"\\'")}')">
+            <div class="left">
+              <span class="name">${g.name}</span>
+              <span class="pred">Dự đoán: <span class="${cls}">${g.pred || '—'}</span>
+                <span style="color:#94a3b8;font-size:11px">(${g.conf || 0}%)</span>
+              </span>
+            </div>
+            <div class="acc">${g.acc || 0}%</div>
+          </div>`;
+      }
+    };
+
+    render('TÀI XỈU', groups.tx);
+    render('MD5', groups.md5);
+    render('SICBO', groups.sicbo);
+
+    if (!html) html = '<div class="empty">Không có game</div>';
+    document.getElementById('game-list').innerHTML = html;
   } catch (e) {
-    console.error('Lỗi tải danh sách', e);
-    document.getElementById('ds-game').innerHTML = '<div class="empty-state">Lỗi tải danh sách</div>';
+    document.getElementById('game-list').innerHTML = '<div class="empty">Lỗi tải danh sách</div>';
   }
 }
 
-function chonGame(id, name) {
-  gameDangChon = id;
-  document.getElementById('modal-chon').style.display = 'none';
-  document.getElementById('info-bar').style.display = 'flex';
-  document.getElementById('info-ten').innerText = name;
-  document.getElementById('bang-du-lieu').innerHTML = `
-    <tr>
-      <td colspan="6" style="text-align:center; padding:40px; color:#94a3b8;">
-        Đang tải dữ liệu...
-      </td>
-    </tr>`;
+function selectGame(id, name) {
+  currentId = id;
+  document.getElementById('modal').style.display = 'none';
+  document.getElementById('infobar').classList.add('show');
+  document.getElementById('info-name').innerText = name;
+  document.getElementById('tbody').innerHTML = '<tr><td colspan="6" style="text-align:center;padding:40px;color:#94a3b8">Đang tải dữ liệu...</td></tr>';
   lastHash = '';
-  if (vongLapChiTiet) clearInterval(vongLapChiTiet);
-  taiChiTiet();
-  vongLapChiTiet = setInterval(taiChiTiet, 3000);
+  if (timer) clearInterval(timer);
+  fetchData();
+  timer = setInterval(fetchData, 3000);
 }
 
-function quayLai() {
-  if (vongLapChiTiet) {
-    clearInterval(vongLapChiTiet);
-    vongLapChiTiet = null;
-  }
-  document.getElementById('modal-chon').style.display = 'flex';
-  document.getElementById('info-bar').style.display = 'none';
-  document.getElementById('bang-du-lieu').innerHTML = `
-    <tr>
-      <td colspan="6" style="text-align:center; padding:48px; color:#94a3b8;">
-        Chọn game để bắt đầu...
-      </td>
-    </tr>`;
-  taiDanhSachGame();
+function backToList() {
+  if (timer) { clearInterval(timer); timer = null; }
+  document.getElementById('modal').style.display = 'flex';
+  document.getElementById('infobar').classList.remove('show');
+  document.getElementById('tbody').innerHTML = '<tr><td colspan="6" style="text-align:center;padding:48px;color:#94a3b8">Chọn game để bắt đầu...</td></tr>';
+  loadGames();
 }
 
-async function taiChiTiet() {
-  if (!gameDangChon) return;
+function cleanText(t) {
+  if (!t) return t;
+  // Bỏ số vị (3-4-5) và icon cảnh báo
+  return String(t)
+    .replace(/\s*\(\d+-\d+-\d+\)/g, '')
+    .replace(/[⚠️🎯⏳]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+async function fetchData() {
+  if (!currentId) return;
   try {
     const res = await fetch('/api/data', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ apiId: gameDangChon })
+      body: JSON.stringify({ apiId: currentId })
     });
     const json = await res.json();
-    if (!json.rows || json.rows.length === 0) return;
+    if (!json.rows || !json.rows.length) return;
 
     const hash = json.rows.map(r => r.phien + r.result + r.verify).join('|');
     if (hash === lastHash) return;
     lastHash = hash;
 
     let html = '';
-    let thang = 0, thua = 0;
+    let win = 0, lose = 0;
 
     for (const r of json.rows) {
+      const pred = cleanText(r.prediction);
+      const result = cleanText(r.result);
+      const verify = cleanText(r.verify);
+
       if (r.isNext) {
         document.getElementById('info-phien').innerText = 'Phiên: #' + r.phien;
-        const predClass = r.prediction.includes('Tài') || r.prediction.includes('TÀI') ? 'tai' : 'xiu';
-        html += `<tr class="hang-tiep">
-          <td><span style="color:var(--primary);font-weight:800;">${r.game}</span></td>
-          <td style="font-family:var(--font-mono);">#${r.phien}</td>
-          <td style="font-size:11px;color:#94a3b8;">${r.time}</td>
-          <td><span class="pill ${predClass}">${r.prediction}</span></td>
-          <td class="cho">Chờ...</td>
-          <td class="cho">...</td>
+        const cls = pred.includes('Tài') || pred.includes('TÀI') ? 'tai' : 'xiu';
+        html += `<tr class="row-next">
+          <td><span style="color:var(--primary);font-weight:800">${r.game}</span></td>
+          <td style="font-family:var(--font-m)">#${r.phien}</td>
+          <td style="font-size:11px;color:#94a3b8">${r.time}</td>
+          <td><span class="pill ${cls}">${pred}</span></td>
+          <td class="waiting">Chờ...</td>
+          <td class="waiting">...</td>
         </tr>`;
       } else {
-        if (r.isCorrect === true) thang++;
-        else if (r.isCorrect === false) thua++;
-
-        const predClass = r.prediction.includes('Tài') || r.prediction.includes('TÀI') ? 'tai' : 'xiu';
-        const resClass = r.result.includes('Tài') || r.result.includes('TÀI') ? 'tai' : 'xiu';
-        const verClass = r.isCorrect ? 'dung' : 'sai';
-
+        if (r.isCorrect === true) win++;
+        else if (r.isCorrect === false) lose++;
+        const pCls = pred.includes('Tài') || pred.includes('TÀI') ? 'tai' : 'xiu';
+        const rCls = result.includes('Tài') || result.includes('TÀI') ? 'tai' : 'xiu';
+        const vCls = r.isCorrect ? 'ok' : 'err';
+        const vText = r.isCorrect ? 'ĐÚNG' : 'SAI';
         html += `<tr>
-          <td><span style="color:var(--primary);font-weight:800;">${r.game}</span></td>
-          <td style="font-family:var(--font-mono);">#${r.phien}</td>
-          <td style="font-size:11px;color:#94a3b8;">${r.time}</td>
-          <td><span class="pill ${predClass}">${r.prediction}</span></td>
-          <td><span class="pill ${resClass}">${r.result}</span></td>
-          <td><span class="verify ${verClass}">${r.verify}</span></td>
+          <td><span style="color:var(--primary);font-weight:800">${r.game}</span></td>
+          <td style="font-family:var(--font-m)">#${r.phien}</td>
+          <td style="font-size:11px;color:#94a3b8">${r.time}</td>
+          <td><span class="pill ${pCls}">${pred}</span></td>
+          <td><span class="pill ${rCls}">${result}</span></td>
+          <td><span class="badge ${vCls}">${vText}</span></td>
         </tr>`;
       }
     }
 
-    document.getElementById('bang-du-lieu').innerHTML = html;
-
-    const total = thang + thua;
-    document.getElementById('stat-thang').innerText = thang;
-    document.getElementById('stat-thua').innerText = thua;
-    document.getElementById('stat-tile').innerText = total ? ((thang / total) * 100).toFixed(0) + '%' : '0%';
-  } catch (e) {
-    console.error(e);
-  }
+    document.getElementById('tbody').innerHTML = html;
+    const total = win + lose;
+    document.getElementById('s-win').innerText = win;
+    document.getElementById('s-lose').innerText = lose;
+    document.getElementById('s-rate').innerText = total ? Math.round((win / total) * 100) + '%' : '0%';
+  } catch (e) { console.error(e); }
 }
 
 async function resetLearn() {
-  if (!gameDangChon) return alert('Vui lòng chọn game trước!');
+  if (!currentId) return alert('Vui lòng chọn game trước!');
   if (!confirm('Reset dữ liệu học máy của game này?')) return;
   await fetch('/reset-learn', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ apiId: gameDangChon })
+    body: JSON.stringify({ apiId: currentId })
   });
   lastHash = '';
-  taiChiTiet();
+  fetchData();
 }
 
-taiDanhSachGame();
+loadGames();
 setInterval(() => {
-  if (document.getElementById('modal-chon').style.display !== 'none') {
-    taiDanhSachGame();
-  }
+  if (document.getElementById('modal').style.display !== 'none') loadGames();
 }, 5000);
 </script>
 </body>
