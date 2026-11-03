@@ -1,5 +1,5 @@
 /**
- * TOOL HTUNGG — ULTIMATE PREDICTION TOOL (FINAL v15.8)
+ * TOOL HTUNG BOT — ULTIMATE PREDICTION TOOL (FINAL v15.9)
  * Full Bot Telegram (Hash, History, Admin) + Web Dashboard (Link gốc)
  */
 'use strict';
@@ -26,6 +26,9 @@ const ADMIN_IDS = String(process.env.TELEGRAM_ADMIN_IDS || process.env.ADMIN_IDS
 const PUBLIC_URL = (process.env.PUBLIC_URL || process.env.WEB_URL || '').replace(/\/$/, '');
 const POLL_MS = Number(process.env.POLL_MS || 5000);
 const TRIAL_HOURS = 2;
+// DeepSeek AI
+const DEEPSEEK_API_KEY = '';
+const DEEPSEEK_URL = 'https://api.deepseek.com/chat/completions';
 
 const TG = `https://api.telegram.org/bot${BOT_TOKEN}`;
 
@@ -93,7 +96,8 @@ let autoWatch = {};
 
 function saveUsers() { saveJSON('users.json', users); }
 function ensureUser(uid) {
-  if (!users[uid]) users[uid] = { vipUntil: Date.now() + TRIAL_HOURS * 3600 * 1000 };
+  if (!users[uid]) users[uid] = { vipUntil: Date.now() + TRIAL_HOURS * 3600 * 1000, predCount: 0, lastActive: Date.now() };
+  if (users[uid].predCount == null) users[uid].predCount = 0;
   return users[uid];
 }
 function isVip(uid) {
@@ -116,20 +120,57 @@ function grantVip(uid, hours) {
   return u.vipUntil;
 }
 
+/* ═══════════════ DEEPSEEK AI ═══════════════ */
+async function deepseekAnalyze(history, enginePred, gameName) {
+  if (!DEEPSEEK_API_KEY) return null;
+  try {
+    const cau = history.slice(-20).map(x => x === 'T' ? 'T' : 'X').join('');
+    const prompt = `Bạn là chuyên gia soi cầu Tài Xỉu. Cầu 20 phiên gần nhất (T=Tài, X=Xỉu): ${cau || 'ít data'}.
+Tool local dự đoán: ${enginePred.side === 'T' ? 'TÀI' : 'XỈU'} (conf ${enginePred.conf}%).
+Game: ${gameName}.
+Hãy trả lời NGẮN gọn 1 dòng tiếng Việt:
+- Đồng ý hay nên đảo chiều?
+- Lý do ngắn (cầu, streak, bias).
+Ví dụ: "Đồng ý TÀI — cầu đang lệch Xỉu, mean-reversion" hoặc "Nên đảo XỈU — tool đang dính cầu dài".`;
+
+    const body = JSON.stringify({
+      model: 'deepseek-chat',
+      messages: [
+        { role: 'system', content: 'Trả lời ngắn gọn 1 dòng, tiếng Việt, chuyên soi cầu Tài Xỉu.' },
+        { role: 'user', content: prompt }
+      ],
+      temperature: 0.3,
+      max_tokens: 80
+    });
+
+    const res = await fetch(DEEPSEEK_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${DEEPSEEK_API_KEY}`
+      },
+      body
+    });
+    if (!res.ok) return null;
+    const json = await res.json();
+    const text = json.choices && json.choices[0] && json.choices[0].message && json.choices[0].message.content;
+    return text ? String(text).trim().slice(0, 160) : null;
+  } catch (e) {
+    return null;
+  }
+}
+
 /* ═══════════════ GAMES ═══════════════ */
 const DEFAULT_GAMES = [
   // ===== TÀI XỈU =====
   { id: 'sunwin_tx', brand: 'sunwin', brandLabel: 'SUNWIN', variant: 'Tài Xỉu', url: 'https://well-summary-oclc-invisible.trycloudflare.com/api/tx', group: 'tx', enabled: true },
-  { id: 'tik88_tx', brand: 'tik88', brandLabel: 'TIK88', variant: 'Tài Xỉu', url: 'https://get-enemies-got-copper.trycloudflare.com/api/txmd5', group: 'tx', enabled: true },
   { id: 'hitclub_tx', brand: 'hitclub', brandLabel: 'HITCLUB', variant: 'Tài Xỉu', url: 'https://apihitclubhihi.onrender.com/api/hitclub/hu', group: 'tx', enabled: true },
   { id: 'b52_tx', brand: 'b52', brandLabel: 'B52', variant: 'Tài Xỉu', url: 'https://apitaixiu-6jjn.onrender.com/api/ditmemayb52', group: 'tx', enabled: true },
   { id: 'max789_tx', brand: 'max789', brandLabel: 'MAX789', variant: 'Tài Xỉu', url: 'https://apitaixiu-6jjn.onrender.com/max789/tx', group: 'tx', enabled: true },
-  { id: 'max789_kubet', brand: 'max789', brandLabel: 'MAX789', variant: 'Kubet Live', url: 'https://apitaixiu-6jjn.onrender.com/max789/kubet', group: 'tx', enabled: true },
   { id: 'lc79_tx', brand: 'lc79', brandLabel: 'LC79', variant: 'Tài Xỉu', url: 'https://apitaixiu-6jjn.onrender.com/lc79/tx', group: 'tx', enabled: true },
   { id: 'betvip_tx', brand: 'betvip', brandLabel: 'BETVIP', variant: 'Tài Xỉu', url: 'https://apitaixiu-6jjn.onrender.com/betvip/tx', group: 'tx', enabled: true },
   { id: 'xocdia88_tx', brand: 'xocdia88', brandLabel: 'XOCDIA88', variant: 'Tài Xỉu', url: 'https://apitaixiu-6jjn.onrender.com/xocdia88/tx', group: 'tx', enabled: true },
   { id: 'sumclub_tx', brand: 'sumclub', brandLabel: 'SUMCLUB', variant: 'Tài Xỉu', url: 'https://apitaixiu-6jjn.onrender.com/sumclub/tx', group: 'tx', enabled: true },
-  { id: 'luck8_hu', brand: 'luck8', brandLabel: 'LUCK8', variant: 'Tài Xỉu Hũ', url: 'https://apitaixiu-6jjn.onrender.com/luck8-hu', group: 'tx', enabled: true },
 
   // ===== MD5 =====
   { id: 'hitclub_md5', brand: 'hitclub', brandLabel: 'HITCLUB', variant: 'MD5', url: 'https://apihitclubhihi.onrender.com/api/hitclub/md5', group: 'md5', enabled: true },
@@ -138,14 +179,11 @@ const DEFAULT_GAMES = [
   { id: 'betvip_md5', brand: 'betvip', brandLabel: 'BETVIP', variant: 'MD5', url: 'https://apitaixiu-6jjn.onrender.com/betvip/md5', group: 'md5', enabled: true },
   { id: 'xocdia88_md5', brand: 'xocdia88', brandLabel: 'XOCDIA88', variant: 'MD5', url: 'https://apitaixiu-6jjn.onrender.com/xocdia88/md5', group: 'md5', enabled: true },
   { id: 'sumclub_md5', brand: 'sumclub', brandLabel: 'SUMCLUB', variant: 'MD5', url: 'https://apitaixiu-6jjn.onrender.com/sumclub/md5', group: 'md5', enabled: true },
-  { id: 'luck8_md5', brand: 'luck8', brandLabel: 'LUCK8', variant: 'MD5', url: 'https://apitaixiu-6jjn.onrender.com/luck8-md5', group: 'md5', enabled: true },
-  { id: '68gb_md5', brand: '68gb', brandLabel: '68GB', variant: 'MD5', url: 'https://apitaixiu-6jjn.onrender.com/68gb/md5', group: 'md5', enabled: true },
 
   // ===== SICBO =====
   { id: 'sicbo_sunwin', brand: 'sunwin', brandLabel: 'SUNWIN', variant: 'Sicbo', url: 'https://apitaixiu-6jjn.onrender.com/api/sicbo/sunwin', group: 'sicbo', enabled: true },
   { id: 'sicbo_hitclub', brand: 'hitclub', brandLabel: 'HITCLUB', variant: 'Sicbo', url: 'https://apitaixiu-6jjn.onrender.com/api/sicbo/hitclub', group: 'sicbo', enabled: true },
-  { id: 'sicbo_789', brand: '789club', brandLabel: '789CLUB', variant: 'Sicbo', url: 'https://apitaixiu-6jjn.onrender.com/api/sicbo/789', group: 'sicbo', enabled: true },
-  { id: 'sicbo_b52', brand: 'b52', brandLabel: 'B52', variant: 'Sicbo', url: 'https://sicbob52-9zn5.onrender.com/api/sicbo/b52', group: 'sicbo', enabled: true }
+  { id: 'sicbo_789', brand: '789club', brandLabel: '789CLUB', variant: 'Sicbo', url: 'https://apitaixiu-6jjn.onrender.com/api/sicbo/789', group: 'sicbo', enabled: true }
 ];
 
 let games = loadJSON('games.json', null);
@@ -276,9 +314,9 @@ class Engine {
     const h = this.history;
     const n = h.length;
 
-    if (n < 4) {
+    if (n < 5) {
       const side = n && h[n - 1] === 'X' ? 'T' : 'X';
-      const out = { side, conf: 53, vi: this._pickVi(side), streak: 0 };
+      const out = { side, conf: 54, vi: this._pickVi(side), streak: 0 };
       this.pending = side;
       this.pendingMeta = out;
       return out;
@@ -288,92 +326,146 @@ class Engine {
     let streak = 1;
     for (let i = n - 2; i >= 0 && h[i] === last; i--) streak++;
 
-    // Markov
+    // Đếm số lần đoán cùng 1 bên gần đây (tránh dính 1 chiều)
+    let samePredStreak = 0;
+    if (this.recentPreds.length) {
+      const lastPredSide = this.recentPreds[this.recentPreds.length - 1].side;
+      for (let i = this.recentPreds.length - 1; i >= 0; i--) {
+        if (this.recentPreds[i].side === lastPredSide) samePredStreak++;
+        else break;
+      }
+    }
+
+    // Markov nhẹ
     const totalFromT = (this.transition.TT + this.transition.TX) || 1;
     const totalFromX = (this.transition.XT + this.transition.XX) || 1;
     const pT_given_T = this.transition.TT / totalFromT;
     const pT_given_X = this.transition.XT / totalFromX;
-    const markovScoreT = last === 'T' ? (pT_given_T - 0.5) * 2.8 : (pT_given_X - 0.5) * 2.8;
+    const markovScoreT = last === 'T' ? (pT_given_T - 0.5) * 1.6 : (pT_given_X - 0.5) * 1.6;
 
     let scoreT = 0, scoreX = 0;
 
-    if (Math.abs(this.trend) > 0.12) {
-      if (this.trend > 0) scoreT += this.trend * 4.2;
-      else scoreX += Math.abs(this.trend) * 4.2;
+    // Trend & Momentum (giảm trọng số để đỡ bị dính)
+    if (Math.abs(this.trend) > 0.18) {
+      if (this.trend > 0) scoreT += this.trend * 2.4;
+      else scoreX += Math.abs(this.trend) * 2.4;
     }
-    if (Math.abs(this.momentum) > 0.12) {
-      if (this.momentum > 0) scoreT += this.momentum * 3.4;
-      else scoreX += Math.abs(this.momentum) * 3.4;
-    }
-
-    if (streak >= 2) {
-      let sScore = Math.min(2.8, streak * 0.72);
-      if (streak >= 6) sScore -= (streak - 5) * 0.55;
-      if (streak >= 9) sScore -= 1.2;
-      if (last === 'T') scoreT += sScore;
-      else scoreX += sScore;
+    if (Math.abs(this.momentum) > 0.18) {
+      if (this.momentum > 0) scoreT += this.momentum * 2.0;
+      else scoreX += Math.abs(this.momentum) * 2.0;
     }
 
-    // Pattern
+    // ===== STREAK: ưu tiên ĐẢO chiều khi cầu dài =====
+    if (streak >= 3) {
+      // Cầu càng dài → càng nghiêng về đảo
+      const breakForce = Math.min(3.5, (streak - 2) * 0.85);
+      if (last === 'T') scoreX += breakForce;
+      else scoreT += breakForce;
+    } else if (streak === 2) {
+      // Cầu 2 thì hơi nghiêng theo, nhưng rất nhẹ
+      if (last === 'T') scoreT += 0.35;
+      else scoreX += 0.35;
+    }
+
+    // Nếu tool đang đoán cùng 1 bên nhiều phiên → ép đảo
+    if (samePredStreak >= 3) {
+      const lastPredSide = this.recentPreds[this.recentPreds.length - 1].side;
+      if (lastPredSide === 'T') scoreX += 1.8;
+      else scoreT += 1.8;
+    }
+    if (samePredStreak >= 5) {
+      const lastPredSide = this.recentPreds[this.recentPreds.length - 1].side;
+      if (lastPredSide === 'T') scoreX += 2.2;
+      else scoreT += 2.2;
+    }
+
+    // Pattern đảo cầu
+    const last5 = h.slice(-5).join('');
     const last6 = h.slice(-6).join('');
-    const patterns = {
-      'TXTTXT': 0.35, 'XTXTXT': 0.35,
-      'TTXTTX': 0.28, 'XXTXXT': 0.28,
-      'TXXTXX': 0.25, 'XTTXTT': 0.25,
-      'TTTTTX': -0.45, 'XXXXXT': -0.45,
-      'TTTTTT': -0.7,  'XXXXXX': -0.7
+    const breakPatterns = {
+      'TTTTT': 2.2, 'XXXXX': 2.2,
+      'TTTT': 1.4, 'XXXX': 1.4,
+      'TTT': 0.7, 'XXX': 0.7,
+      'TXTTT': 0.5, 'XTTTX': 0.5,
+      'XTXXX': 0.5, 'TXXXT': 0.5
     };
-    if (patterns[last6] !== undefined) {
-      const val = patterns[last6];
-      if (val > 0) {
-        if (last6.endsWith('T')) scoreT += val;
-        else scoreX += val;
-      } else {
-        if (last === 'T') scoreX += Math.abs(val);
-        else scoreT += Math.abs(val);
+    if (breakPatterns[last5] !== undefined) {
+      const v = breakPatterns[last5];
+      if (last === 'T') scoreX += v;
+      else scoreT += v;
+    }
+    if (breakPatterns[last6] !== undefined) {
+      const v = breakPatterns[last6];
+      if (last === 'T') scoreX += v;
+      else scoreT += v;
+    }
+
+    // Recent accuracy: đang thua nhiều → đảo mạnh
+    if (this.recentPreds.length >= 5) {
+      const recent = this.recentPreds.slice(-8);
+      const loseCount = recent.filter(p => !p.correct).length;
+      const correctRate = (recent.length - loseCount) / recent.length;
+
+      if (correctRate <= 0.35) {
+        // Đang thua nặng → ưu tiên đảo chiều so với lần đoán trước
+        const lastPredSide = recent[recent.length - 1].side;
+        if (lastPredSide === 'T') scoreX += 1.6;
+        else scoreT += 1.6;
+      } else if (correctRate <= 0.45) {
+        const lastPredSide = recent[recent.length - 1].side;
+        if (lastPredSide === 'T') scoreX += 0.9;
+        else scoreT += 0.9;
       }
     }
 
-    // Recent accuracy bias
-    if (this.recentPreds.length >= 8) {
-      const recent = this.recentPreds.slice(-12);
-      const correctRate = recent.filter(p => p.correct).length / recent.length;
-      if (correctRate < 0.42) {
-        if (last === 'T') scoreX += 0.6;
-        else scoreT += 0.6;
-      } else if (correctRate > 0.68) {
-        if (last === 'T') scoreT += 0.45;
-        else scoreX += 0.45;
-      }
-    }
-
+    // Markov nhẹ
     scoreT += markovScoreT;
     scoreX -= markovScoreT;
 
+    // Balance 20 phiên gần (mean reversion)
+    if (n >= 12) {
+      const w20 = h.slice(-20);
+      const tCount = w20.filter(x => x === 'T').length;
+      const bias = (tCount / w20.length) - 0.5;
+      // Nếu Tài xuất hiện quá nhiều → nghiêng Xỉu và ngược lại
+      if (Math.abs(bias) > 0.12) {
+        if (bias > 0) scoreX += Math.abs(bias) * 2.5;
+        else scoreT += Math.abs(bias) * 2.5;
+      }
+    }
+
     let netScore = scoreT - scoreX;
-    const pT = 1 / (1 + Math.exp(-netScore * 1.65));
+    const pT = 1 / (1 + Math.exp(-netScore * 1.35));
     let side = pT >= 0.5 ? 'T' : 'X';
+
+    // Safety: nếu đang thua 3 phiên liên tiếp cùng 1 bên dự đoán → ép đảo
+    if (this.recentPreds.length >= 3) {
+      const last3 = this.recentPreds.slice(-3);
+      if (last3.every(p => !p.correct) && last3.every(p => p.side === last3[0].side)) {
+        side = last3[0].side === 'T' ? 'X' : 'T';
+      }
+    }
 
     let conf = pT >= 0.5 ? pT * 100 : (1 - pT) * 100;
 
+    // Confidence điều chỉnh
     if (this.recentPreds.length >= 3) {
       const last3 = this.recentPreds.slice(-3);
-      if (last3.every(p => !p.correct)) conf -= 14;
-      else if (last3.filter(p => !p.correct).length >= 2) conf -= 7;
+      if (last3.every(p => !p.correct)) conf -= 16;
+      else if (last3.filter(p => !p.correct).length >= 2) conf -= 9;
     }
-    if (this.recentPreds.length >= 4) {
-      const last4 = this.recentPreds.slice(-4);
-      if (last4.every(p => p.correct)) conf += 6;
-    }
+    if (streak >= 5) conf = Math.min(conf, 68);
+    if (samePredStreak >= 4) conf = Math.min(conf, 64);
 
-    if (n < 15) conf = Math.min(conf, 68);
-    if (n < 25) conf = Math.min(conf, 78);
+    if (n < 15) conf = Math.min(conf, 66);
+    if (n < 25) conf = Math.min(conf, 76);
 
-    conf = Math.max(53, Math.min(96, Math.round(conf)));
+    conf = Math.max(52, Math.min(92, Math.round(conf)));
 
-    if (Math.abs(pT - 0.5) < 0.04 && streak >= 4) {
+    // Borderline + cầu dài → đảo
+    if (Math.abs(pT - 0.5) < 0.08 && streak >= 3) {
       side = last === 'T' ? 'X' : 'T';
-      conf = Math.min(conf, 61);
+      conf = Math.min(conf, 60);
     }
 
     const vi = this._pickVi(side);
@@ -420,7 +512,7 @@ class Engine {
 
 /* ═══════════════ FEEDS & POLLING ═══════════════ */
 const FEEDS = {};
-for (const g of games) FEEDS[g.id] = { id: g.id, engine: new Engine(g.id), lastSession: null, lastLive: null, lastError: null, lastPred: null };
+for (const g of games) FEEDS[g.id] = { id: g.id, engine: new Engine(g.id), lastSession: null, lastLive: null, lastError: null, lastPred: null, lastAi: null, lastAiSession: null };
 
 function parseHistoryArray(json) {
   if (!json) return [];
@@ -493,7 +585,16 @@ async function pollGame(g) {
         f.lastSession = live.session; f.lastLive = live; added++;
       }
     }
-    if (added > 0 || !f.lastPred) f.lastPred = f.engine.predict();
+    if (added > 0 || !f.lastPred) {
+      f.lastPred = f.engine.predict();
+      // DeepSeek phân tích khi có phiên mới
+      if (added > 0 && f.lastLive && f.lastAiSession !== f.lastLive.session) {
+        f.lastAiSession = f.lastLive.session;
+        deepseekAnalyze(f.engine.history, f.lastPred, g.brandLabel + ' ' + g.variant)
+          .then(ai => { if (ai) f.lastAi = ai; })
+          .catch(() => {});
+      }
+    }
     f.lastError = null;
   } catch (e) { f.lastError = e.message; }
 }
@@ -678,7 +779,7 @@ function btnUrl(text, url, style) { return { text, url, style }; }
 async function showUserMenu(chatId, from) {
   const uid = uidOf(from);
   const v = vipText(uid);
-  const text = `🔥 <b>TOOL HTUNGG v15.8</b>\n<i>Soi cầu Tài Xỉu real-time</i>\n\n👤 <b>${esc(displayName(from))}</b>\n🆔 <code>${uid}</code>\n💎 ${v.line}\n⏳ ${v.expire}\n\n👇 Chọn chức năng:`;
+  const text = `🔥 <b>TOOL HTUNG BOT</b>\n<i>Soi cầu Tài Xỉu • MD5 • Sicbo</i>\n\n👤 <b>${esc(displayName(from))}</b>\n🆔 <code>${uid}</code>\n💎 ${v.line}\n⏳ ${v.expire}\n\n👇 Chọn chức năng:`;
 
   const rows = [
     [btn('🎯 VÀO SOI CẦU NGAY', 'pred:brands', 'primary')],
@@ -693,7 +794,7 @@ async function showBrandMenu(chatId) {
   const brands = [
     ['sunwin', 'Sunwin'], ['789club', '789 Club'], ['b52', 'B52'], ['hitclub', 'Hitclub'],
     ['xocdia88', 'Xóc Đĩa 88'], ['max789', 'Max789'], ['lc79', 'LC79'], ['betvip', 'Betvip'],
-    ['sumclub', 'Sumclub'], ['luck8', 'Luck8'], ['tik88', 'TIK88'], ['68gb', '68GB Bàn Xanh']
+    ['sumclub', 'Sumclub']
   ];
   const rows = []; let row = [];
   for (let i = 0; i < brands.length; i++) {
@@ -726,6 +827,11 @@ async function pushPredCard(chatId, gameId, uid, fromAuto) {
   if (!isVip(uid)) return send(chatId, '🔒 Cần VIP.');
   const g = games.find(x => x.id === gameId), f = FEEDS[gameId];
   if (!g || !f || !f.lastPred) return;
+  // Thống kê sử dụng
+  const u = ensureUser(uid);
+  u.predCount = (u.predCount || 0) + 1;
+  u.lastActive = Date.now();
+  if (!fromAuto) saveUsers();
   const p = f.lastPred;
   const live = f.lastLive || {};
   const acc = f.engine.accuracy();
@@ -743,8 +849,12 @@ async function pushPredCard(chatId, gameId, uid, fromAuto) {
   }
 
   const sideTxt = p.side === 'T' ? '🔴 TÀI' : '🔵 XỈU';
-  const viTxt = (p.vi && Array.isArray(p.vi)) ? p.vi.join('-') : '—';
-  const text = `${fromAuto ? '🔄 <i>Auto update...</i>\n' : ''}<b>${g.brandLabel} • ${g.variant}</b>\n━━━━━━━━━━━━━━━\n${prevLine}📦 Phiên mới: <code>#${nextSess}</code>\n🎯 Dự đoán: <b>${sideTxt}</b>\n🎲 Vị: <b>${viTxt}</b>\n📊 Độ tin: <b>${p.conf}%</b>\n━━━━━━━━━━━━━━━\n📊 Cầu: ${cauStr(f.engine.history, 20, g) || '—'}\n📈 Chuẩn: <b>${acc}%</b> (${f.engine.correct}/${f.engine.total})`;
+  const isSicbo = isSicboGame(g);
+  const viLine = (isSicbo && p.vi && Array.isArray(p.vi))
+    ? `\n🎲 Vị: <b>${p.vi.join('-')}</b>`
+    : '';
+  const aiLine = f.lastAi ? `\n🤖 AI: <i>${esc(f.lastAi)}</i>` : '';
+  const text = `${fromAuto ? '🔄 <i>Auto update...</i>\n' : ''}<b>${g.brandLabel} • ${g.variant}</b>\n━━━━━━━━━━━━━━━\n${prevLine}📦 Phiên mới: <code>#${nextSess}</code>\n🎯 Dự đoán: <b>${sideTxt}</b>${viLine}\n📊 Độ tin: <b>${p.conf}%</b>${aiLine}\n━━━━━━━━━━━━━━━\n📊 Cầu: ${cauStr(f.engine.history, 20, g) || '—'}\n📈 Chuẩn: <b>${acc}%</b> (${f.engine.correct}/${f.engine.total})`;
 
   const rows = [
     [btn('🔄 LÀM MỚI', 'pred:' + gameId, 'success'), btn('📜 LỊCH SỬ', 'predhist:' + gameId, 'primary')],
@@ -797,10 +907,46 @@ async function showHashTool(chatId) {
   kb([[btn('🏠 THOÁT TOOL HASH', 'menu', 'danger')]]));
 }
 
+function revokeVip(uid) {
+  const u = ensureUser(uid);
+  u.vipUntil = 0;
+  saveUsers();
+}
+
 async function showAdmin(chatId) {
-  const activeVip = Object.values(users).filter(u => u.vipUntil > Date.now()).length;
-  return send(chatId, `🛠 <b>BẢNG ĐIỀU KHIỂN ADMIN</b>\n\n👥 <b>Tổng users:</b> ${Object.keys(users).length}\n💎 <b>VIP active:</b> ${activeVip}\n🤖 <b>LC79 active:</b> ${Object.keys(LC79.sessions).length}\n\n💡 <i>Cấp quyền:</i> <code>/grant ID Số_Giờ</code>`,
-  kb([[btn('👤 VỀ MENU USER', 'menu', 'danger')]]));
+  const now = Date.now();
+  const allIds = Object.keys(users);
+  const activeVip = allIds.filter(id => Number(users[id].vipUntil || 0) > now);
+  const expired = allIds.filter(id => Number(users[id].vipUntil || 0) <= now);
+
+  let lines = [];
+  lines.push(`🛠 <b>TOOL HTUNG BOT — ADMIN</b>`);
+  lines.push(`━━━━━━━━━━━━━━━`);
+  lines.push(`👥 Tổng users: <b>${allIds.length}</b>`);
+  lines.push(`💎 VIP đang active: <b>${activeVip.length}</b>`);
+  lines.push(`🔒 Hết hạn / chưa VIP: <b>${expired.length}</b>`);
+  lines.push(`━━━━━━━━━━━━━━━`);
+
+  if (activeVip.length) {
+    lines.push(`\n💎 <b>VIP ACTIVE:</b>`);
+    for (const id of activeVip.slice(0, 25)) {
+      const u = users[id];
+      const exp = new Date(u.vipUntil).toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
+      const used = u.predCount || 0;
+      lines.push(`• <code>${id}</code> — dùng ${used} lần — hết: ${exp}`);
+    }
+    if (activeVip.length > 25) lines.push(`… và ${activeVip.length - 25} user nữa`);
+  }
+
+  lines.push(`\n💡 <b>Lệnh admin:</b>`);
+  lines.push(`• Cấp quyền: <code>/grant ID Số_Giờ</code>`);
+  lines.push(`• Thu hồi: <code>/revoke ID</code>`);
+  lines.push(`• Xem 1 user: <code>/user ID</code>`);
+
+  return send(chatId, lines.join('\n'), kb([
+    [btn('🔄 LÀM MỚI', 'adm:home', 'success')],
+    [btn('👤 VỀ MENU USER', 'menu', 'danger')]
+  ]));
 }
 
 /* ═══════════════ CALLBACKS & MESSAGES ═══════════════ */
@@ -855,9 +1001,28 @@ async function onMessage(msg) {
       if (hours > 0) {
         grantVip(targetUid, hours);
         send(chatId, `✅ Đã cấp <b>${hours}h</b> cho user <code>${targetUid}</code>`);
-        send(targetUid, `🎉 <b>CHÚC MỪNG!</b>\nBố mày đã ban phát <b>${hours} giờ VIP</b>.\nHạn dùng: <b>${vipText(targetUid).expire}</b>`);
+        send(targetUid, `🎉 <b>CHÚC MỪNG!</b>\nBạn được cấp <b>${hours} giờ VIP</b> Tool Htung Bot.\nHạn: <b>${vipText(targetUid).expire}</b>`);
       }
     } else send(chatId, '⚠️ Cú pháp: <code>/grant ID Số_Giờ</code>');
+    return;
+  }
+  if (text.startsWith('/revoke ') && isAdmin(uid)) {
+    const targetUid = text.split(/\s+/)[1];
+    if (targetUid) {
+      revokeVip(targetUid);
+      send(chatId, `🔒 Đã thu hồi quyền của <code>${targetUid}</code>`);
+      send(targetUid, `🔒 Quyền sử dụng Tool Htung Bot của bạn đã bị thu hồi.`);
+    } else send(chatId, '⚠️ Cú pháp: <code>/revoke ID</code>');
+    return;
+  }
+  if (text.startsWith('/user ') && isAdmin(uid)) {
+    const targetUid = text.split(/\s+/)[1];
+    if (targetUid) {
+      const u = ensureUser(targetUid);
+      const v = vipText(targetUid);
+      const last = u.lastActive ? new Date(u.lastActive).toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' }) : '—';
+      send(chatId, `👤 <b>USER <code>${targetUid}</code></b>\n💎 ${v.line}\n⏳ ${v.expire}\n📊 Đã dùng dự đoán: <b>${u.predCount || 0}</b> lần\n🕐 Active gần nhất: ${last}`);
+    } else send(chatId, '⚠️ Cú pháp: <code>/user ID</code>');
     return;
   }
 
@@ -932,10 +1097,10 @@ app.post('/reset-learn', (req, res) => {
   res.json({ ok: true });
 });
 
-app.get('/health', (_, res) => res.json({ ok: true, bot: 'HTUNGG v15.8 TX', games: games.length }));
+app.get('/health', (_, res) => res.json({ ok: true, bot: 'Tool Htung Bot v15.9', games: games.length }));
 
 app.listen(PORT, '0.0.0.0', () => {
-  console.log('🔥 TOOL HTUNGG FULL running on port', PORT);
+  console.log('🔥 Tool Htung Bot running on port', PORT);
 });
 
 /* ═══════════════ TELEGRAM POLLING ═══════════════ */
