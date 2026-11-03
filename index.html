@@ -3,18 +3,18 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-<title>Tool Htung Bot</title>
+<title>TOOL TX BY FEE</title>
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=Inter:wght@500;600;700&family=JetBrains+Mono:wght@600;700&display=swap" rel="stylesheet">
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; -webkit-font-smoothing: antialiased; -webkit-tap-highlight-color: transparent; }
   :root {
-    --primary: #0062FF;
-    --primary-dark: #004FCC;
-    --secondary: #00B4FF;
+    --primary: #4F46E5;
+    --primary-dark: #3730A3;
+    --secondary: #06B6D4;
     --text: #0F172A;
     --muted: #64748B;
     --border: #E2E8F0;
-    --bg: #F1F5F9;
+    --bg: #EEF2FF;
     --card: #FFFFFF;
     --ok: #059669;
     --ok-bg: #D1FAE5;
@@ -23,12 +23,15 @@
     --font-h: 'Plus Jakarta Sans', sans-serif;
     --font-b: 'Inter', sans-serif;
     --font-m: 'JetBrains Mono', monospace;
-    --radius: 14px;
-    --shadow: 0 4px 24px rgba(0, 98, 255, 0.08);
+    --radius: 16px;
+    --shadow: 0 8px 30px rgba(79, 70, 229, 0.12);
   }
   body {
     font-family: var(--font-b);
-    background: var(--bg);
+    background:
+      radial-gradient(1200px 600px at 10% -10%, #C7D2FE 0%, transparent 55%),
+      radial-gradient(900px 500px at 100% 0%, #A5F3FC 0%, transparent 50%),
+      var(--bg);
     color: var(--text);
     height: 100vh;
     display: flex;
@@ -39,12 +42,13 @@
 
   /* Header */
   .topbar {
-    background: #fff;
+    background: rgba(255,255,255,0.9);
+    backdrop-filter: blur(12px);
     padding: 12px 16px;
     display: flex;
     justify-content: space-between;
     align-items: center;
-    border-bottom: 1px solid var(--border);
+    border-bottom: 1px solid rgba(226,232,240,0.8);
     z-index: 20;
   }
   .brand { display: flex; align-items: center; gap: 10px; }
@@ -71,13 +75,13 @@
 
   /* Info bar */
   .infobar {
-    background: linear-gradient(135deg, #0062FF, #0090FF);
+    background: linear-gradient(135deg, #4F46E5, #06B6D4);
     color: #fff;
     padding: 14px 16px;
     display: none;
     justify-content: space-between;
     align-items: center;
-    box-shadow: 0 6px 20px rgba(0, 98, 255, 0.22);
+    box-shadow: 0 8px 24px rgba(79, 70, 229, 0.28);
   }
   .infobar.show { display: flex; }
   .game-title { font-family: var(--font-h); font-weight: 800; font-size: 15px; }
@@ -237,7 +241,7 @@
 <div class="overlay" id="modal">
   <div class="modal">
     <div class="modal-head">
-      <h3>Tool Htung Bot</h3>
+      <h3>TOOL TX BY FEE</h3>
       <p>Tài Xỉu • MD5 • Sicbo • Real-time</p>
     </div>
     <div class="game-list" id="game-list">
@@ -251,8 +255,8 @@
     <div class="brand">
       <div class="logo">TX</div>
       <div class="brand-text">
-        <span class="brand-name">Tool Htung Bot</span>
-        <span class="brand-ver">v15.9</span>
+        <span class="brand-name">TOOL TX BY FEE</span>
+        <span class="brand-ver">v16.0</span>
       </div>
     </div>
     <div class="actions">
