@@ -1,5 +1,5 @@
 /**
- * TOOL TX BY FEE — v16.0
+ * TOOL TX BY FEE — v16.2
  * Key access • VietQR pay • Force join • Hash feedback • Admin panel
  */
 'use strict';
@@ -13,17 +13,25 @@ const https = require('https');
 const dns = require('dns');
 const crypto = require('crypto');
 const { io } = require('socket.io-client');
+const multer = require('multer');
 
 try { dns.setDefaultResultOrder('ipv4first'); } catch (e) {}
 
 const ROOT = __dirname;
 const DATA = path.join(ROOT, 'data');
+const STORE_UPLOADS = path.join(DATA, 'kho_files');
 if (!fs.existsSync(DATA)) fs.mkdirSync(DATA, { recursive: true });
+if (!fs.existsSync(STORE_UPLOADS)) fs.mkdirSync(STORE_UPLOADS, { recursive: true });
 
 const PORT = Number(process.env.PORT) || 10000;
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
 const ADMIN_IDS = String(process.env.TELEGRAM_ADMIN_IDS || process.env.ADMIN_IDS || '').split(/[,;\s]+/).map(s => s.trim()).filter(Boolean);
 const PUBLIC_URL = (process.env.PUBLIC_URL || process.env.WEB_URL || '').replace(/\/$/, '');
+const ADMIN_WEB_PASSWORD = String(process.env.ADMIN_WEB_PASSWORD || '');
+const ADMIN_WEB_SECRET = String(process.env.ADMIN_WEB_SECRET || ADMIN_WEB_PASSWORD || BOT_TOKEN || '');
+const STORE_PRICE = 10000;
+const STORE_PRODUCT_NAME = 'FULL SCR AUTOCUOCLC79';
+const STORE_TRANSFER_INFO = 'lc79napvip123';
 const POLL_MS = Number(process.env.POLL_MS || 5000);
 const TRIAL_HOURS = 0; // không dùng trial theo giờ — dùng KEY
 // Bank VietQR
@@ -97,6 +105,8 @@ let users = loadJSON('users.json', {});
 let keysDB = loadJSON('keys.json', {}); // key -> { uid, until, created }
 let codesDB = loadJSON('codes.json', {}); // code -> { hours, maxUses, used, active }
 let orders = loadJSON('orders.json', {}); // orderId -> order
+let storeFiles = loadJSON('store_files.json', {}); // id -> uploaded file metadata
+let storeProduct = loadJSON('store_product.json', { activeFileId: '' });
 let settings = loadJSON('settings.json', {
   support: 'SunNetWin',
   packages: [
@@ -111,11 +121,18 @@ let settings = loadJSON('settings.json', {
 let sessions = {};
 let predMsg = {};
 let autoWatch = {};
+// Hash predictions are keyed by Telegram chat/message so feedback cannot be applied to the wrong code.
+let hashPredictions = loadJSON('hash_predictions.json', {});
+let hashFeedbacks = loadJSON('hash_feedback.json', []);
+function saveHashPredictions() { saveJSON('hash_predictions.json', hashPredictions); }
+function saveHashFeedbacks() { saveJSON('hash_feedback.json', hashFeedbacks); }
 
 function saveUsers() { saveJSON('users.json', users); }
 function saveKeys() { saveJSON('keys.json', keysDB); }
 function saveCodes() { saveJSON('codes.json', codesDB); }
 function saveOrders() { saveJSON('orders.json', orders); }
+function saveStoreFiles() { saveJSON('store_files.json', storeFiles); }
+function saveStoreProduct() { saveJSON('store_product.json', storeProduct); }
 function saveSettings() { saveJSON('settings.json', settings); }
 
 function ensureUser(uid, from) {
@@ -187,7 +204,91 @@ function revokeVip(uid) {
 function vietqrUrl(amount, addInfo) {
   const info = encodeURIComponent(addInfo);
   const name = encodeURIComponent(BANK.name);
-  return `https://img.vietqr.io/image/${BANK.bankCode}-${BANK.account}-compact2.png?amount=${amount}&addInfo=${info}&accountName=${name}`;
+  return `https://img.vietqr.io/image/${BANK.bin}-${BANK.account}-compact2.png?amount=${encodeURIComponent(Math.max(0, Math.round(Number(amount) || 0)))}&addInfo=${info}&accountName=${name}`;
+}
+
+// Download the VietQR PNG ourselves, then upload the bytes to Telegram.
+// This avoids Telegram failing to fetch a remote image URL on its own.
+function downloadImage(url, redirects = 3) {
+  return new Promise((resolve, reject) => {
+    let parsed;
+    try { parsed = new URL(url); } catch { return reject(new Error('URL QR không hợp lệ')); }
+    if (parsed.protocol !== 'https:') return reject(new Error('Nguồn QR không an toàn'));
+    const req = https.get(parsed, { timeout: 18000, family: 4 }, (res) => {
+      const status = Number(res.statusCode || 0);
+      if ([301, 302, 303, 307, 308].includes(status) && res.headers.location && redirects > 0) {
+        res.resume();
+        const next = new URL(res.headers.location, parsed).toString();
+        return resolve(downloadImage(next, redirects - 1));
+      }
+      if (status !== 200) {
+        res.resume();
+        return reject(new Error('Dịch vụ QR trả HTTP ' + status));
+      }
+      const contentType = String(res.headers['content-type'] || '').toLowerCase();
+      if (!contentType.includes('image/')) {
+        res.resume();
+        return reject(new Error('Dịch vụ QR không trả về ảnh (' + (contentType || 'không rõ định dạng') + ')'));
+      }
+      const chunks = [];
+      let size = 0;
+      res.on('data', chunk => {
+        size += chunk.length;
+        if (size > 5 * 1024 * 1024) {
+          req.destroy(new Error('Ảnh QR vượt quá 5 MB'));
+          return;
+        }
+        chunks.push(chunk);
+      });
+      res.on('end', () => {
+        const buffer = Buffer.concat(chunks);
+        if (!buffer.length) return reject(new Error('Ảnh QR rỗng'));
+        resolve({ buffer, contentType: contentType.split(';')[0] || 'image/png' });
+      });
+      res.on('error', reject);
+    });
+    req.on('timeout', () => req.destroy(new Error('Hết thời gian tải ảnh QR')));
+    req.on('error', reject);
+  });
+}
+
+function tgMultipart(method, fields, file) {
+  if (!BOT_TOKEN) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    const boundary = '----ToolTxByFee' + crypto.randomBytes(12).toString('hex');
+    const chunks = [];
+    for (const [name, rawValue] of Object.entries(fields || {})) {
+      if (rawValue === undefined || rawValue === null) continue;
+      const value = typeof rawValue === 'object' ? JSON.stringify(rawValue) : String(rawValue);
+      chunks.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name=\"${name}\"\r\n\r\n${value}\r\n`));
+    }
+    if (file && Buffer.isBuffer(file.buffer)) {
+      const filename = String(file.filename || 'vietqr.png').replace(/[\"\r\n]/g, '');
+      const mime = String(file.contentType || 'image/png').replace(/[\r\n]/g, '');
+      const fieldName = String(file.fieldName || 'photo').replace(/[^a-zA-Z0-9_]/g, '') || 'photo';
+      chunks.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name=\"${fieldName}\"; filename=\"${filename}\"\r\nContent-Type: ${mime}\r\n\r\n`));
+      chunks.push(file.buffer);
+      chunks.push(Buffer.from('\r\n'));
+    }
+    chunks.push(Buffer.from(`--${boundary}--\r\n`));
+    const body = Buffer.concat(chunks);
+    const req = https.request({
+      hostname: 'api.telegram.org', port: 443,
+      path: `/bot${BOT_TOKEN}/${method}`, method: 'POST', family: 4, timeout: (file && file.buffer && file.buffer.length > 1024 * 1024) ? 120000 : 30000,
+      headers: { 'Content-Type': `multipart/form-data; boundary=${boundary}`, 'Content-Length': body.length }
+    }, (res) => {
+      const parts = [];
+      res.on('data', c => parts.push(c));
+      res.on('end', () => {
+        try { resolve(JSON.parse(Buffer.concat(parts).toString('utf8'))); }
+        catch { resolve({ ok: false, description: 'Telegram trả dữ liệu không hợp lệ (HTTP ' + res.statusCode + ')' }); }
+      });
+    });
+    req.on('timeout', () => req.destroy(new Error('Telegram gửi tệp quá thời gian')));
+    req.on('error', (err) => resolve({ ok: false, description: err.message }));
+    req.write(body);
+    req.end();
+  });
 }
 
 async function checkUserInGroups(uid) {
@@ -788,30 +889,154 @@ async function showUserMenu(chatId, from) {
   if (!join.ok) return showForceJoin(chatId, join.missing);
 
   const v = vipText(uid);
-  const uname = from.username ? '@' + from.username : '—';
+  const uname = from.username ? '@' + from.username : 'Chưa đặt username';
+  const display = esc(displayName(from));
+  const accessLine = isAdmin(uid) ? '👑 <b>ADMIN VĨNH VIỄN</b>' : (v.active ? '🟢 <b>ĐANG HOẠT ĐỘNG</b>' : '🔒 <b>CHƯA KÍCH HOẠT KEY</b>');
   const text =
-`╔══════════════════╗
-   🔥 <b>TOOL TX BY FEE</b>
-   <i>TX · MD5 · Sicbo</i>
-╚══════════════════╝
+`╭━━━━━━━━━━━━━━━━━━━━╮
+       🔥 <b>TOOL TX BY FEE</b>
+       <i>SMART GAME TOOL • v16.2</i>
+╰━━━━━━━━━━━━━━━━━━━━╯
 
-👤 <b>${esc(displayName(from))}</b>
-🆔 <code>${uid}</code>
-🔗 ${esc(uname)}
-${v.line}
-${v.expire}
+👤 <b>TÀI KHOẢN CỦA BẠN</b>
+├ Tên: <b>${display}</b>
+├ ID: <code>${uid}</code>
+├ Telegram: ${esc(uname)}
+├ Trạng thái: ${accessLine}
+└ Thời hạn: <b>${esc(v.expire.replace(/^.*?: /, ''))}</b>
 
-👇 Chọn chức năng:`;
+┌── 🧰 <b>TRUNG TÂM CÔNG CỤ</b>
+├ 🎮 ALL GAME: TX • MD5 • SICBO
+├ 🧩 HASH LAB: MD5 • SHA-256
+├ 📡 Cập nhật dữ liệu và lịch sử phiên
+├ 📦 KHO FILE: FULL SCR AUTOCUOCLC79\n└ 🔐 Quản lý KEY / CODE / gói thuê
+
+👇 <b>CHỌN CHỨC NĂNG BÊN DƯỚI</b>`;
 
   const rows = [
     [btn('🚀 VÀO TOOL ALL GAME', 'pred:brands', 'primary')],
-    [btn('🔑 NHẬP KEY', 'key:input', 'success'), btn('🎫 NHẬP CODE', 'code:input', 'success')],
-    [btn('💳 THUÊ TOOL', 'rent:menu', 'primary')],
-    [btn('🧩 TOOL HASH', 'hash:start', 'success')],
-    [btn('💬 SUPPORT', 'support:go', 'primary'), btn('⭐ FEEDBACK', 'fb:start', 'success')]
+    [btn('🧩 TOOL HASH', 'hash:start', 'success'), btn('📦 KHO FILE', 'store:open', 'primary')],
+    [btn('💳 THUÊ TOOL', 'rent:menu', 'primary'), btn('🔑 NHẬP KEY', 'key:input', 'success')],
+    [btn('🎫 NHẬP CODE', 'code:input', 'success'), btn('💬 SUPPORT', 'support:go', 'primary')],
+    [btn('⭐ FEEDBACK', 'fb:start', 'success')]
   ];
-  if (isAdmin(uid)) rows.push([btn('🛠 ADMIN PANEL', 'adm:home', 'danger')]);
   return send(chatId, text, kb(rows));
+}
+
+async function showFileStore(chatId) {
+  const file = storeFiles[String(storeProduct.activeFileId || '')];
+  if (!file || !fs.existsSync(path.join(STORE_UPLOADS, file.storedName))) {
+    return send(chatId, '📦 <b>KHO FILE</b>\n\nHiện admin chưa tải file sản phẩm lên kho. Vui lòng quay lại sau hoặc liên hệ hỗ trợ.', kb([
+      [btn('◀️ QUAY LẠI MENU', 'menu', 'danger')]
+    ]));
+  }
+  const sizeMb = (Number(file.size || 0) / (1024 * 1024)).toFixed(2);
+  return send(chatId, `📦 <b>KHO FILE PREMIUM</b>\n\n🧾 Sản phẩm: <b>${esc(STORE_PRODUCT_NAME)}</b>\n💰 Giá: <b>${fmt(STORE_PRICE)}đ</b>\n📁 Tệp: <b>${esc(file.originalName)}</b>\n📏 Dung lượng: <b>${sizeMb} MB</b>\n\nSau khi thanh toán thành công, bot sẽ tự động gửi file vào cuộc trò chuyện này.`, kb([
+    [btn('💳 MUA NGAY — 10.000đ', 'store:confirm', 'success')],
+    [btn('◀️ QUAY LẠI MENU', 'menu', 'danger')]
+  ]));
+}
+
+async function createFileOrder(chatId, uid) {
+  const file = storeFiles[String(storeProduct.activeFileId || '')];
+  if (!file || !fs.existsSync(path.join(STORE_UPLOADS, file.storedName))) {
+    return send(chatId, '⚠️ Kho file chưa có tệp đang bán. Vui lòng liên hệ admin.', kb([[btn('◀️ QUAY LẠI', 'store:open', 'primary')]]));
+  }
+  const orderId = 'F' + Date.now().toString(36).toUpperCase() + String(uid).slice(-4);
+  const addInfo = STORE_TRANSFER_INFO;
+  const qr = vietqrUrl(STORE_PRICE, addInfo);
+  orders[orderId] = {
+    id: orderId, type: 'file', product: STORE_PRODUCT_NAME, uid: String(uid),
+    fileId: String(file.id), amount: STORE_PRICE, addInfo,
+    status: 'pending', created: Date.now(), expire: Date.now() + 30 * 60 * 1000
+  };
+  saveOrders();
+  const caption = `📦 <b>ĐƠN MUA KHO FILE</b>\n\n🧾 ${esc(STORE_PRODUCT_NAME)}\n💰 <b>${fmt(STORE_PRICE)}đ</b>\n🏦 TPBank • <code>${BANK.account}</code>\n👤 ${esc(BANK.name)}\n📝 Nội dung chuyển khoản: <code>${addInfo}</code>\n⏳ Đơn có hiệu lực 30 phút.\n\nQuét QR và chuyển đúng số tiền, đúng nội dung. Sau khi chuyển khoản, bấm <b>TÔI ĐÃ CHUYỂN</b>. Admin sẽ xác nhận và bot gửi file cho bạn.`,
+    replyMarkup = { inline_keyboard: [
+      [{ text: '✅ TÔI ĐÃ CHUYỂN', callback_data: 'store:done:' + orderId }],
+      [{ text: '🗑 HUỶ ĐƠN', callback_data: 'store:cancel:' + orderId }],
+      [{ text: '◀️ QUAY LẠI', callback_data: 'store:open' }]
+    ] };
+  try {
+    const image = await downloadImage(qr);
+    const sent = await tgMultipart('sendPhoto', {
+      chat_id: chatId, caption, parse_mode: 'HTML', reply_markup: replyMarkup
+    }, { buffer: image.buffer, contentType: image.contentType, filename: 'qr-' + orderId + '.png' });
+    if (sent && sent.ok) return sent;
+    throw new Error((sent && sent.description) || 'Telegram không nhận ảnh QR');
+  } catch (err) {
+    console.error('[STORE QR]', err.message);
+    return send(chatId, `⚠️ <b>KHÔNG TẢI ĐƯỢC ẢNH QR TỰ ĐỘNG</b>\n\n🧾 ${esc(STORE_PRODUCT_NAME)}\n💰 <b>${fmt(STORE_PRICE)}đ</b>\n🏦 TPBank: <code>${BANK.account}</code>\n👤 ${esc(BANK.name)}\n📝 Nội dung: <code>${addInfo}</code>\n<a href="${esc(qr)}">MỞ MÃ QR VIETQR</a>\n\n${esc(err.message)}\nSau khi chuyển khoản bấm TÔI ĐÃ CHUYỂN.`, { reply_markup: replyMarkup, disable_web_page_preview: false });
+  }
+}
+
+async function markFileOrderDone(chatId, uid, orderId) {
+  const order = orders[orderId];
+  if (!order || order.type !== 'file' || order.uid !== String(uid)) return send(chatId, '❌ Đơn hàng không hợp lệ.');
+  if (order.status === 'paid') return send(chatId, '✅ Đơn này đã được xác nhận và file đã gửi.');
+  if (order.status === 'checking') return send(chatId, '⏳ Đơn đang chờ admin xác nhận. Bot sẽ gửi file ngay khi được duyệt.');
+  if (order.status !== 'pending' || (order.expire && Date.now() > order.expire)) return send(chatId, '⌛ Đơn đã hết hạn hoặc đã huỷ. Hãy tạo đơn mới tại KHO FILE.');
+  order.status = 'checking';
+  order.checkAt = Date.now();
+  saveOrders();
+  await send(chatId, `⏳ <b>ĐÃ GỬI YÊU CẦU XÁC NHẬN</b>\n\nĐơn: <code>${orderId}</code>\nSản phẩm: <b>${esc(STORE_PRODUCT_NAME)}</b>\nSố tiền: <b>${fmt(STORE_PRICE)}đ</b>\n\nAdmin sẽ kiểm tra giao dịch. Khi được xác nhận, bot tự động gửi file cho bạn.`, kb([[btn('📦 XEM KHO FILE', 'store:open', 'primary'), btn('🏠 MENU', 'menu', 'success')]]));
+  for (const adminId of ADMIN_IDS) {
+    await send(adminId, `🔔 <b>CÓ ĐƠN KHO FILE CHỜ DUYỆT</b>\n\nĐơn: <code>${orderId}</code>\nUser: <code>${order.uid}</code>\nSản phẩm: ${esc(STORE_PRODUCT_NAME)}\nSố tiền: <b>${fmt(order.amount)}đ</b>\nNội dung CK: <code>${esc(order.addInfo)}</code>`, kb([
+      [btn('✅ XÁC NHẬN ĐÃ NHẬN TIỀN', 'store:approve:' + orderId, 'success')],
+      [btn('❌ TỪ CHỐI ĐƠN', 'store:reject:' + orderId, 'danger')]
+    ]));
+  }
+  return true;
+}
+
+async function approveFileOrder(orderId, adminId, webAuthorized = false) {
+  if (!webAuthorized && !isAdmin(adminId)) return { ok: false, message: 'Không có quyền admin.' };
+  const order = orders[orderId];
+  if (!order || order.type !== 'file') return { ok: false, message: 'Không tìm thấy đơn kho file.' };
+  if (order.status === 'paid') return { ok: true, already: true, message: 'Đơn đã được giao file trước đó.' };
+  if (!['pending', 'checking'].includes(order.status)) return { ok: false, message: 'Đơn không ở trạng thái chờ xử lý.' };
+  const file = storeFiles[String(order.fileId || '')];
+  if (!file) return { ok: false, message: 'File của đơn đã bị xoá khỏi kho.' };
+  const filePath = path.join(STORE_UPLOADS, file.storedName);
+  if (!fs.existsSync(filePath)) return { ok: false, message: 'Không tìm thấy dữ liệu file trên máy chủ.' };
+  const size = fs.statSync(filePath).size;
+  if (size > 49 * 1024 * 1024) return { ok: false, message: 'File vượt giới hạn gửi Telegram (49 MB).' };
+  order.status = 'delivering';
+  order.approvedBy = String(adminId);
+  order.approvedAt = Date.now();
+  saveOrders();
+  const buffer = fs.readFileSync(filePath);
+  const sent = await tgMultipart('sendDocument', {
+    chat_id: order.uid,
+    caption: `✅ <b>THANH TOÁN ĐÃ ĐƯỢC XÁC NHẬN</b>\n\n📦 ${esc(STORE_PRODUCT_NAME)}\n🧾 Đơn: <code>${orderId}</code>\nCảm ơn bạn đã mua hàng!`,
+    parse_mode: 'HTML'
+  }, { buffer, filename: file.originalName || 'file', contentType: file.mimeType || 'application/octet-stream', fieldName: 'document' });
+  if (!sent || !sent.ok) {
+    order.status = 'checking';
+    order.deliveryError = (sent && sent.description) || 'Không gửi được file qua Telegram';
+    saveOrders();
+    return { ok: false, message: order.deliveryError };
+  }
+  order.status = 'paid';
+  order.paidAt = Date.now();
+  order.deliveredAt = Date.now();
+  order.deliveredMessageId = sent.result && sent.result.message_id;
+  delete order.deliveryError;
+  saveOrders();
+  return { ok: true, message: `Đã xác nhận và gửi file đến user ${order.uid}.` };
+}
+
+async function rejectFileOrder(orderId, adminId, reason = 'Giao dịch chưa được xác nhận', webAuthorized = false) {
+  if (!webAuthorized && !isAdmin(adminId)) return { ok: false, message: 'Không có quyền admin.' };
+  const order = orders[orderId];
+  if (!order || order.type !== 'file') return { ok: false, message: 'Không tìm thấy đơn kho file.' };
+  if (order.status === 'paid') return { ok: false, message: 'Đơn đã thanh toán và file đã gửi, không thể từ chối.' };
+  order.status = 'rejected';
+  order.rejectedAt = Date.now();
+  order.rejectedBy = String(adminId);
+  saveOrders();
+  await send(order.uid, `❌ <b>ĐƠN KHO FILE CHƯA ĐƯỢC DUYỆT</b>\nĐơn: <code>${orderId}</code>\nLý do: ${esc(reason)}\nNếu bạn đã chuyển tiền, vui lòng liên hệ admin để đối chiếu.`);
+  return { ok: true, message: 'Đã từ chối đơn và thông báo người mua.' };
 }
 
 async function showRentMenu(chatId) {
@@ -841,20 +1066,33 @@ async function createRentOrder(chatId, uid, pkgId) {
     addInfo, status: 'pending', created: Date.now(), expire: Date.now() + 10 * 60 * 1000
   };
   saveOrders();
-  const caption = `💳 <b>ĐƠN HÀNG ${orderId}</b>\n\n🏦 TPBank • <code>${BANK.account}</code>\n👤 ${BANK.name}\n💰 <b>${Number(pkg.amount).toLocaleString('vi-VN')}đ</b>\n📝 ND: <code>${addInfo}</code>\n⏳ Hết hạn đơn: 10 phút\n\nSau khi chuyển khoản bấm <b>DONE</b>.\nHệ thống đang check xử lí giao dịch vui lòng đợi trong vài phút.`;
-  await tg('sendPhoto', {
-    chat_id: chatId,
-    photo: qr,
-    caption,
-    parse_mode: 'HTML',
-    reply_markup: {
-      inline_keyboard: [
-        [{ text: '✅ DONE', callback_data: 'rent:done:' + orderId, style: 'success' },
-         { text: '🗑 HUỶ ĐƠN', callback_data: 'rent:cancel:' + orderId, style: 'danger' }],
-        [{ text: '◀️ QUAY LẠI', callback_data: 'rent:menu', style: 'primary' }]
-      ]
-    }
-  });
+  const caption = `💳 <b>ĐƠN HÀNG ${orderId}</b>\n\n🏦 TPBank • <code>${BANK.account}</code>\n👤 ${BANK.name}\n💰 <b>${Number(pkg.amount).toLocaleString('vi-VN')}đ</b>\n📝 ND: <code>${addInfo}</code>\n⏳ Hết hạn đơn: 10 phút\n\nQuét mã QR bằng ứng dụng ngân hàng, kiểm tra đúng số tiền và nội dung chuyển khoản. Sau khi chuyển khoản bấm <b>DONE</b>.`;
+  const replyMarkup = {
+    inline_keyboard: [
+      [{ text: '✅ DONE', callback_data: 'rent:done:' + orderId },
+       { text: '🗑 HUỶ ĐƠN', callback_data: 'rent:cancel:' + orderId }],
+      [{ text: '◀️ QUAY LẠI', callback_data: 'rent:menu' }]
+    ]
+  };
+
+  try {
+    const image = await downloadImage(qr);
+    const sent = await tgMultipart('sendPhoto', {
+      chat_id: chatId,
+      caption,
+      parse_mode: 'HTML',
+      reply_markup: replyMarkup
+    }, { buffer: image.buffer, contentType: image.contentType, filename: 'vietqr-' + orderId + '.png' });
+    if (sent && sent.ok) return sent;
+    throw new Error((sent && sent.description) || 'Telegram không nhận ảnh QR');
+  } catch (err) {
+    console.error('[QR] Không gửi được mã QR:', err.message);
+    // Keep the order usable and expose a clear fallback rather than silently failing.
+    return send(chatId, `⚠️ <b>CHƯA GỬI ĐƯỢC ẢNH QR TỰ ĐỘNG</b>\n\n💳 <b>ĐƠN HÀNG ${orderId}</b>\n🏦 TPBank: <code>${BANK.account}</code>\n👤 ${BANK.name}\n💰 <b>${Number(pkg.amount).toLocaleString('vi-VN')}đ</b>\n📝 Nội dung: <code>${addInfo}</code>\n\n<a href=\"${esc(qr)}\">MỞ MÃ QR VIETQR</a>\n\n${esc(err.message)}\nBạn vẫn có thể thanh toán theo thông tin trên rồi bấm DONE.`, {
+      reply_markup: replyMarkup,
+      disable_web_page_preview: false
+    });
+  }
 }
 
 async function markOrderDone(chatId, uid, orderId) {
@@ -882,7 +1120,7 @@ function tryMatchPayment(text) {
   if (!mAmount) return null;
   const amount = Number(String(mAmount[1]).replace(/[.,]/g, ''));
   if (!amount) return null;
-  const nd = (text.match(/ND:\s*([^\n|]+)/i) || text.match(/Napas(\d+)/i) || [])[1] || '';
+  const nd = (text.match(/(?:ND|Nội dung(?: chuyển khoản)?|Description|Transfer content)\s*[:=]\s*([^\n|]+)/i) || text.match(/Napas(\d+)/i) || [])[1] || ''; 
   const uidMatch = String(nd).match(/(\d{6,})/);
   return { amount, nd: String(nd).trim(), uid: uidMatch ? uidMatch[1] : null };
 }
@@ -894,9 +1132,16 @@ async function onBankMessage(msg) {
   const parsed = tryMatchPayment(text);
   if (!parsed) return;
   const now = Date.now();
+  // Nội dung chuyển khoản kho file là chuỗi cố định, không định danh được người gửi.
+  // Chỉ cảnh báo admin; tuyệt đối không tự giao file khi chưa đối chiếu giao dịch thực nhận.
+  if (String(parsed.nd || '').toLowerCase().replace(/\s+/g, '').includes(STORE_TRANSFER_INFO.toLowerCase()) && Number(parsed.amount) === STORE_PRICE) {
+    const matches = Object.values(orders).filter(o => o && o.type === 'file' && ['pending', 'checking'].includes(o.status) && Number(o.amount) === STORE_PRICE && (!o.expire || now <= o.expire + 5 * 60 * 1000));
+    for (const aid of ADMIN_IDS) await send(aid, `🏦 <b>CÓ BIẾN ĐỘNG KHỚP NỘI DUNG KHO FILE</b>\nSố tiền: <b>${fmt(parsed.amount)}đ</b>\nNội dung: <code>${STORE_TRANSFER_INFO}</code>\nĐơn đang chờ: <b>${matches.length}</b>\nVui lòng tự đối chiếu người chuyển và duyệt trong trang admin. Bot không tự gửi file từ thông báo này.`);
+    return;
+  }
   for (const id of Object.keys(orders)) {
     const o = orders[id];
-    if (!o || (o.status !== 'pending' && o.status !== 'checking')) continue;
+    if (!o || o.type === 'file' || (o.status !== 'pending' && o.status !== 'checking')) continue;
     if (o.expire && now > o.expire + 5 * 60 * 1000) continue;
     if (Number(o.amount) !== Number(parsed.amount)) continue;
     if (parsed.uid && String(o.uid) !== String(parsed.uid)) continue;
@@ -1047,8 +1292,8 @@ async function showLc79Menu(chatId, uid) {
 }
 
 async function showHashTool(chatId) {
-  return send(chatId, `🧩 <b>TOOL HASH MD5/SHA256</b> 🧩\n\n😎 Bố mày sẽ đọc mã Hash của mày và phân tích xem nên đập Tài hay Xỉu.\n\n👉 <i>Hãy nhắn (gửi) mã Hash vào đây:</i>\n(MD5 dài 32 ký tự, SHA256 dài 64 ký tự)\n\n💡 Gửi liên tục nhiều mã đều được, không cần bấm nút!`,
-  kb([[btn('✅ ĐÚNG', 'hash:ok', 'success'), btn('❌ SAI', 'hash:bad', 'danger')], [btn('🏠 THOÁT', 'menu', 'danger')]]));
+  return send(chatId, `╭━━ 🧩 <b>HASH LAB</b> ━━╮\n\n🔐 <b>Phân tích mã MD5 / SHA-256</b>\n\n📌 Gửi mã hash dạng ký tự hex: \n├ MD5: 32 ký tự\n└ SHA-256: 64 ký tự\n\n💡 Sau khi nhận mã hợp lệ, bot mới hiển thị kết quả và nút xác nhận ĐÚNG / SAI.\n\n👇 <i>Gửi mã hash của bạn ngay tại đây.</i>`,
+  kb([[btn('🏠 THOÁT VỀ MENU', 'menu', 'danger')]]));
 }
 
 function revokeVip(uid) {
@@ -1104,6 +1349,32 @@ async function onCallback(cq) {
     return showHashTool(chatId);
   }
   if (data === 'adm:home' && isAdmin(uid)) return showAdmin(chatId);
+  if (data === 'store:open') return showFileStore(chatId);
+  if (data === 'store:confirm') {
+    const active = storeFiles[String(storeProduct.activeFileId || '')];
+    if (!active || !fs.existsSync(path.join(STORE_UPLOADS, active.storedName))) return showFileStore(chatId);
+    return send(chatId, `🛒 <b>XÁC NHẬN MUA KHO FILE</b>\n\n📦 ${esc(STORE_PRODUCT_NAME)}\n💰 Giá: <b>${fmt(STORE_PRICE)}đ</b>\n📝 Nội dung chuyển khoản: <code>${STORE_TRANSFER_INFO}</code>\n\nSau khi thanh toán và admin xác nhận, bot gửi file trực tiếp cho bạn.`, kb([
+      [btn('✅ TẠO MÃ QR THANH TOÁN', 'store:buy', 'success')],
+      [btn('◀️ QUAY LẠI', 'store:open', 'danger')]
+    ]));
+  }
+  if (data === 'store:buy') return createFileOrder(chatId, uid);
+  if (data.startsWith('store:done:')) return markFileOrderDone(chatId, uid, data.slice(11));
+  if (data.startsWith('store:cancel:')) {
+    const oid = data.slice(13), order = orders[oid];
+    if (order && order.type === 'file' && order.uid === String(uid) && order.status === 'pending') { order.status = 'cancelled'; saveOrders(); }
+    return send(chatId, '🗑 Đã huỷ đơn kho file.', kb([[btn('📦 KHO FILE', 'store:open', 'primary'), btn('🏠 MENU', 'menu', 'success')]]));
+  }
+  if (data.startsWith('store:approve:')) {
+    if (!isAdmin(uid)) return send(chatId, '⛔ Bạn không có quyền.');
+    const result = await approveFileOrder(data.slice(14), uid);
+    return send(chatId, (result.ok ? '✅ ' : '❌ ') + esc(result.message));
+  }
+  if (data.startsWith('store:reject:')) {
+    if (!isAdmin(uid)) return send(chatId, '⛔ Bạn không có quyền.');
+    const result = await rejectFileOrder(data.slice(13), uid);
+    return send(chatId, (result.ok ? '✅ ' : '❌ ') + esc(result.message));
+  }
   if (data === 'pred:brands') { stopAuto(uid); return showBrandMenu(chatId); }
   if (data.startsWith('predbrand:')) { stopAuto(uid); return showTables(chatId, data.slice(10), uid); }
   if (data.startsWith('predhist:')) return exportHistory(chatId, data.slice(9));
@@ -1171,9 +1442,30 @@ async function onCallback(cq) {
     return send(chatId, 'Cảm Ơn Quý Khách Đã Gửi Feedback Tới Admin\nChúc Bạn Chơi Vui Vẻ Thắng Lớn DCM bạn!!', kb([[btn('🏠 MENU', 'menu', 'primary')]]));
   }
   if (data === 'hash:ok' || data === 'hash:bad') {
-    // feedback để cải thiện — không bắt buộc
+    const predictionKey = `${chatId}:${msgId}`;
+    const prediction = hashPredictions[predictionKey];
+    if (!prediction || prediction.uid !== String(uid)) {
+      return send(chatId, '⚠️ Kết quả này không còn ở trạng thái chờ xác nhận. Hãy gửi mã hash mới để phân tích.');
+    }
+    delete hashPredictions[predictionKey];
+    saveHashPredictions();
+    const isCorrect = data === 'hash:ok';
+    hashFeedbacks.push({
+      uid: String(uid), hash: prediction.hash, type: prediction.type,
+      prediction: prediction.side, confidence: prediction.conf,
+      feedback: isCorrect ? 'correct' : 'incorrect', createdAt: Date.now()
+    });
+    if (hashFeedbacks.length > 1000) hashFeedbacks = hashFeedbacks.slice(-1000);
+    saveHashFeedbacks();
     sessions[uid] = { await: 'hash_input' };
-    return send(chatId, data === 'hash:ok' ? '✅ Đã ghi nhận ĐÚNG. Gửi mã tiếp:' : '❌ Đã ghi nhận SAI. Gửi mã tiếp:', kb([[btn('🏠 THOÁT', 'menu', 'danger')]]));
+    return send(chatId, isCorrect
+      ? '✅ <b>ĐÃ GHI NHẬN: DỰ ĐOÁN ĐÚNG</b>\nGửi mã hash tiếp theo để phân tích.'
+      : '❌ <b>ĐÃ GHI NHẬN: DỰ ĐOÁN SAI</b>\nGửi mã hash tiếp theo để phân tích.',
+      kb([[btn('🧩 PHÂN TÍCH MÃ TIẾP', 'hash:again', 'success')], [btn('🏠 THOÁT', 'menu', 'danger')]]));
+  }
+  if (data === 'hash:again') {
+    sessions[uid] = { await: 'hash_input' };
+    return showHashTool(chatId);
   }
 
   if (data.startsWith('pred:')) {
@@ -1364,8 +1656,22 @@ async function onMessage(msg) {
       const sideIcon = pred.side === 'T' ? '🔴' : '🔵';
       const filled = Math.max(0, Math.min(10, Math.round((pred.conf || 52) / 10)));
       const bar = '█'.repeat(filled) + '░'.repeat(10 - filled);
-      return send(chatId, `🧩 <b>KẾT QUẢ PHÂN TÍCH ${type}</b>\n\n🔑 <b>Hash:</b> <code>${esc(hashStr)}</code>\n\n🎯 <b>DỰ ĐOÁN:</b> ${sideIcon} <b>${sideTxt}</b>\n⚡ <b>Tỉ lệ nổ:</b> <b>${pred.conf}%</b>\n<code>${bar}</code>\n💡 <b>Phân tích:</b> ${esc(pred.reason)}\n\n👇 <i>Gửi tiếp mã mới để phân tích tiếp:</i>`,
-      kb([[btn('✅ ĐÚNG', 'hash:ok', 'success'), btn('❌ SAI', 'hash:bad', 'danger')], [btn('🏠 THOÁT', 'menu', 'danger')]]));
+      const sent = await send(chatId, `🧩 <b>KẾT QUẢ PHÂN TÍCH ${type}</b>\n\n🔑 <b>Hash:</b> <code>${esc(hashStr)}</code>\n\n🎯 <b>DỰ ĐOÁN:</b> ${sideIcon} <b>${sideTxt}</b>\n⚡ <b>Điểm tham khảo:</b> <b>${pred.conf}%</b>\n<code>${bar}</code>\n💡 <b>Phân tích:</b> ${esc(pred.reason)}\n\n👇 <i>Xác nhận kết quả dự đoán bên dưới:</i>`,
+      kb([[btn('✅ DỰ ĐOÁN ĐÚNG', 'hash:ok', 'success'), btn('❌ DỰ ĐOÁN SAI', 'hash:bad', 'danger')], [btn('🏠 THOÁT', 'menu', 'danger')]]));
+      if (sent && sent.ok && sent.result && sent.result.message_id) {
+        const predictionKey = `${chatId}:${sent.result.message_id}`;
+        hashPredictions[predictionKey] = {
+          uid: String(uid), hash: hashStr, type, side: pred.side,
+          conf: pred.conf, createdAt: Date.now()
+        };
+        const entries = Object.entries(hashPredictions);
+        if (entries.length > 500) {
+          entries.sort((a, b) => Number(a[1].createdAt || 0) - Number(b[1].createdAt || 0));
+          for (const [key] of entries.slice(0, entries.length - 500)) delete hashPredictions[key];
+        }
+        saveHashPredictions();
+      }
+      return sent;
     }
 
     if (st.await === 'lc79_user' || st.await === 'lc79_pass') {
@@ -1378,13 +1684,119 @@ async function onMessage(msg) {
 /* ═══════════════ WEB SERVER (INDEX Ở NGOÀI) ═══════════════ */
 const app = express();
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '2mb' }));
 
-// Trả file index.html ở thư mục gốc
+function safeCompare(a, b) {
+  const aa = Buffer.from(String(a || ''));
+  const bb = Buffer.from(String(b || ''));
+  return aa.length === bb.length && crypto.timingSafeEqual(aa, bb);
+}
+function createAdminToken() {
+  const payload = Buffer.from(JSON.stringify({ exp: Date.now() + 12 * 60 * 60 * 1000 })).toString('base64url');
+  const sig = crypto.createHmac('sha256', ADMIN_WEB_SECRET).update(payload).digest('base64url');
+  return payload + '.' + sig;
+}
+function validAdminToken(token) {
+  if (!ADMIN_WEB_PASSWORD || !ADMIN_WEB_SECRET || !token || !String(token).includes('.')) return false;
+  const [payload, sig] = String(token).split('.');
+  const expected = crypto.createHmac('sha256', ADMIN_WEB_SECRET).update(payload).digest('base64url');
+  if (!safeCompare(sig, expected)) return false;
+  try { const data = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')); return Number(data.exp) > Date.now(); }
+  catch { return false; }
+}
+function requireWebAdmin(req, res, next) {
+  const token = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+  if (!validAdminToken(token)) return res.status(401).json({ ok: false, error: 'Phiên admin hết hạn hoặc không hợp lệ.' });
+  next();
+}
+const adminLoginAttempts = new Map();
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 45 * 1024 * 1024, files: 1 },
+  fileFilter: (_req, file, cb) => {
+    const name = String(file.originalname || 'file').replace(/[\r\n\0]/g, '').slice(0, 180);
+    file.originalname = name || 'file';
+    cb(null, true);
+  }
+});
+function handleStoreUpload(req, res, next) {
+  upload.single('file')(req, res, err => {
+    if (err) {
+      const message = err.code === 'LIMIT_FILE_SIZE' ? 'File vượt giới hạn 45 MB.' : (err.message || 'Không tải được file.');
+      return res.status(400).json({ ok: false, error: message });
+    }
+    next();
+  });
+}
+
+app.post('/api/admin/login', (req, res) => {
+  if (!ADMIN_WEB_PASSWORD) return res.status(503).json({ ok: false, error: 'Chưa cấu hình ADMIN_WEB_PASSWORD trên máy chủ.' });
+  const ip = String(req.ip || req.socket.remoteAddress || 'unknown');
+  const attempt = adminLoginAttempts.get(ip) || { count: 0, resetAt: Date.now() + 15 * 60 * 1000 };
+  if (Date.now() > attempt.resetAt) { attempt.count = 0; attempt.resetAt = Date.now() + 15 * 60 * 1000; }
+  if (attempt.count >= 8) return res.status(429).json({ ok: false, error: 'Thử quá nhiều lần. Vui lòng đợi 15 phút.' });
+  const password = String((req.body || {}).password || '');
+  if (!safeCompare(password, ADMIN_WEB_PASSWORD)) {
+    attempt.count++; adminLoginAttempts.set(ip, attempt);
+    return res.status(401).json({ ok: false, error: 'Mật khẩu admin không chính xác.' });
+  }
+  adminLoginAttempts.delete(ip);
+  res.json({ ok: true, token: createAdminToken(), expiresIn: 12 * 60 * 60 });
+});
+app.get('/api/admin/session', requireWebAdmin, (_req, res) => res.json({ ok: true, product: STORE_PRODUCT_NAME, price: STORE_PRICE }));
+app.get('/api/admin/files', requireWebAdmin, (_req, res) => {
+  const files = Object.values(storeFiles).map(f => ({ ...f, active: String(f.id) === String(storeProduct.activeFileId), exists: fs.existsSync(path.join(STORE_UPLOADS, f.storedName)) })).sort((a, b) => Number(b.uploadedAt || 0) - Number(a.uploadedAt || 0));
+  res.json({ ok: true, files, activeFileId: storeProduct.activeFileId || '' });
+});
+app.post('/api/admin/files', requireWebAdmin, handleStoreUpload, (req, res) => {
+  if (!req.file) return res.status(400).json({ ok: false, error: 'Vui lòng chọn một file để tải lên.' });
+  const id = crypto.randomBytes(8).toString('hex');
+  const originalName = String(req.file.originalname || 'file').replace(/[\/\\]/g, '_').slice(0, 180);
+  const ext = path.extname(originalName).slice(0, 16);
+  const storedName = id + ext;
+  try {
+    fs.writeFileSync(path.join(STORE_UPLOADS, storedName), req.file.buffer, { flag: 'wx' });
+    storeFiles[id] = { id, originalName, storedName, size: req.file.size, mimeType: req.file.mimetype || 'application/octet-stream', uploadedAt: Date.now() };
+    storeProduct.activeFileId = id; // file mới tải lên sẽ trở thành file đang bán
+    saveStoreFiles(); saveStoreProduct();
+    res.json({ ok: true, file: { ...storeFiles[id], active: true } });
+  } catch (e) { res.status(500).json({ ok: false, error: 'Không lưu được file: ' + e.message }); }
+});
+app.post('/api/admin/files/:id/activate', requireWebAdmin, (req, res) => {
+  const f = storeFiles[String(req.params.id || '')];
+  if (!f || !fs.existsSync(path.join(STORE_UPLOADS, f.storedName))) return res.status(404).json({ ok: false, error: 'Không tìm thấy file.' });
+  storeProduct.activeFileId = f.id; saveStoreProduct();
+  res.json({ ok: true, activeFileId: f.id });
+});
+app.delete('/api/admin/files/:id', requireWebAdmin, (req, res) => {
+  const id = String(req.params.id || ''), f = storeFiles[id];
+  if (!f) return res.status(404).json({ ok: false, error: 'Không tìm thấy file.' });
+  const used = Object.values(orders).some(o => o && o.type === 'file' && String(o.fileId) === id && ['pending', 'checking', 'delivering'].includes(o.status));
+  if (used) return res.status(409).json({ ok: false, error: 'File đang gắn với đơn chưa xử lý, không thể xoá.' });
+  try { fs.unlinkSync(path.join(STORE_UPLOADS, f.storedName)); } catch {}
+  delete storeFiles[id];
+  if (String(storeProduct.activeFileId) === id) storeProduct.activeFileId = Object.keys(storeFiles)[0] || '';
+  saveStoreFiles(); saveStoreProduct();
+  res.json({ ok: true });
+});
+app.get('/api/admin/orders', requireWebAdmin, (_req, res) => {
+  const list = Object.values(orders).filter(o => o && o.type === 'file').map(o => ({ id: o.id, uid: o.uid, product: o.product || STORE_PRODUCT_NAME, amount: o.amount, addInfo: o.addInfo, status: o.status, created: o.created, checkAt: o.checkAt, paidAt: o.paidAt, fileId: o.fileId, deliveryError: o.deliveryError || '' })).sort((a, b) => Number(b.created || 0) - Number(a.created || 0));
+  res.json({ ok: true, orders: list });
+});
+app.post('/api/admin/orders/:id/approve', requireWebAdmin, async (req, res) => {
+  try { const result = await approveFileOrder(String(req.params.id || ''), 'web-admin', true); res.status(result.ok ? 200 : 400).json(result); }
+  catch (e) { res.status(500).json({ ok: false, message: e.message }); }
+});
+app.post('/api/admin/orders/:id/reject', requireWebAdmin, async (req, res) => {
+  try { const result = await rejectFileOrder(String(req.params.id || ''), 'web-admin', 'Admin từ chối sau khi đối soát.', true); res.status(result.ok ? 200 : 400).json(result); }
+  catch (e) { res.status(500).json({ ok: false, message: e.message }); }
+});
+
+// Root is the private admin dashboard; bot users never need to open this page.
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 
-// Các API cho Web
-app.get('/api/games', (req, res) => {
+// Các API cho Web — cần đăng nhập admin
+app.get('/api/games', requireWebAdmin, (req, res) => {
   const list = games.map(g => {
     const f = FEEDS[g.id], p = f.lastPred || {};
     return { id: g.id, name: `${g.brandLabel} - ${g.variant}`, group: g.group, pred: p.side ? (p.side === 'T' ? 'TÀI' : 'XỈU') : 'Đang lấy...', conf: p.conf || 0, acc: f.engine.accuracy() };
@@ -1392,7 +1804,7 @@ app.get('/api/games', (req, res) => {
   res.json({ games: list });
 });
 
-app.post('/api/data', (req, res) => {
+app.post('/api/data', requireWebAdmin, (req, res) => {
   const { apiId } = req.body;
   const g = games.find(x => x.id === apiId), feed = FEEDS[apiId];
   if (!g || !feed) return res.json({ rows: [] });
@@ -1416,13 +1828,13 @@ app.post('/api/data', (req, res) => {
   res.json({ rows });
 });
 
-app.post('/reset-learn', (req, res) => {
+app.post('/reset-learn', requireWebAdmin, (req, res) => {
   const { apiId } = req.body;
   if (FEEDS[apiId]) { FEEDS[apiId].engine = new Engine(apiId); FEEDS[apiId].lastSession = null; }
   res.json({ ok: true });
 });
 
-app.get('/health', (_, res) => res.json({ ok: true, bot: 'TOOL TX BY FEE v16.0', games: games.length }));
+app.get('/health', (_, res) => res.json({ ok: true, bot: 'TOOL TX BY FEE v16.2', games: games.length }));
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log('🔥 TOOL TX BY FEE running on port', PORT);
