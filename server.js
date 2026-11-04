@@ -1,6 +1,6 @@
 /**
- * TOOL TX BY FEE — v16.2
- * Key access • VietQR pay • Force join • Hash feedback • Admin panel
+ * TOOL TX BY FEE — v16.8 ALL-GAME ADAPTIVE ENGINE
+ * Dynamic VietQR memos • Sicbo dice ensemble • Calibrated hash feedback
  */
 'use strict';
 
@@ -13,7 +13,6 @@ const https = require('https');
 const dns = require('dns');
 const crypto = require('crypto');
 const { io } = require('socket.io-client');
-const multer = require('multer');
 
 try { dns.setDefaultResultOrder('ipv4first'); } catch (e) {}
 
@@ -27,15 +26,15 @@ const PORT = Number(process.env.PORT) || 10000;
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
 const ADMIN_IDS = String(process.env.TELEGRAM_ADMIN_IDS || process.env.ADMIN_IDS || '').split(/[,;\s]+/).map(s => s.trim()).filter(Boolean);
 const PUBLIC_URL = (process.env.PUBLIC_URL || process.env.WEB_URL || '').replace(/\/$/, '');
-const ADMIN_WEB_PASSWORD = String(process.env.ADMIN_WEB_PASSWORD || '');
-const ADMIN_WEB_SECRET = String(process.env.ADMIN_WEB_SECRET || ADMIN_WEB_PASSWORD || BOT_TOKEN || '');
-const STORE_PRICE = 10000;
-const STORE_PRODUCT_NAME = 'FULL SCR AUTOCUOCLC79';
-const STORE_TRANSFER_INFO = 'lc79napvip123';
+let STORE_PRICE = 10000;
+let STORE_PRODUCT_NAME = 'FULL SCR AUTOCUOCLC79';
+let STORE_TRANSFER_PREFIX = 'MUAFILE';
+let KEY_TRANSFER_PREFIX = 'NAPASS';
+const DEFAULT_BANK_GROUP_ID = String(process.env.BANK_GROUP_ID || '-1003806492891');
 const POLL_MS = Number(process.env.POLL_MS || 5000);
 const TRIAL_HOURS = 0; // không dùng trial theo giờ — dùng KEY
 // Bank VietQR
-const BANK = {
+let BANK = {
   bin: '970423', // TPBank
   bankCode: 'TPB',
   account: '24032506210',
@@ -78,12 +77,13 @@ async function tg(method, body) {
     const req = https.request({
       hostname: u.hostname, port: 443, path: u.pathname + u.search, method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) },
-      family: 4, timeout: 15000
+      family: 4, timeout: method === 'getUpdates' ? 35000 : 15000
     }, (res) => {
       let chunks = '';
       res.on('data', c => chunks += c);
       res.on('end', () => { try { resolve(JSON.parse(chunks)); } catch { resolve(null); } });
     });
+    req.on('timeout', () => req.destroy(new Error(method === 'getUpdates' ? 'Telegram long polling timed out' : 'Telegram request timed out')));
     req.on('error', () => resolve(null));
     req.write(data);
     req.end();
@@ -115,17 +115,71 @@ let settings = loadJSON('settings.json', {
     { id: '2w', label: '20K — 2 TUẦN', amount: 20000, hours: 336 }
   ],
   groups: [], // [{id, title, link}]
-  bankGroupId: '', // id nhóm thông báo biến động số dư
+  bankGroupId: DEFAULT_BANK_GROUP_ID, // nhóm nhận thông báo biến động số dư
+  feedbackChannels: [],
+  bankSenderIds: [], // optional allowlist of trusted bank-notification senders
+  storePrice: 10000,
+  storeProductName: 'FULL SCR AUTOCUOCLC79',
+  storeTransferPrefix: 'MUAFILE',
+  keyTransferPrefix: 'NAPASS',
   channelFeedback: ''
 });
+if (!settings.bankGroupId) settings.bankGroupId = DEFAULT_BANK_GROUP_ID;
+settings.feedbackChannels = Array.isArray(settings.feedbackChannels) ? settings.feedbackChannels : [];
+settings.bankSenderIds = Array.isArray(settings.bankSenderIds) ? settings.bankSenderIds.map(String) : [];
+STORE_PRICE = Math.max(1000, Number(settings.storePrice) || 10000);
+STORE_PRODUCT_NAME = String(settings.storeProductName || 'FULL SCR AUTOCUOCLC79');
+STORE_TRANSFER_PREFIX = String(settings.storeTransferPrefix || 'MUAFILE').toUpperCase();
+KEY_TRANSFER_PREFIX = String(settings.keyTransferPrefix || 'NAPASS').toUpperCase();
+BANK = { ...BANK, ...(settings.bank || {}) };
 let sessions = {};
 let predMsg = {};
 let autoWatch = {};
 // Hash predictions are keyed by Telegram chat/message so feedback cannot be applied to the wrong code.
 let hashPredictions = loadJSON('hash_predictions.json', {});
 let hashFeedbacks = loadJSON('hash_feedback.json', []);
+let hashTrainingRevision = 0;
+const hashModelCache = {};
+if (!Array.isArray(hashFeedbacks)) hashFeedbacks = [];
+let feedbacks = loadJSON('feedbacks.json', {});
+let bankTransactions = loadJSON('bank_transactions.json', {});
+function saveFeedbacks() { saveJSON('feedbacks.json', feedbacks); }
+function saveBankTransactions() { saveJSON('bank_transactions.json', bankTransactions); }
+function storeFileExists(file) {
+  if (!file) return false;
+  if (file.telegramFileId) return true;
+  return Boolean(file.storedName && fs.existsSync(path.join(STORE_UPLOADS, file.storedName)));
+}
 function saveHashPredictions() { saveJSON('hash_predictions.json', hashPredictions); }
 function saveHashFeedbacks() { saveJSON('hash_feedback.json', hashFeedbacks); }
+function recordHashOutcome(row) {
+  const hash = String(row.hash || '').toLowerCase();
+  const type = String(row.type || '').toUpperCase();
+  if (!/^[a-f0-9]{32}$/.test(hash) && !/^[a-f0-9]{64}$/.test(hash)) return { saved: false, reason: 'invalid' };
+  if ((type === 'MD5' && hash.length !== 32) || (type === 'SHA256' && hash.length !== 64)) return { saved: false, reason: 'type' };
+  const existing = hashFeedbacks.find(x => x && x.type === type && String(x.hash || '').toLowerCase() === hash);
+  if (existing) {
+    if (existing.actual !== row.actual) {
+      existing.conflicted = true;
+      existing.conflicts = Number(existing.conflicts || 0) + 1;
+      existing.conflictAt = Date.now();
+      hashTrainingRevision++;
+      delete hashModelCache[type];
+      saveHashFeedbacks();
+      return { saved: false, reason: 'conflict' };
+    }
+    existing.confirmations = Number(existing.confirmations || 1) + 1;
+    existing.lastConfirmedAt = Date.now();
+    saveHashFeedbacks();
+    return { saved: false, reason: 'duplicate' };
+  }
+  hashFeedbacks.push({ ...row, hash, type, createdAt: row.createdAt || Date.now() });
+  hashTrainingRevision++;
+  delete hashModelCache[type];
+  if (hashFeedbacks.length > 5000) hashFeedbacks = hashFeedbacks.slice(-5000);
+  saveHashFeedbacks();
+  return { saved: true };
+}
 
 function saveUsers() { saveJSON('users.json', users); }
 function saveKeys() { saveJSON('keys.json', keysDB); }
@@ -205,6 +259,29 @@ function vietqrUrl(amount, addInfo) {
   const info = encodeURIComponent(addInfo);
   const name = encodeURIComponent(BANK.name);
   return `https://img.vietqr.io/image/${BANK.bin}-${BANK.account}-compact2.png?amount=${encodeURIComponent(Math.max(0, Math.round(Number(amount) || 0)))}&addInfo=${info}&accountName=${name}`;
+}
+
+function memoToken(value, max = 12) {
+  return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]/gi, '').toUpperCase().slice(0, max);
+}
+
+// Compact, unique VietQR memo. The full username/Telegram ID, order type and
+// timestamp stay in orders.json; the bank transfer description only needs a short
+// per-order token so it fits neatly inside QR/payment apps.
+// N = KEY order, M = FILE order; each memo ends with six random hex characters.
+function createPaymentMemo(type, uid, username = '') {
+  const configuredPrefix = type === 'file' ? STORE_TRANSFER_PREFIX : KEY_TRANSFER_PREFIX;
+  const prefix = memoToken(configuredPrefix, 1) || (type === 'file' ? 'M' : 'N');
+  // New format: N-ABC123 for KEY, M-ABC123 for FILE (8 characters total).
+  // Old open orders keep their original memo and remain matchable.
+  for (let attempt = 0; attempt < 96; attempt++) {
+    const suffix = crypto.randomBytes(4).toString('hex').slice(0, 6).toUpperCase();
+    const memo = `${prefix}-${suffix}`;
+    const used = Object.values(orders || {}).some(order => order && String(order.addInfo || '').toUpperCase() === memo);
+    if (!used) return memo;
+  }
+  throw new Error('Không tạo được mã chuyển khoản duy nhất; vui lòng thử lại.');
 }
 
 // Download the VietQR PNG ourselves, then upload the bytes to Telegram.
@@ -340,43 +417,177 @@ if (!Array.isArray(games) || !games.length) games = DEFAULT_GAMES.map(g => ({ ..
 class SicboAnalyzer {
   constructor() { this.reset(); }
   reset() {
-    this.diceFreq = [[0,0,0,0,0,0],[0,0,0,0,0,0],[0,0,0,0,0,0]];
-    this.sums = {}; this.total = 0;
+    this.history = [];
+    this.pending = null;
+    this.tests = 0;
+    this.exactHits = 0;
+    this.top3Hits = 0;
+    this.faceHits = 0;
+    this.faceSlots = 0;
+    this.sumHits = 0;
+    this.sumTop3Hits = 0;
+    this.sumTop3Tests = 0;
+    this.sideTests = 0;
+    this.sideHits = 0;
+    this.brierTotal = 0;
   }
   push(diceArr) {
-    if (!Array.isArray(diceArr) || diceArr.length < 3) return false;
-    const d = diceArr.slice(0, 3).map(x => {
-      const n = Math.floor(Number(x));
-      return (n >= 1 && n <= 6) ? n : 0;
-    });
-    if (d.some(x => !x)) return false;
-    for (let i = 0; i < 3; i++) this.diceFreq[i][d[i] - 1]++;
-    const sum = d[0] + d[1] + d[2];
-    this.sums[sum] = (this.sums[sum] || 0) + 1;
-    this.total++;
-    return true;
-  }
-  guessDice(side) {
-    const pool = side === 'T' ? [11,12,13,14,15,16,17] : [4,5,6,7,8,9,10];
-    if (this.total < 10) return null;
-    const topDice = this.diceFreq.map(freq => {
-      return freq.map((count, val) => ({ val: val + 1, count }))
-                 .sort((a, b) => b.count - a.count)
-                 .map(x => x.val);
-    });
-    for (let i = 0; i < 3; i++) {
-      for (let j = 0; j < 3; j++) {
-        for (let k = 0; k < 3; k++) {
-          const d1 = topDice[0][i], d2 = topDice[1][j], d3 = topDice[2][k];
-          if (pool.includes(d1 + d2 + d3)) return [d1, d2, d3].sort();
+    if (!Array.isArray(diceArr) || diceArr.length < 3) { this.pending = null; return false; }
+    const d = diceArr.slice(0, 3).map(x => Math.floor(Number(x))).sort((a, b) => a - b);
+    if (d.some(x => !Number.isInteger(x) || x < 1 || x > 6)) { this.pending = null; return false; }
+    if (this.pending) {
+      const exact = this.pending.dice.every((v, i) => v === d[i]);
+      const actualKey = d.join('');
+      const top3 = (this.pending.top3 || []).some(row => row.join('') === actualKey);
+      let matched = 0;
+      const remaining = [...d];
+      for (const face of this.pending.dice) {
+        const i = remaining.indexOf(face);
+        if (i >= 0) { matched++; remaining.splice(i, 1); }
+      }
+      const sum = d[0] + d[1] + d[2];
+      const triple = d[0] === d[2];
+      this.tests++;
+      if (exact) this.exactHits++;
+      if (top3) this.top3Hits++;
+      this.faceHits += matched;
+      this.faceSlots += 3;
+      if (sum === this.pending.sum) this.sumHits++;
+      // Sicbo Big/Small excludes triples (1-1-1 through 6-6-6).
+      if (!triple) {
+        const actualSide = sum >= 11 ? 'T' : 'X';
+        if (Array.isArray(this.pending.topSums) && this.pending.topSums.length) {
+          this.sumTop3Tests++;
+          if (actualSide === this.pending.side && this.pending.topSums.includes(sum)) this.sumTop3Hits++;
+        }
+        if (Number.isFinite(this.pending.pBig)) {
+          const actualBig = actualSide === 'T' ? 1 : 0;
+          const predictedBig = this.pending.pBig >= 0.5 ? 1 : 0;
+          if (actualBig === predictedBig) this.sideHits++;
+          this.sideTests++;
+          this.brierTotal += (this.pending.pBig - actualBig) ** 2;
         }
       }
+      this.pending = null;
     }
-    return null;
+    this.history.push(d);
+    if (this.history.length > 1200) this.history.shift();
+    return true;
+  }
+  _faceDistribution() {
+    const long = new Array(6).fill(0);
+    const recent = new Array(6).fill(0);
+    for (const row of this.history) for (const face of row) long[face - 1]++;
+    const window = this.history.slice(-240);
+    let weightTotal = 0;
+    window.forEach((row, i) => {
+      const w = 0.99 ** (window.length - 1 - i);
+      for (const face of row) recent[face - 1] += w;
+      weightTotal += 3 * w;
+    });
+    const longN = this.history.length * 3;
+    const prior = 72;
+    const longP = long.map(c => (c + prior / 6) / (longN + prior));
+    const recentP = recent.map(c => (c + prior / 6) / (weightTotal + prior));
+    const drift = longP.reduce((sum, p, i) => sum + Math.abs(p - recentP[i]), 0) / 2;
+    const recentWeight = Math.max(0.15, Math.min(0.32, 0.15 + drift * 0.35));
+    return longP.map((p, i) => (1 - recentWeight) * p + recentWeight * recentP[i]);
+  }
+
+  predict() {
+    const n = this.history.length;
+    const faceP = this._faceDistribution();
+    const comboCounts = new Map();
+    const comboWindow = this.history.slice(-600);
+    for (const row of comboWindow) {
+      const key = row.join('');
+      comboCounts.set(key, (comboCounts.get(key) || 0) + 1);
+    }
+    const permutations = (a, b, c) => a === c ? 1 : (a === b || b === c ? 3 : 6);
+    const priorStrength = 900;
+    const empiricalWeight = Math.min(0.16, comboWindow.length / (comboWindow.length + 2400));
+    const candidates = [];
+    let norm = 0;
+    for (let a = 1; a <= 6; a++) for (let b = a; b <= 6; b++) for (let c = b; c <= 6; c++) {
+      const key = `${a}${b}${c}`;
+      const mult = permutations(a, b, c);
+      const independent = faceP[a - 1] * faceP[b - 1] * faceP[c - 1] * mult;
+      const empirical = ((comboCounts.get(key) || 0) + priorStrength * independent) / (comboWindow.length + priorStrength);
+      const probability = (1 - empiricalWeight) * independent + empiricalWeight * empirical;
+      const sum = a + b + c;
+      candidates.push({ dice: [a, b, c], sum, probability });
+      norm += probability;
+    }
+    candidates.forEach(x => { x.probability = norm ? x.probability / norm : 1 / 56; });
+
+    // Aggregate all non-triple combinations by total. Rank totals conditionally
+    // inside Big (11-17) and Small (4-10), rather than mixing both sides.
+    const sideSums = { T: new Map(), X: new Map() };
+    let pBigRaw = 0, pSmallRaw = 0;
+    for (const c of candidates) {
+      const triple = c.dice[0] === c.dice[2];
+      if (triple) continue;
+      const side = c.sum >= 11 ? 'T' : 'X';
+      sideSums[side].set(c.sum, (sideSums[side].get(c.sum) || 0) + c.probability);
+      if (side === 'T') pBigRaw += c.probability;
+      else pSmallRaw += c.probability;
+    }
+    const decisiveMass = pBigRaw + pSmallRaw;
+    const pBig = decisiveMass > 0 ? pBigRaw / decisiveMass : 0.5;
+    const pSmall = 1 - pBig;
+    const rankSums = (map) => {
+      const total = [...map.values()].reduce((a, b) => a + b, 0) || 1;
+      return [...map.entries()]
+        .sort((a, b) => b[1] - a[1] || a[0] - b[0])
+        .slice(0, 3)
+        .map(([sum, mass]) => ({ sum, probability: mass / total, percent: Number((mass / total * 100).toFixed(2)) }));
+    };
+    const topSumsBySide = { T: rankSums(sideSums.T), X: rankSums(sideSums.X) };
+    const sortedByProbability = [...candidates].sort((a, b) => b.probability - a.probability || a.sum - b.sum || a.dice.join('').localeCompare(b.dice.join('')));
+    const bestBySide = {
+      T: sortedByProbability.find(x => x.sum >= 11 && x.dice[0] !== x.dice[2]) || sortedByProbability[0],
+      X: sortedByProbability.find(x => x.sum <= 10 && x.dice[0] !== x.dice[2]) || sortedByProbability[0]
+    };
+    const topBySide = {
+      T: sortedByProbability.filter(x => x.sum >= 11 && x.dice[0] !== x.dice[2]).slice(0, 3),
+      X: sortedByProbability.filter(x => x.sum <= 10 && x.dice[0] !== x.dice[2]).slice(0, 3)
+    };
+    for (const side of ['T', 'X']) {
+      topBySide[side] = topBySide[side].map(x => ({ ...x, percent: Number((x.probability * 100).toFixed(3)) }));
+    }
+    const defaultSide = pBig >= 0.5 ? 'T' : 'X';
+    const chosen = bestBySide[defaultSide] || sortedByProbability[0];
+    const topDice = topBySide[defaultSide] || [];
+    const sumProbabilities = topSumsBySide[defaultSide] || [];
+    const result = {
+      dice: [...chosen.dice], sum: chosen.sum,
+      top: topDice, topSums: sumProbabilities.map(x => x.sum),
+      topSumsBySide, topBySide, bestBySide,
+      selectedSide: defaultSide,
+      selectedTopSums: sumProbabilities,
+      exactProbability: Number((chosen.probability * 100).toFixed(3)),
+      pBig, pSmall, sampleSize: n,
+      exactRate: this.tests ? this.exactHits / this.tests * 100 : null,
+      top3Rate: this.tests ? this.top3Hits / this.tests * 100 : null,
+      sumTop3Rate: this.sumTop3Tests ? this.sumTop3Hits / this.sumTop3Tests * 100 : null,
+      sumTop3Tests: this.sumTop3Tests,
+      faceRate: this.faceSlots ? this.faceHits / this.faceSlots * 100 : null,
+      sumRate: this.tests ? this.sumHits / this.tests * 100 : null,
+      sideRate: this.sideTests ? this.sideHits / this.sideTests * 100 : null,
+      brierScore: this.sideTests ? this.brierTotal / this.sideTests : null,
+      tests: this.tests, sideTests: this.sideTests
+    };
+    this.pending = {
+      dice: [...chosen.dice], sum: chosen.sum,
+      top3: topDice.map(x => [...x.dice]),
+      topSums: sumProbabilities.map(x => x.sum),
+      side: defaultSide, pBig
+    };
+    return result;
   }
 }
 
-/* ═══════════════ ENGINE v15.4 ═══════════════ */
+/* ═══════════════ ENGINE v16.8 — ALL-GAME ADAPTIVE ENSEMBLE ═══════════════ */
 class Engine {
   constructor(id) {
     this.id = id || '';
@@ -393,220 +604,315 @@ class Engine {
     this.momentum = 0;
     this.recentPreds = [];
     this.transition = { TT: 0, TX: 0, XT: 0, XX: 0 };
+    // Per-model rolling Brier scores. These are updated only after the next real result arrives.
+    this.modelLosses = { base: [], short: [], mid: [], ewma: [], markov1: [], markov2: [], transition: [], pattern: [], streak: [], sicbo: [] };
   }
 
   push(side, sum, dice, session) {
-    const s = side === 'T' ? 'T' : 'X';
-    const n = this.history.length;
+    const isSicbo = String(this.id).startsWith('sicbo_');
+    const validDice = Array.isArray(dice) && dice.length >= 3 && dice.slice(0, 3).every(v => Number.isInteger(Number(v)) && Number(v) >= 1 && Number(v) <= 6);
+    const normalizedDice = validDice ? dice.slice(0, 3).map(Number) : null;
 
-    if (n >= 1) {
-      const prev = this.history[n - 1];
-      const key = prev + s;
-      if (this.transition[key] !== undefined) this.transition[key]++;
+    // Score the dice prediction on every valid Sicbo result, including triples.
+    if (isSicbo) {
+      if (validDice) {
+        this.sicbo.push(normalizedDice);
+        this.diceHist.push(normalizedDice);
+      } else {
+        this.sicbo.pending = null;
+      }
     }
 
+    // Triples are a separate outcome in common Sicbo rules, not Big or Small.
+    const isTriple = isSicbo && validDice && normalizedDice[0] === normalizedDice[1] && normalizedDice[1] === normalizedDice[2];
+    const s = isTriple ? null : (side === 'T' ? 'T' : side === 'X' ? 'X' : null);
+
     if (this.pending) {
-      this.total++;
-      const ok = this.pending === s;
-      if (ok) this.correct++;
+      if (s) {
+        const actual = s === 'T' ? 1 : 0;
+        this.total++;
+        const ok = this.pending === s;
+        if (ok) this.correct++;
+        this.recentPreds.push({ correct: ok, side: this.pending });
+        if (this.recentPreds.length > 100) this.recentPreds.shift();
 
-      this.recentPreds.push({ correct: ok, side: this.pending });
-      if (this.recentPreds.length > 40) this.recentPreds.shift();
+        const modelProbabilities = (this.pendingMeta && this.pendingMeta.modelProbabilities) || {};
+        for (const [name, probability] of Object.entries(modelProbabilities)) {
+          if (!this.modelLosses[name]) this.modelLosses[name] = [];
+          const p = Math.max(0, Math.min(1, Number(probability)));
+          if (Number.isFinite(p)) this.modelLosses[name].push((p - actual) ** 2);
+          if (this.modelLosses[name].length > 160) this.modelLosses[name].shift();
+        }
 
-      this.log.push({
-        session: session || '',
-        pred: this.pending,
-        actual: s,
-        ok,
-        conf: (this.pendingMeta && this.pendingMeta.conf) || 0,
-        sum: Number(sum) || 0,
-        dice: Array.isArray(dice) ? dice.map(Number) : [],
-        time: nowVN()
-      });
-      if (this.log.length > 500) this.log.shift();
-
+        this.log.push({
+          session: session || '', pred: this.pending, actual: s, ok,
+          conf: (this.pendingMeta && this.pendingMeta.conf) || 0,
+          probability: (this.pendingMeta && this.pendingMeta.probability) || 0.5,
+          sum: Number(sum) || 0,
+          dice: normalizedDice || [],
+          time: nowVN()
+        });
+        if (this.log.length > 600) this.log.shift();
+      }
+      // A triple voids the Big/Small comparison; do not score it as an Xiu loss.
       this.pending = null;
       this.pendingMeta = null;
     }
 
-    this.history.push(s);
-    this.sums.push(Number(sum) || 10);
-    if (dice && dice.length >= 3) {
-      this.diceHist.push(dice.map(Number));
-      this.sicbo.push(dice);
+    if (s) {
+      const n = this.history.length;
+      if (n >= 1) {
+        const key = this.history[n - 1] + s;
+        if (this.transition[key] !== undefined) this.transition[key]++;
+      }
+      this.history.push(s);
+      this.sums.push(Number(sum) || 10);
+      if (this.history.length > 900) {
+        this.history.shift();
+        this.sums.shift();
+      }
+      this._updateDerived();
+    } else if (isSicbo && validDice) {
+      // Keep total history for Sicbo diagnostics, but never add a triple to Big/Small history.
+      this.sums.push(normalizedDice.reduce((a, b) => a + b, 0));
     }
-    if (this.history.length > 600) {
-      this.history.shift();
-      this.sums.shift();
-    }
-    if (this.diceHist.length > 600) this.diceHist.shift();
 
-    this._updateDerived();
+    if (this.sums.length > 1200) this.sums.shift();
+    if (this.diceHist.length > 1200) this.diceHist.shift();
   }
 
   _updateDerived() {
     const h = this.history;
-    if (h.length < 8) return;
-    const w20 = h.slice(-20);
-    const t20 = w20.filter(x => x === 'T').length;
-    this.trend = (t20 - (w20.length - t20)) / w20.length;
-    if (h.length >= 15) {
-      const w5 = h.slice(-5);
-      const t5 = w5.filter(x => x === 'T').length / 5;
-      this.momentum = t5 - (t20 / Math.max(w20.length, 1));
+    if (h.length < 2) return;
+    const w24 = h.slice(-24);
+    const t24 = w24.filter(x => x === 'T').length;
+    this.trend = (t24 - (w24.length - t24)) / w24.length;
+    const w6 = h.slice(-6);
+    const t6 = w6.filter(x => x === 'T').length / Math.max(w6.length, 1);
+    this.momentum = t6 - t24 / Math.max(w24.length, 1);
+  }
+
+  _rate(values, priorP = 0.5, priorStrength = 16) {
+    if (!values.length) return priorP;
+    const t = values.reduce((sum, value) => sum + (value === 'T' ? 1 : 0), 0);
+    return (t + priorP * priorStrength) / (values.length + priorStrength);
+  }
+
+  _weightedRate(values, alpha, priorP = 0.5) {
+    let p = priorP;
+    for (const value of values) p = alpha * (value === 'T' ? 1 : 0) + (1 - alpha) * p;
+    return p;
+  }
+
+  _supportReliability(count, priorStrength) {
+    return count / (count + priorStrength);
+  }
+
+  _skill(name) {
+    const losses = this.modelLosses[name] || [];
+    if (losses.length < 12) return 1;
+    const recent = losses.slice(-80);
+    const mean = recent.reduce((a, b) => a + b, 0) / recent.length;
+    // 0.25 is the Brier score of a 50/50 forecast. Shrink skill toward neutral.
+    const observedSkill = Math.exp((0.25 - mean) * 1.5);
+    const support = recent.length / (recent.length + 35);
+    return Math.max(0.82, Math.min(1.18, 1 + (observedSkill - 1) * support));
+  }
+
+  _contextProbability(context, priorP, priorStrength) {
+    const h = this.history;
+    const k = context.length;
+    let count = 0, t = 0;
+    for (let i = 0; i + k < h.length; i++) {
+      let match = true;
+      for (let j = 0; j < k; j++) {
+        if (h[i + j] !== context[j]) { match = false; break; }
+      }
+      if (match) {
+        count++;
+        if (h[i + k] === 'T') t++;
+      }
     }
+    return { p: (t + priorP * priorStrength) / (count + priorStrength), count };
+  }
+
+  _streakProbability(last, streak, priorP) {
+    const h = this.history;
+    let count = 0, t = 0, run = 0;
+    const targetBucket = Math.min(streak, 6);
+    for (let i = 0; i < h.length - 1; i++) {
+      run = i > 0 && h[i - 1] === h[i] ? run + 1 : 1;
+      if (h[i] !== last || Math.min(run, 6) !== targetBucket) continue;
+      count++;
+      if (h[i + 1] === 'T') t++;
+    }
+    return { p: (t + priorP * 12) / (count + 12), count };
+  }
+
+  _transitionProbability(last, priorP) {
+    const h = this.history;
+    const start = Math.max(0, h.length - 360);
+    let weightedT = 0, weightedCount = 0, rawCount = 0;
+    for (let i = start; i < h.length - 1; i++) {
+      if (h[i] !== last) continue;
+      const age = (h.length - 2) - i;
+      const weight = Math.pow(0.985, age);
+      weightedCount += weight;
+      if (h[i + 1] === 'T') weightedT += weight;
+      rawCount++;
+    }
+    const priorStrength = 16;
+    return {
+      p: (weightedT + priorP * priorStrength) / (weightedCount + priorStrength),
+      count: rawCount,
+      effectiveCount: weightedCount
+    };
+  }
+
+  _modelSignals() {
+    const h = this.history;
+    const n = h.length;
+    const longWindow = h.slice(-Math.min(300, n));
+    const midWindow = h.slice(-Math.min(72, n));
+    const shortWindow = h.slice(-Math.min(24, n));
+    const longRate = this._rate(longWindow, 0.5, 28);
+    const midRate = this._rate(midWindow, longRate, 18);
+    const shortRate = this._rate(shortWindow, midRate, 12);
+    const ewmaRate = this._weightedRate(longWindow, 0.075, longRate);
+    const base = 0.55 * longRate + 0.30 * midRate + 0.15 * ewmaRate;
+    const last = h[n - 1];
+
+    let streak = 0;
+    for (let i = n - 1; i >= 0 && h[i] === last; i--) streak++;
+    const one = this._contextProbability([last], base, 12);
+    const two = n >= 2 ? this._contextProbability(h.slice(-2), base, 14) : { p: base, count: 0 };
+
+    let pattern = { p: base, count: 0, length: 0 };
+    for (let k = Math.min(6, n); k >= 3; k--) {
+      const candidate = this._contextProbability(h.slice(-k), base, 12);
+      if (candidate.count > pattern.count) pattern = { ...candidate, length: k };
+      if (candidate.count >= 5) { pattern = { ...candidate, length: k }; break; }
+    }
+    const streakSignal = this._streakProbability(last, streak, base);
+    const transitionSignal = this._transitionProbability(last, base);
+    const regimeShift = Math.min(1, Math.abs(shortRate - longRate) / 0.18);
+    return {
+      base: { p: base, count: longWindow.length, reliability: 1 },
+      short: { p: shortRate, count: shortWindow.length, reliability: this._supportReliability(shortWindow.length, 14) },
+      mid: { p: midRate, count: midWindow.length, reliability: this._supportReliability(midWindow.length, 24) },
+      ewma: { p: ewmaRate, count: longWindow.length, reliability: this._supportReliability(longWindow.length, 30) },
+      markov1: { p: one.p, count: one.count, reliability: this._supportReliability(one.count, 12) },
+      markov2: { p: two.p, count: two.count, reliability: this._supportReliability(two.count, 14) },
+      transition: { p: transitionSignal.p, count: transitionSignal.count, reliability: this._supportReliability(transitionSignal.count, 18) },
+      pattern: { p: pattern.p, count: pattern.count, reliability: this._supportReliability(pattern.count, 12), length: pattern.length },
+      streak: { p: streakSignal.p, count: streakSignal.count, reliability: this._supportReliability(streakSignal.count, 12), run: streak },
+      regimeShift
+    };
   }
 
   predict() {
     const h = this.history;
     const n = h.length;
-
-    if (n < 4) {
-      const side = n && h[n - 1] === 'X' ? 'T' : 'X';
-      const out = { side, conf: 55, vi: this._pickVi(side), streak: 0 };
-      this.pending = side;
-      this.pendingMeta = out;
-      return out;
+    if (!n) {
+      const empty = { side: 'X', conf: 50, probability: 0.5, vi: this._pickVi('X'), streak: 0,
+        reason: 'Chưa có đủ lịch sử để phân tích. Tín hiệu hiện tại đang ở mức cân bằng.',
+        qualityLabel: 'ĐANG THU THẬP DỮ LIỆU', sampleSize: 0, modelProbabilities: {} };
+      this.pending = empty.side; this.pendingMeta = empty; return empty;
     }
 
-    const last = h[n - 1];
-    let streak = 1;
-    for (let i = n - 2; i >= 0 && h[i] === last; i--) streak++;
-
-    // Thống kê dự đoán gần đây
-    const recent = this.recentPreds.slice(-10);
-    let loseStreak = 0;
-    for (let i = recent.length - 1; i >= 0; i--) {
-      if (!recent[i].correct) loseStreak++;
-      else break;
+    const signals = this._modelSignals();
+    const shift = signals.regimeShift;
+    const priors = {
+      base: 0.22 - 0.03 * shift,
+      short: 0.13 + 0.045 * shift,
+      mid: 0.12,
+      ewma: 0.12 + 0.015 * shift,
+      markov1: 0.11,
+      markov2: 0.08,
+      transition: 0.09,
+      pattern: 0.07,
+      streak: 0.06
+    };
+    let weighted = 0, totalWeight = 0;
+    const modelProbabilities = {};
+    for (const name of Object.keys(priors)) {
+      const signal = signals[name];
+      const weight = priors[name] * (0.30 + 0.70 * signal.reliability) * this._skill(name);
+      const probability = Math.max(0.04, Math.min(0.96, signal.p));
+      weighted += probability * weight;
+      totalWeight += weight;
+      modelProbabilities[name] = probability;
     }
-    let samePredStreak = 0;
-    if (recent.length) {
-      const lp = recent[recent.length - 1].side;
-      for (let i = recent.length - 1; i >= 0; i--) {
-        if (recent[i].side === lp) samePredStreak++;
-        else break;
+
+    let blended = totalWeight ? weighted / totalWeight : 0.5;
+    // The model deliberately shrinks noisy game-history signals toward 50/50.
+    const evidenceFactor = 0.42 + 0.34 * (n / (n + 100));
+    let pT = 0.5 + (blended - 0.5) * evidenceFactor;
+    const isSicbo = String(this.id).startsWith('sicbo_');
+    const sicboPrediction = isSicbo ? this.sicbo.predict() : null;
+    if (sicboPrediction && sicboPrediction.sampleSize >= 30) {
+      pT = 0.88 * pT + 0.12 * sicboPrediction.pBig;
+      modelProbabilities.sicbo = sicboPrediction.pBig;
+    }
+    pT = Math.max(0.38, Math.min(0.62, pT));
+    const side = pT >= 0.5 ? 'T' : 'X';
+    const confidence = Math.min(62, Math.round(Math.max(pT, 1 - pT) * 100));
+    const streak = signals.streak.run || 1;
+
+    if (sicboPrediction) {
+      const selectedSums = sicboPrediction.topSumsBySide && sicboPrediction.topSumsBySide[side] || [];
+      const selectedCombos = sicboPrediction.topBySide && sicboPrediction.topBySide[side] || [];
+      const bestCombo = sicboPrediction.bestBySide && sicboPrediction.bestBySide[side];
+      sicboPrediction.selectedSide = side;
+      sicboPrediction.selectedTopSums = selectedSums;
+      sicboPrediction.topSums = selectedSums.map(x => x.sum);
+      if (bestCombo) {
+        sicboPrediction.dice = [...bestCombo.dice];
+        sicboPrediction.sum = bestCombo.sum;
+        sicboPrediction.exactProbability = Number((bestCombo.probability * 100).toFixed(3));
+      }
+      sicboPrediction.top = selectedCombos;
+      if (this.sicbo.pending) {
+        this.sicbo.pending.side = side;
+        this.sicbo.pending.topSums = sicboPrediction.topSums.slice();
+        this.sicbo.pending.dice = [...sicboPrediction.dice];
+        this.sicbo.pending.sum = sicboPrediction.sum;
+        this.sicbo.pending.top3 = selectedCombos.map(x => [...x.dice]);
+        this.sicbo.pending.pBig = sicboPrediction.pBig;
       }
     }
 
-    // ===== HARD RULES (ưu tiên cao nhất) =====
-    // 1) Thua ≥ 2 phiên liên tiếp → ĐẢO so với lần đoán trước
-    if (loseStreak >= 2 && recent.length) {
-      const lastPred = recent[recent.length - 1].side;
-      const side = lastPred === 'T' ? 'X' : 'T';
-      const out = { side, conf: 58, vi: this._pickVi(side), streak };
-      this.pending = side;
-      this.pendingMeta = out;
-      return out;
-    }
-
-    // 2) Đoán cùng 1 bên ≥ 3 lần → ép đảo
-    if (samePredStreak >= 3 && recent.length) {
-      const lastPred = recent[recent.length - 1].side;
-      const side = lastPred === 'T' ? 'X' : 'T';
-      const out = { side, conf: 57, vi: this._pickVi(side), streak };
-      this.pending = side;
-      this.pendingMeta = out;
-      return out;
-    }
-
-    // 3) Cầu thực tế ≥ 4 → đảo chiều cầu
-    if (streak >= 4) {
-      const side = last === 'T' ? 'X' : 'T';
-      const out = { side, conf: 60, vi: this._pickVi(side), streak };
-      this.pending = side;
-      this.pendingMeta = out;
-      return out;
-    }
-
-    // ===== Soft scoring =====
-    let scoreT = 0, scoreX = 0;
-
-    // Mean reversion 12–20 phiên
-    const w = h.slice(-Math.min(20, n));
-    const tRatio = w.filter(x => x === 'T').length / w.length;
-    if (tRatio > 0.58) scoreX += (tRatio - 0.5) * 4;
-    else if (tRatio < 0.42) scoreT += (0.5 - tRatio) * 4;
-
-    // Cầu 2–3: hơi nghiêng đảo nhẹ
-    if (streak === 3) {
-      if (last === 'T') scoreX += 1.2;
-      else scoreT += 1.2;
-    } else if (streak === 2) {
-      if (last === 'T') scoreX += 0.4;
-      else scoreT += 0.4;
-    }
-
-    // Momentum ngắn
-    if (n >= 8) {
-      const w5 = h.slice(-5);
-      const t5 = w5.filter(x => x === 'T').length / 5;
-      if (t5 >= 0.8) scoreX += 0.8;
-      if (t5 <= 0.2) scoreT += 0.8;
-    }
-
-    // Markov rất nhẹ
-    const totalFromT = (this.transition.TT + this.transition.TX) || 1;
-    const totalFromX = (this.transition.XT + this.transition.XX) || 1;
-    const pT_T = this.transition.TT / totalFromT;
-    const pT_X = this.transition.XT / totalFromX;
-    if (last === 'T') scoreT += (pT_T - 0.5) * 1.0;
-    else scoreT += (pT_X - 0.5) * 1.0;
-
-    let net = scoreT - scoreX;
-    const pT = 1 / (1 + Math.exp(-net * 1.2));
-    let side = pT >= 0.5 ? 'T' : 'X';
-
-    // Nếu vừa thua 1 phiên → hơi nghiêng đảo
-    if (loseStreak === 1 && recent.length) {
-      const lastPred = recent[recent.length - 1].side;
-      if (side === lastPred) {
-        // 60% cơ hội đảo
-        if (Math.abs(pT - 0.5) < 0.12) side = lastPred === 'T' ? 'X' : 'T';
-      }
-    }
-
-    let conf = pT >= 0.5 ? pT * 100 : (1 - pT) * 100;
-    if (loseStreak >= 1) conf -= 8;
-    if (streak >= 3) conf = Math.min(conf, 62);
-    if (n < 12) conf = Math.min(conf, 64);
-    conf = Math.max(53, Math.min(88, Math.round(conf)));
-
-    const vi = this._pickVi(side);
-    const out = { side, conf, vi, streak };
+    const vi = sicboPrediction ? sicboPrediction.topSums : this._pickVi(side);
+    const longPct = (signals.base.p * 100).toFixed(1);
+    const shortPct = (signals.short.p * 100).toFixed(1);
+    const midPct = (signals.mid.p * 100).toFixed(1);
+    const qualityLabel = n < 12 ? 'CẦN THÊM DỮ LIỆU' : n < 50 ? 'ĐANG TÍCH LŨY' : 'ĐỦ LỊCH SỬ ĐÁNH GIÁ';
+    const reason = `Tài ${longPct}% ở dữ liệu dài hạn • ${shortPct}% trong 24 phiên gần • ${midPct}% trong 72 phiên. Các nhánh Markov, chuyển trạng thái và mẫu chuỗi được cân trọng số theo kết quả kiểm định riêng của game này.`;
+    const out = {
+      side, conf: confidence, probability: pT, vi, streak, reason,
+      modelProbabilities, qualityLabel, sampleSize: n,
+      regimeShift: Number(shift.toFixed(3)),
+      modelVersion: 'adaptive-18'
+    };
+    if (sicboPrediction) out.dicePrediction = sicboPrediction;
     this.pending = side;
     this.pendingMeta = out;
     return out;
   }
 
   _pickVi(side) {
-    // Trả về 3 tổng điểm có khả năng cao (không phải 3 xúc xắc)
-    // Tài: 11-17 | Xỉu: 4-10
-    const isTai = side === 'T';
-    const pool = isTai ? [11, 12, 13, 14, 15, 16, 17] : [4, 5, 6, 7, 8, 9, 10];
-
-    // Ưu tiên các tổng xuất hiện nhiều trong history
-    const freq = {};
-    for (const s of this.sums.slice(-80)) {
-      if (pool.includes(s)) freq[s] = (freq[s] || 0) + 1;
+    const pool = side === 'T' ? [11, 12, 13, 14, 15, 16, 17] : [4, 5, 6, 7, 8, 9, 10];
+    const theoretical = {};
+    for (let a = 1; a <= 6; a++) for (let b = 1; b <= 6; b++) for (let c = 1; c <= 6; c++) {
+      const sum = a + b + c;
+      theoretical[sum] = (theoretical[sum] || 0) + 1;
     }
-    const sorted = Object.keys(freq)
-      .map(Number)
-      .sort((a, b) => (freq[b] || 0) - (freq[a] || 0));
-
-    if (sorted.length >= 3) return sorted.slice(0, 3);
-
-    // Fallback preset đẹp
-    const presetsT = [
-      [11, 12, 15], [12, 13, 14], [11, 14, 16], [12, 15, 16],
-      [13, 14, 15], [11, 13, 17], [12, 14, 15]
-    ];
-    const presetsX = [
-      [4, 6, 8], [5, 6, 7], [4, 5, 9], [6, 7, 8],
-      [5, 7, 9], [4, 7, 10], [5, 8, 9]
-    ];
-    const arr = isTai ? presetsT : presetsX;
-    return arr[Math.floor(Math.random() * arr.length)];
+    const counts = {};
+    const recent = this.sums.slice(-180);
+    recent.forEach((sum, index) => { counts[sum] = (counts[sum] || 0) + Math.pow(0.992, recent.length - 1 - index); });
+    return pool.map(sum => ({ sum, score: (counts[sum] || 0) + (theoretical[sum] || 0) * 1.5 }))
+      .sort((a, b) => b.score - a.score || a.sum - b.sum)
+      .slice(0, 3).map(x => x.sum);
   }
 
   accuracy() {
@@ -616,7 +922,7 @@ class Engine {
 
 /* ═══════════════ FEEDS & POLLING ═══════════════ */
 const FEEDS = {};
-for (const g of games) FEEDS[g.id] = { id: g.id, engine: new Engine(g.id), lastSession: null, lastLive: null, lastError: null, lastPred: null };
+for (const g of games) FEEDS[g.id] = { id: g.id, engine: new Engine(g.id), lastSession: null, seenSessions: new Set(), lastLive: null, lastError: null, lastPred: null };
 
 function parseHistoryArray(json) {
   if (!json) return [];
@@ -657,15 +963,42 @@ function parseHistoryArray(json) {
     let sum = Number(getVal(item, ['Tong', 'total']));
     if (!Number.isFinite(sum) || sum <= 0) sum = d1 + d2 + d3;
 
-    const k = String(ket).toLowerCase();
-    let side = 'X';
-    if (k.includes('tài') || k === 't') side = 'T';
-    else if (k.includes('xỉu') || k === 'x') side = 'X';
-    else if (sum > 0) side = sum >= 11 ? 'T' : 'X';
+    const k = String(ket).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+    let side = null;
+    if (k.includes('tai') || k === 't') side = 'T';
+    else if (k.includes('xiu') || k === 'x') side = 'X';
+    else if (sum >= 4 && sum <= 17) side = sum >= 11 ? 'T' : 'X';
+    if (!side && !(d1 >= 1 && d1 <= 6 && d2 >= 1 && d2 <= 6 && d3 >= 1 && d3 <= 6)) continue;
 
     out.push({ session: String(phien), side, sum, dice: [d1, d2, d3] });
   }
   return out.sort((a,b) => Number(a.session) - Number(b.session));
+}
+
+function compareSessionIds(a, b) {
+  const an = Number(a), bn = Number(b);
+  if (Number.isFinite(an) && Number.isFinite(bn)) return an - bn;
+  return String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: 'base' });
+}
+
+function appendNewGameResults(feed, historyArr) {
+  if (!(feed.seenSessions instanceof Set)) feed.seenSessions = new Set();
+  let added = 0;
+  for (const live of historyArr) {
+    const session = String(live.session || '');
+    if (!session || feed.seenSessions.has(session)) continue;
+    // Polling endpoints often return the full history on every request. Only append IDs
+    // newer than the last processed session; this prevents replaying old rows every poll.
+    if (feed.lastSession && compareSessionIds(session, feed.lastSession) <= 0) continue;
+    feed.engine.push(live.side, live.sum, live.dice, session);
+    feed.lastSession = session;
+    feed.lastLive = live;
+    feed.seenSessions.add(session);
+    added++;
+  }
+  // Bound memory while retaining a generous overlap for duplicate/late API rows.
+  while (feed.seenSessions.size > 2000) feed.seenSessions.delete(feed.seenSessions.values().next().value);
+  return added;
 }
 
 async function fetchJson(url) {
@@ -682,13 +1015,7 @@ async function pollGame(g) {
     const historyArr = parseHistoryArray(raw);
     if (!historyArr.length) throw new Error('empty');
 
-    let added = 0;
-    for (const live of historyArr) {
-      if (live.session && live.session !== f.lastSession) {
-        f.engine.push(live.side, live.sum, live.dice, live.session);
-        f.lastSession = live.session; f.lastLive = live; added++;
-      }
-    }
+    const added = appendNewGameResults(f, historyArr);
     if (added > 0 || !f.lastPred) {
       f.lastPred = f.engine.predict();
     }
@@ -825,15 +1152,137 @@ async function lc79Connect(uid, chatId, data) {
 }
 
 /* ═══════════════ HASH PREDICTOR ═══════════════ */
+function hashFeatures(hashStr) {
+  const chars = String(hashStr || '').toLowerCase().split('').map(ch => parseInt(ch, 16));
+  const values = [];
+  for (let segment = 0; segment < 8; segment++) {
+    const start = Math.floor(segment * chars.length / 8);
+    const end = Math.floor((segment + 1) * chars.length / 8);
+    const part = chars.slice(start, end);
+    const mean = part.length ? part.reduce((a, b) => a + b, 0) / part.length / 15 : 0.5;
+    const high = part.length ? part.filter(x => x >= 8).length / part.length : 0.5;
+    values.push(mean, high);
+  }
+  const entropyCounts = new Array(16).fill(0);
+  chars.forEach(x => entropyCounts[x]++);
+  const entropy = -entropyCounts.reduce((sum, count) => {
+    if (!count) return sum;
+    const p = count / chars.length;
+    return sum + p * Math.log2(p);
+  }, 0) / 4;
+  const oddRate = chars.filter(x => x % 2).length / Math.max(1, chars.length);
+  const diffs = chars.slice(1).map((x, i) => x - chars[i]);
+  const meanDiff = diffs.length ? diffs.reduce((a, b) => a + b, 0) / diffs.length / 15 : 0;
+  const meanAbsDiff = diffs.length ? diffs.reduce((a, b) => a + Math.abs(b), 0) / diffs.length / 15 : 0;
+  const repeatedAdjacent = diffs.length ? diffs.filter(x => x === 0).length / diffs.length : 0;
+  const risingRate = diffs.length ? diffs.filter(x => x > 0).length / diffs.length : 0.5;
+  const byteValues = [];
+  for (let i = 0; i + 1 < chars.length; i += 2) byteValues.push(chars[i] * 16 + chars[i + 1]);
+  const byteMean = byteValues.length ? byteValues.reduce((a, b) => a + b, 0) / byteValues.length / 255 : 0.5;
+  const byteVariance = byteValues.length ? byteValues.reduce((a, b) => a + (b / 255 - byteMean) ** 2, 0) / byteValues.length : 0;
+  const adjacentParityChanges = chars.length > 1 ? chars.slice(1).filter((x, i) => (x % 2) !== (chars[i] % 2)).length / (chars.length - 1) : 0.5;
+  values.push(oddRate, chars[0] / 15, chars[chars.length - 1] / 15, entropy,
+    meanDiff, meanAbsDiff, repeatedAdjacent, risingRate, byteMean, byteVariance, adjacentParityChanges);
+  return values;
+}
+
+function fitHashLogistic(type, samples) {
+  const expectedLength = type === 'MD5' ? 32 : 64;
+  const byDigest = new Map();
+  for (const row of Array.isArray(samples) ? samples : []) {
+    const hash = String(row && row.hash || '').toLowerCase();
+    if (!row || row.type !== type || row.conflicted || hash.length !== expectedLength || !/^[a-f0-9]+$/i.test(hash) || !['T', 'X'].includes(row.actual)) continue;
+    const old = byDigest.get(hash);
+    if (!old) byDigest.set(hash, { ...row, hash });
+    else if (old.actual !== row.actual) old.conflicted = true;
+  }
+  const rows = [...byDigest.values()].filter(row => !row.conflicted).sort((a, b) => Number(a.createdAt || 0) - Number(b.createdAt || 0));
+  const tCount = rows.filter(x => x.actual === 'T').length;
+  const xCount = rows.length - tCount;
+  if (rows.length < 240 || tCount < 70 || xCount < 70) return null;
+  const holdoutSize = Math.max(60, Math.floor(rows.length * 0.25));
+  const trainRows = rows.slice(0, rows.length - holdoutSize);
+  const testRows = rows.slice(rows.length - holdoutSize);
+  const fit = data => {
+    const xs = data.map(r => hashFeatures(r.hash));
+    const dims = xs[0].length;
+    const means = Array.from({ length: dims }, (_, j) => xs.reduce((a, x) => a + x[j], 0) / xs.length);
+    const scales = Array.from({ length: dims }, (_, j) => {
+      const v = xs.reduce((a, x) => a + (x[j] - means[j]) ** 2, 0) / xs.length;
+      return Math.sqrt(v) || 1;
+    });
+    const z = xs.map(x => x.map((v, j) => (v - means[j]) / scales[j]));
+    let w = new Array(dims).fill(0), bias = 0;
+    const lr = 0.12, l2 = 0.025;
+    for (let epoch = 0; epoch < 260; epoch++) {
+      const gw = new Array(dims).fill(0); let gb = 0;
+      for (let i = 0; i < z.length; i++) {
+        const y = data[i].actual === 'T' ? 1 : 0;
+        const score = bias + z[i].reduce((a, v, j) => a + v * w[j], 0);
+        const p = 1 / (1 + Math.exp(-Math.max(-20, Math.min(20, score))));
+        const error = p - y;
+        gb += error;
+        for (let j = 0; j < dims; j++) gw[j] += error * z[i][j];
+      }
+      bias -= lr * gb / z.length;
+      for (let j = 0; j < dims; j++) w[j] -= lr * (gw[j] / z.length + l2 * w[j]);
+    }
+    return { means, scales, w, bias };
+  };
+  const validationModel = fit(trainRows);
+  const predictP = (model, hash) => {
+    const x = hashFeatures(hash).map((v, j) => (v - model.means[j]) / model.scales[j]);
+    const score = model.bias + x.reduce((a, v, j) => a + v * model.w[j], 0);
+    return 1 / (1 + Math.exp(-Math.max(-20, Math.min(20, score))));
+  };
+  let tCorrect = 0, tTotal = 0, xCorrect = 0, xTotal = 0, brier = 0;
+  for (const row of testRows) {
+    const expected = row.actual === 'T' ? 1 : 0;
+    const probability = predictP(validationModel, row.hash);
+    const predicted = probability >= 0.5 ? 1 : 0;
+    brier += (probability - expected) ** 2;
+    if (expected) { tTotal++; if (predicted) tCorrect++; }
+    else { xTotal++; if (!predicted) xCorrect++; }
+  }
+  const balancedAccuracy = 100 * (((tTotal ? tCorrect / tTotal : 0) + (xTotal ? xCorrect / xTotal : 0)) / 2);
+  const validationBrier = brier / Math.max(1, testRows.length);
+  const baselineAccuracy = 100 * Math.max(tTotal, xTotal) / Math.max(1, testRows.length);
+  // Require chronological holdout performance beyond the majority baseline and a better-than-neutral Brier score.
+  if (balancedAccuracy < Math.max(55, baselineAccuracy + 2.5) || validationBrier >= 0.245) {
+    return { ready: false, samples: rows.length, validationAccuracy: balancedAccuracy, validationBrier, baselineAccuracy, holdoutSamples: testRows.length };
+  }
+  const model = fit(rows);
+  return { ready: true, samples: rows.length, validationAccuracy: balancedAccuracy, validationBrier, baselineAccuracy, holdoutSamples: testRows.length, model, predictP };
+}
+
 function predictHash(hashStr) {
-  const str = hashStr.toLowerCase();
-  let sum = 0;
-  for (let i = 0; i < str.length; i++) sum += str.charCodeAt(i) * (i + 1);
-  const pseudo = (sum * 9301 + 49297) % 233280 / 233280;
-  const side = pseudo >= 0.5 ? 'T' : 'X';
-  const conf = Math.round(55 + Math.abs(pseudo - 0.5) * 80);
-  const reason = pseudo >= 0.5 ? '🔴 Hash nghiêng Tài' : '🔵 Hash nghiêng Xỉu';
-  return { side, conf, reason };
+  const type = String(hashStr).length === 32 ? 'MD5' : 'SHA256';
+  let cached = hashModelCache[type];
+  if (!cached || cached.revision !== hashTrainingRevision) {
+    cached = { revision: hashTrainingRevision, result: fitHashLogistic(type, hashFeedbacks) };
+    hashModelCache[type] = cached;
+  }
+  const trained = cached.result;
+  if (trained && trained.ready) {
+    const p = trained.predictP(trained.model, hashStr);
+    const side = p >= 0.5 ? 'T' : 'X';
+    const conf = Math.max(50, Math.min(62, Math.round(Math.max(p, 1 - p) * 100)));
+    return {
+      side, conf,
+      reason: `Mô hình đã qua kiểm định ngoài mẫu ${trained.holdoutSamples} dòng; balanced accuracy ${trained.validationAccuracy.toFixed(1)}%, Brier ${trained.validationBrier.toFixed(3)}. Chỉ là tín hiệu tham khảo, không bảo đảm kết quả.`,
+      model: 'learned', samples: trained.samples, validationAccuracy: trained.validationAccuracy, validationBrier: trained.validationBrier
+    };
+  }
+  // Cryptographic digests are designed to look random. Without a known game seed/mapping,
+  // do not invent a confident prediction: display a neutral exploratory signal only.
+  const bytes = Buffer.from(hashStr, 'hex');
+  const parity = bytes.reduce((sum, value, index) => sum + (index % 2 ? -1 : 1) * (value / 255), 0);
+  return {
+    side: parity >= 0 ? 'T' : 'X', conf: 50,
+    reason: 'Chưa có đủ dữ liệu đã xác nhận để mô hình vượt kiểm định ngoài mẫu. Hash mã hóa không tự tiết lộ Tài/Xỉu nếu chưa biết cơ chế tạo kết quả; hiện chỉ hiển thị tín hiệu trung tính.',
+    model: 'neutral', samples: 0,
+    validationAccuracy: trained ? trained.validationAccuracy : null
+  };
 }
 
 /* ═══════════════ EXPORT HISTORY (TELEGRAM) ═══════════════ */
@@ -878,8 +1327,8 @@ async function showForceJoin(chatId, missing) {
   (missing || settings.groups || []).forEach((g, i) => {
     if (g.link) rows.push([btnUrl(`📢 GROUP ${i + 1}: ${g.title || 'Tham gia'}`, g.link, 'primary')]);
   });
-  rows.push([btn('✅ TÔI ĐÃ THAM GIA', 'join:check', 'success')]);
-  return send(chatId, '⚠️ <b>BẮT BUỘC THAM GIA NHÓM</b>\n\nBạn cần join đủ nhóm/kênh bên dưới rồi bấm <b>TÔI ĐÃ THAM GIA</b> để mở bot.', kb(rows));
+  rows.push([btn('✅ KIỂM TRA THAM GIA', 'join:check', 'success')]);
+  return send(chatId, '🔔 <b>THAM GIA CỘNG ĐỒNG</b>\n\nVui lòng tham gia các nhóm/kênh bên dưới, sau đó chọn <b>KIỂM TRA THAM GIA</b> để tiếp tục.', kb(rows));
 }
 
 async function showUserMenu(chatId, from) {
@@ -895,7 +1344,6 @@ async function showUserMenu(chatId, from) {
   const text =
 `╭━━━━━━━━━━━━━━━━━━━━╮
        🔥 <b>TOOL TX BY FEE</b>
-       <i>SMART GAME TOOL • v16.2</i>
 ╰━━━━━━━━━━━━━━━━━━━━╯
 
 👤 <b>TÀI KHOẢN CỦA BẠN</b>
@@ -905,112 +1353,135 @@ async function showUserMenu(chatId, from) {
 ├ Trạng thái: ${accessLine}
 └ Thời hạn: <b>${esc(v.expire.replace(/^.*?: /, ''))}</b>
 
-┌── 🧰 <b>TRUNG TÂM CÔNG CỤ</b>
-├ 🎮 ALL GAME: TX • MD5 • SICBO
-├ 🧩 HASH LAB: MD5 • SHA-256
-├ 📡 Cập nhật dữ liệu và lịch sử phiên
-├ 📦 KHO FILE: FULL SCR AUTOCUOCLC79\n└ 🔐 Quản lý KEY / CODE / gói thuê
+┌── ✨ <b>TIỆN ÍCH TÀI KHOẢN</b>
+├ 🎮 Nhận định TX • MD5 • Sicbo
+├ 🧩 Phân tích mã Hash
+├ 📊 Lịch sử phiên và đối chiếu
+└ 📦 Tải tệp từ Kho File
 
-👇 <b>CHỌN CHỨC NĂNG BÊN DƯỚI</b>`;
+👇 <b>Chọn chức năng bạn cần</b>`;
 
   const rows = [
-    [btn('🚀 VÀO TOOL ALL GAME', 'pred:brands', 'primary')],
-    [btn('🧩 TOOL HASH', 'hash:start', 'success'), btn('📦 KHO FILE', 'store:open', 'primary')],
-    [btn('💳 THUÊ TOOL', 'rent:menu', 'primary'), btn('🔑 NHẬP KEY', 'key:input', 'success')],
-    [btn('🎫 NHẬP CODE', 'code:input', 'success'), btn('💬 SUPPORT', 'support:go', 'primary')],
-    [btn('⭐ FEEDBACK', 'fb:start', 'success')]
+    [btn('🎮 CHỌN GAME', 'pred:brands', 'primary')],
+    [btn('🧩 KIỂM TRA HASH', 'hash:start', 'success'), btn('📦 KHO FILE', 'store:open', 'primary')],
+    [btn('💳 GÓI SỬ DỤNG', 'rent:menu', 'primary'), btn('🔑 KÍCH HOẠT KEY', 'key:input', 'success')],
+    [btn('🎫 KÍCH HOẠT CODE', 'code:input', 'success'), btn('💬 TRỢ GIÚP', 'support:go', 'primary')],
+    [btn('⭐ GỬI ĐÁNH GIÁ', 'fb:start', 'success')]
   ];
   return send(chatId, text, kb(rows));
 }
 
 async function showFileStore(chatId) {
   const file = storeFiles[String(storeProduct.activeFileId || '')];
-  if (!file || !fs.existsSync(path.join(STORE_UPLOADS, file.storedName))) {
-    return send(chatId, '📦 <b>KHO FILE</b>\n\nHiện admin chưa tải file sản phẩm lên kho. Vui lòng quay lại sau hoặc liên hệ hỗ trợ.', kb([
-      [btn('◀️ QUAY LẠI MENU', 'menu', 'danger')]
+  if (!storeFileExists(file)) {
+    return send(chatId, '📦 <b>KHO FILE</b>\n\nHiện chưa có tệp để bán. Vui lòng quay lại sau nhé! 💙', kb([
+      [btn('◀️ MENU CHÍNH', 'menu', 'primary')]
     ]));
   }
   const sizeMb = (Number(file.size || 0) / (1024 * 1024)).toFixed(2);
-  return send(chatId, `📦 <b>KHO FILE PREMIUM</b>\n\n🧾 Sản phẩm: <b>${esc(STORE_PRODUCT_NAME)}</b>\n💰 Giá: <b>${fmt(STORE_PRICE)}đ</b>\n📁 Tệp: <b>${esc(file.originalName)}</b>\n📏 Dung lượng: <b>${sizeMb} MB</b>\n\nSau khi thanh toán thành công, bot sẽ tự động gửi file vào cuộc trò chuyện này.`, kb([
-    [btn('💳 MUA NGAY — 10.000đ', 'store:confirm', 'success')],
-    [btn('◀️ QUAY LẠI MENU', 'menu', 'danger')]
+  return send(chatId, `📦 <b>KHO FILE</b>\n\n🧾 <b>${esc(STORE_PRODUCT_NAME)}</b>\n💰 Giá: <b>${fmt(STORE_PRICE)}đ</b>\n📁 ${esc(file.originalName || 'Tài liệu số')} • ${sizeMb} MB\n\n🏦 Thanh toán bằng QR TPBank.\n📩 Khi giao dịch khớp, bot tự gửi tệp vào chat này.`, kb([
+    [btn('💳 MUA NGAY • ' + fmt(STORE_PRICE) + 'đ', 'store:confirm', 'success')],
+    [btn('◀️ MENU CHÍNH', 'menu', 'primary')]
   ]));
 }
 
 async function createFileOrder(chatId, uid) {
   const file = storeFiles[String(storeProduct.activeFileId || '')];
-  if (!file || !fs.existsSync(path.join(STORE_UPLOADS, file.storedName))) {
-    return send(chatId, '⚠️ Kho file chưa có tệp đang bán. Vui lòng liên hệ admin.', kb([[btn('◀️ QUAY LẠI', 'store:open', 'primary')]]));
+  if (!storeFileExists(file)) {
+    return send(chatId, '⚠️ Kho hiện chưa có tệp để giao. Vui lòng quay lại sau hoặc liên hệ bộ phận hỗ trợ.', kb([[btn('◀️ QUAY LẠI', 'store:open', 'primary')]]));
+  }
+  // One active order per user avoids duplicate orders from repeated taps.
+  const existing = Object.values(orders).find(o => o && o.type === 'file' && o.uid === String(uid) && ['pending', 'checking', 'timeout'].includes(o.status) && (!o.expire || Date.now() <= o.expire));
+  if (existing) {
+    return send(chatId, `🧾 <b>ĐƠN ĐANG CHỜ THANH TOÁN</b>\nMã đơn: <code>${existing.id}</code> • <b>${fmt(existing.amount)}đ</b>\nMã CK: <code>${esc(existing.addInfo)}</code>\nVui lòng dùng QR của đơn hiện tại hoặc huỷ đơn trước khi tạo đơn mới.`, kb([
+      [btn('✅ ĐÃ THANH TOÁN', 'store:done:' + existing.id, 'success')],
+      [btn('🏠 MENU', 'menu', 'primary')]
+    ]));
   }
   const orderId = 'F' + Date.now().toString(36).toUpperCase() + String(uid).slice(-4);
-  const addInfo = STORE_TRANSFER_INFO;
+  const addInfo = createPaymentMemo('file', uid, ensureUser(uid).username);
   const qr = vietqrUrl(STORE_PRICE, addInfo);
   orders[orderId] = {
     id: orderId, type: 'file', product: STORE_PRODUCT_NAME, uid: String(uid),
     fileId: String(file.id), amount: STORE_PRICE, addInfo,
-    status: 'pending', created: Date.now(), expire: Date.now() + 30 * 60 * 1000
+    status: 'pending', created: Date.now(), expire: Date.now() + 45 * 60 * 1000
   };
   saveOrders();
-  const caption = `📦 <b>ĐƠN MUA KHO FILE</b>\n\n🧾 ${esc(STORE_PRODUCT_NAME)}\n💰 <b>${fmt(STORE_PRICE)}đ</b>\n🏦 TPBank • <code>${BANK.account}</code>\n👤 ${esc(BANK.name)}\n📝 Nội dung chuyển khoản: <code>${addInfo}</code>\n⏳ Đơn có hiệu lực 30 phút.\n\nQuét QR và chuyển đúng số tiền, đúng nội dung. Sau khi chuyển khoản, bấm <b>TÔI ĐÃ CHUYỂN</b>. Admin sẽ xác nhận và bot gửi file cho bạn.`,
-    replyMarkup = { inline_keyboard: [
-      [{ text: '✅ TÔI ĐÃ CHUYỂN', callback_data: 'store:done:' + orderId }],
-      [{ text: '🗑 HUỶ ĐƠN', callback_data: 'store:cancel:' + orderId }],
-      [{ text: '◀️ QUAY LẠI', callback_data: 'store:open' }]
-    ] };
+  const caption = `🏦 <b>TPBANK • THANH TOÁN</b>\n📦 ${esc(STORE_PRODUCT_NAME)} • <b>${fmt(STORE_PRICE)}đ</b>\n💳 <code>${BANK.account}</code> • ${esc(BANK.name)}\n📝 Mã CK: <code>${esc(addInfo)}</code>\n🧾 Đơn: <code>${orderId}</code>\n\n📲 Quét QR, chuyển đúng số tiền và mã CK. Sau đó chọn <b>ĐÃ THANH TOÁN</b>. Bot tự đối soát.`
+  const replyMarkup = { inline_keyboard: [
+    [{ text: '✅ ĐÃ THANH TOÁN', callback_data: 'store:done:' + orderId }],
+    [{ text: '🗑 HUỶ ĐƠN', callback_data: 'store:cancel:' + orderId }],
+    [{ text: '◀️ QUAY LẠI', callback_data: 'store:open' }]
+  ] };
   try {
     const image = await downloadImage(qr);
     const sent = await tgMultipart('sendPhoto', {
       chat_id: chatId, caption, parse_mode: 'HTML', reply_markup: replyMarkup
-    }, { buffer: image.buffer, contentType: image.contentType, filename: 'qr-' + orderId + '.png' });
+    }, { buffer: image.buffer, contentType: image.contentType, filename: 'vietqr-' + orderId + '.png' });
     if (sent && sent.ok) return sent;
     throw new Error((sent && sent.description) || 'Telegram không nhận ảnh QR');
   } catch (err) {
     console.error('[STORE QR]', err.message);
-    return send(chatId, `⚠️ <b>KHÔNG TẢI ĐƯỢC ẢNH QR TỰ ĐỘNG</b>\n\n🧾 ${esc(STORE_PRODUCT_NAME)}\n💰 <b>${fmt(STORE_PRICE)}đ</b>\n🏦 TPBank: <code>${BANK.account}</code>\n👤 ${esc(BANK.name)}\n📝 Nội dung: <code>${addInfo}</code>\n<a href="${esc(qr)}">MỞ MÃ QR VIETQR</a>\n\n${esc(err.message)}\nSau khi chuyển khoản bấm TÔI ĐÃ CHUYỂN.`, { reply_markup: replyMarkup, disable_web_page_preview: false });
+    return send(chatId, `⚠️ <b>QR TẠM THỜI KHÔNG TẢI ĐƯỢC</b>\n📦 ${esc(STORE_PRODUCT_NAME)} • <b>${fmt(STORE_PRICE)}đ</b>\n🏦 TPBank: <code>${BANK.account}</code> • ${esc(BANK.name)}\n📝 Mã CK: <code>${esc(addInfo)}</code>\n🧾 Đơn: <code>${orderId}</code>\n<a href="${esc(qr)}">📲 Mở QR thanh toán</a>\nSau khi chuyển khoản, chọn <b>ĐÃ THANH TOÁN</b>.`, { reply_markup: replyMarkup, disable_web_page_preview: false });
   }
+}
+
+async function notifyAdminsAboutFileOrder(order, reason) {
+  const text = `🔔 <b>ĐƠN KHO FILE CẦN ADMIN KIỂM TRA</b>\n━━━━━━━━━━━━━━━━━━\n🧾 Đơn: <code>${esc(order.id)}</code>\n👤 User: <code>${esc(order.uid)}</code>\n📦 Sản phẩm: <b>${esc(order.product || STORE_PRODUCT_NAME)}</b>\n💰 Số tiền: <b>${fmt(order.amount)}đ</b>\n📝 Nội dung CK: <code>${esc(order.addInfo)}</code>\n⚠️ ${esc(reason)}\n\nHãy kiểm tra tài khoản ngân hàng trước khi duyệt.`;
+  const markup = kb([
+    [btn('✅ XÁC NHẬN + GỬI FILE', 'store:approve:' + order.id, 'success')],
+    [btn('❌ TỪ CHỐI ĐƠN', 'store:reject:' + order.id, 'danger')]
+  ]);
+  for (const adminId of ADMIN_IDS) await send(adminId, text, markup);
 }
 
 async function markFileOrderDone(chatId, uid, orderId) {
   const order = orders[orderId];
   if (!order || order.type !== 'file' || order.uid !== String(uid)) return send(chatId, '❌ Đơn hàng không hợp lệ.');
-  if (order.status === 'paid') return send(chatId, '✅ Đơn này đã được xác nhận và file đã gửi.');
-  if (order.status === 'checking') return send(chatId, '⏳ Đơn đang chờ admin xác nhận. Bot sẽ gửi file ngay khi được duyệt.');
+  if (order.status === 'paid') return send(chatId, '🎉 Giao dịch đã khớp! File đã được gửi vào Telegram của bạn.');
+  if (order.status === 'delivering') return send(chatId, '📤 <b>BOT ĐANG GỬI FILE CHO BẠN</b>\nVui lòng chờ tin nhắn tài liệu nhé!');
+  if (order.status === 'checking') return send(chatId, '⏳ <b>ĐƠN ĐANG ĐƯỢC ĐỐI SOÁT</b>\n\nBot đang chờ thông báo TPBank. Nếu chưa đọc được giao dịch, admin đã nhận yêu cầu kiểm tra thủ công. Bạn không cần bấm lại nhé! 💙');
   if (order.status !== 'pending' || (order.expire && Date.now() > order.expire)) return send(chatId, '⌛ Đơn đã hết hạn hoặc đã huỷ. Hãy tạo đơn mới tại KHO FILE.');
   order.status = 'checking';
   order.checkAt = Date.now();
   saveOrders();
-  await send(chatId, `⏳ <b>ĐÃ GỬI YÊU CẦU XÁC NHẬN</b>\n\nĐơn: <code>${orderId}</code>\nSản phẩm: <b>${esc(STORE_PRODUCT_NAME)}</b>\nSố tiền: <b>${fmt(STORE_PRICE)}đ</b>\n\nAdmin sẽ kiểm tra giao dịch. Khi được xác nhận, bot tự động gửi file cho bạn.`, kb([[btn('📦 XEM KHO FILE', 'store:open', 'primary'), btn('🏠 MENU', 'menu', 'success')]]));
-  for (const adminId of ADMIN_IDS) {
-    await send(adminId, `🔔 <b>CÓ ĐƠN KHO FILE CHỜ DUYỆT</b>\n\nĐơn: <code>${orderId}</code>\nUser: <code>${order.uid}</code>\nSản phẩm: ${esc(STORE_PRODUCT_NAME)}\nSố tiền: <b>${fmt(order.amount)}đ</b>\nNội dung CK: <code>${esc(order.addInfo)}</code>`, kb([
-      [btn('✅ XÁC NHẬN ĐÃ NHẬN TIỀN', 'store:approve:' + orderId, 'success')],
-      [btn('❌ TỪ CHỐI ĐƠN', 'store:reject:' + orderId, 'danger')]
-    ]));
-  }
+  await send(chatId, `🤖 <b>ĐÃ GỬI YÊU CẦU ĐỐI SOÁT</b>\n\n🧾 Đơn: <code>${orderId}</code>\n💰 Số tiền: <b>${fmt(order.amount)}đ</b>\n📝 Nội dung: <code>${esc(order.addInfo)}</code>\n\n🏦 Bot đang kiểm tra thông báo TPBank. Nếu giao dịch khớp, file sẽ tự động được gửi. Nếu chưa có thông báo phù hợp, admin sẽ kiểm tra và duyệt thủ công.`, kb([[btn('📦 KHO FILE', 'store:open', 'primary'), btn('🏠 MENU', 'menu', 'success')]]));
+  await notifyAdminsAboutFileOrder(order, 'Người mua đã bấm DONE nhưng bot chưa ghi nhận giao dịch tương ứng tại thời điểm kiểm tra.');
   return true;
 }
 
-async function approveFileOrder(orderId, adminId, webAuthorized = false) {
-  if (!webAuthorized && !isAdmin(adminId)) return { ok: false, message: 'Không có quyền admin.' };
+async function approveFileOrder(orderId, adminId, authorizedAuto = false) {
+  if (!authorizedAuto && !isAdmin(adminId)) return { ok: false, message: 'Không có quyền admin.' };
   const order = orders[orderId];
   if (!order || order.type !== 'file') return { ok: false, message: 'Không tìm thấy đơn kho file.' };
-  if (order.status === 'paid') return { ok: true, already: true, message: 'Đơn đã được giao file trước đó.' };
-  if (!['pending', 'checking'].includes(order.status)) return { ok: false, message: 'Đơn không ở trạng thái chờ xử lý.' };
+  if (order.status === 'paid') return { ok: true, already: true, message: 'Đơn đã được gửi file trước đó.' };
+  if (!['pending', 'checking', 'processing'].includes(order.status)) return { ok: false, message: 'Đơn không ở trạng thái chờ xử lý.' };
   const file = storeFiles[String(order.fileId || '')];
-  if (!file) return { ok: false, message: 'File của đơn đã bị xoá khỏi kho.' };
-  const filePath = path.join(STORE_UPLOADS, file.storedName);
-  if (!fs.existsSync(filePath)) return { ok: false, message: 'Không tìm thấy dữ liệu file trên máy chủ.' };
-  const size = fs.statSync(filePath).size;
-  if (size > 49 * 1024 * 1024) return { ok: false, message: 'File vượt giới hạn gửi Telegram (49 MB).' };
+  if (!storeFileExists(file)) return { ok: false, message: 'Không tìm thấy tệp sản phẩm. Admin hãy tải file mới bằng lệnh /setfile.' };
   order.status = 'delivering';
   order.approvedBy = String(adminId);
   order.approvedAt = Date.now();
   saveOrders();
-  const buffer = fs.readFileSync(filePath);
-  const sent = await tgMultipart('sendDocument', {
-    chat_id: order.uid,
-    caption: `✅ <b>THANH TOÁN ĐÃ ĐƯỢC XÁC NHẬN</b>\n\n📦 ${esc(STORE_PRODUCT_NAME)}\n🧾 Đơn: <code>${orderId}</code>\nCảm ơn bạn đã mua hàng!`,
-    parse_mode: 'HTML'
-  }, { buffer, filename: file.originalName || 'file', contentType: file.mimeType || 'application/octet-stream', fieldName: 'document' });
+  const caption = `🎉 <b>THANH TOÁN ĐÃ ĐƯỢC XÁC NHẬN</b>\n━━━━━━━━━━━━━━━━━━\n📦 ${esc(order.product || STORE_PRODUCT_NAME)}\n🧾 Đơn: <code>${esc(orderId)}</code>\n✅ Giao dịch đã đối soát thành công.\n💙 Cảm ơn bạn đã ủng hộ!`;
+  let sent;
+  if (file.telegramFileId) {
+    sent = await tg('sendDocument', { chat_id: order.uid, document: file.telegramFileId, caption, parse_mode: 'HTML' });
+  } else {
+    const filePath = path.join(STORE_UPLOADS, file.storedName);
+    if (!fs.existsSync(filePath)) {
+      order.status = 'checking'; saveOrders();
+      return { ok: false, message: 'Không tìm thấy dữ liệu file trên máy chủ.' };
+    }
+    const size = fs.statSync(filePath).size;
+    if (size > 49 * 1024 * 1024) {
+      order.status = 'checking'; saveOrders();
+      return { ok: false, message: 'File vượt giới hạn gửi Telegram (49 MB).' };
+    }
+    const buffer = fs.readFileSync(filePath);
+    sent = await tgMultipart('sendDocument', {
+      chat_id: order.uid, caption, parse_mode: 'HTML'
+    }, { buffer, filename: file.originalName || 'file', contentType: file.mimeType || 'application/octet-stream', fieldName: 'document' });
+  }
   if (!sent || !sent.ok) {
     order.status = 'checking';
     order.deliveryError = (sent && sent.description) || 'Không gửi được file qua Telegram';
@@ -1021,21 +1492,22 @@ async function approveFileOrder(orderId, adminId, webAuthorized = false) {
   order.paidAt = Date.now();
   order.deliveredAt = Date.now();
   order.deliveredMessageId = sent.result && sent.result.message_id;
+  order.autoPaid = String(adminId) === 'bank-auto';
   delete order.deliveryError;
   saveOrders();
   return { ok: true, message: `Đã xác nhận và gửi file đến user ${order.uid}.` };
 }
 
-async function rejectFileOrder(orderId, adminId, reason = 'Giao dịch chưa được xác nhận', webAuthorized = false) {
-  if (!webAuthorized && !isAdmin(adminId)) return { ok: false, message: 'Không có quyền admin.' };
+async function rejectFileOrder(orderId, adminId, reason = 'Giao dịch chưa được xác nhận') {
+  if (!isAdmin(adminId)) return { ok: false, message: 'Không có quyền admin.' };
   const order = orders[orderId];
   if (!order || order.type !== 'file') return { ok: false, message: 'Không tìm thấy đơn kho file.' };
-  if (order.status === 'paid') return { ok: false, message: 'Đơn đã thanh toán và file đã gửi, không thể từ chối.' };
+  if (order.status === 'paid' || order.status === 'delivering') return { ok: false, message: 'Đơn đã được gửi hoặc đang gửi file, không thể từ chối.' };
   order.status = 'rejected';
   order.rejectedAt = Date.now();
   order.rejectedBy = String(adminId);
   saveOrders();
-  await send(order.uid, `❌ <b>ĐƠN KHO FILE CHƯA ĐƯỢC DUYỆT</b>\nĐơn: <code>${orderId}</code>\nLý do: ${esc(reason)}\nNếu bạn đã chuyển tiền, vui lòng liên hệ admin để đối chiếu.`);
+  await send(order.uid, `❌ <b>ĐƠN KHO FILE CHƯA ĐƯỢC DUYỆT</b>\n🧾 Đơn: <code>${esc(orderId)}</code>\nLý do: ${esc(reason)}\nNếu bạn đã chuyển tiền, vui lòng liên hệ admin để đối chiếu.`);
   return { ok: true, message: 'Đã từ chối đơn và thông báo người mua.' };
 }
 
@@ -1049,27 +1521,37 @@ async function showRentMenu(chatId) {
 async function showRentConfirm(chatId, pkgId) {
   const pkg = (settings.packages || []).find(p => p.id === pkgId);
   if (!pkg) return send(chatId, '❌ Gói không tồn tại.', kb([[btn('◀️ QUAY LẠI', 'rent:menu', 'primary')]]));
-  const text = `🛒 <b>XÁC NHẬN MUA</b>\n\nGói: <b>${esc(pkg.label)}</b>\nSố tiền: <b>${Number(pkg.amount).toLocaleString('vi-VN')}đ</b>\nThời hạn: <b>${pkg.hours}h</b>\n\n<b>MÀY XÁC NHẬN MUA CHỨ??</b>`;
+  const text = `🛒 <b>XÁC NHẬN MUA</b>\n\nGói: <b>${esc(pkg.label)}</b>\nSố tiền: <b>${Number(pkg.amount).toLocaleString('vi-VN')}đ</b>\nThời hạn: <b>${pkg.hours}h</b>\n\n<b>Bạn xác nhận chọn gói này chứ?</b>`;
   return send(chatId, text, kb([
-    [btn('✅ YESS', 'rent:yes:' + pkgId, 'success'), btn('❌ NÔ', 'rent:menu', 'danger')]
+    [btn('✅ XÁC NHẬN', 'rent:yes:' + pkgId, 'success'), btn('↩️ CHỌN LẠI', 'rent:menu', 'danger')]
   ]));
 }
 
 async function createRentOrder(chatId, uid, pkgId) {
   const pkg = (settings.packages || []).find(p => p.id === pkgId);
   if (!pkg) return send(chatId, '❌ Gói không tồn tại.');
+  const activeOrder = Object.values(orders).find(o => o && o.type !== 'file' && o.uid === String(uid) && ['pending', 'checking', 'timeout'].includes(o.status) && (!o.expire || Date.now() <= Number(o.expire)));
+  if (activeOrder) {
+    return send(chatId, `🧾 <b>ĐƠN KEY ĐANG CHỜ THANH TOÁN</b>\n📦 Gói: <b>${esc(activeOrder.pkgId || 'Gói đã chọn')}</b> • ${fmt(activeOrder.amount)}đ\nMã CK: <code>${esc(activeOrder.addInfo)}</code>\nDùng QR cũ hoặc huỷ đơn này trước khi tạo đơn mới.`, kb([
+      [btn('✅ ĐÃ THANH TOÁN', 'rent:done:' + activeOrder.id, 'success')],
+      [btn('🗑 HUỶ ĐƠN CŨ', 'rent:cancel:' + activeOrder.id, 'danger')],
+      [btn('◀️ QUAY LẠI', 'rent:menu', 'primary')]
+    ]));
+  }
   const orderId = 'O' + Date.now().toString(36).toUpperCase() + String(uid).slice(-4);
-  const addInfo = 'Napas' + uid;
+  const user = ensureUser(uid);
+  const addInfo = createPaymentMemo('key', uid, user.username);
   const qr = vietqrUrl(pkg.amount, addInfo);
   orders[orderId] = {
-    id: orderId, uid: String(uid), pkgId, amount: pkg.amount, hours: pkg.hours,
-    addInfo, status: 'pending', created: Date.now(), expire: Date.now() + 10 * 60 * 1000
+    id: orderId, type: 'key', uid: String(uid), username: user.username || '', pkgId,
+    amount: pkg.amount, hours: pkg.hours, addInfo,
+    status: 'pending', created: Date.now(), expire: Date.now() + 30 * 60 * 1000
   };
   saveOrders();
-  const caption = `💳 <b>ĐƠN HÀNG ${orderId}</b>\n\n🏦 TPBank • <code>${BANK.account}</code>\n👤 ${BANK.name}\n💰 <b>${Number(pkg.amount).toLocaleString('vi-VN')}đ</b>\n📝 ND: <code>${addInfo}</code>\n⏳ Hết hạn đơn: 10 phút\n\nQuét mã QR bằng ứng dụng ngân hàng, kiểm tra đúng số tiền và nội dung chuyển khoản. Sau khi chuyển khoản bấm <b>DONE</b>.`;
+  const caption = `🏦 <b>TPBANK • MUA GÓI KEY</b>\n💰 <b>${fmt(pkg.amount)}đ</b> • ${Number(pkg.hours) || 24} giờ\n💳 <code>${BANK.account}</code> • ${esc(BANK.name)}\n📝 Mã CK: <code>${esc(addInfo)}</code>\n🧾 Đơn: <code>${orderId}</code>\n\n📲 Quét QR, chuyển đúng số tiền và mã CK. Sau đó chọn <b>ĐÃ THANH TOÁN</b>.`
   const replyMarkup = {
     inline_keyboard: [
-      [{ text: '✅ DONE', callback_data: 'rent:done:' + orderId },
+      [{ text: '✅ ĐÃ THANH TOÁN', callback_data: 'rent:done:' + orderId },
        { text: '🗑 HUỶ ĐƠN', callback_data: 'rent:cancel:' + orderId }],
       [{ text: '◀️ QUAY LẠI', callback_data: 'rent:menu' }]
     ]
@@ -1088,23 +1570,86 @@ async function createRentOrder(chatId, uid, pkgId) {
   } catch (err) {
     console.error('[QR] Không gửi được mã QR:', err.message);
     // Keep the order usable and expose a clear fallback rather than silently failing.
-    return send(chatId, `⚠️ <b>CHƯA GỬI ĐƯỢC ẢNH QR TỰ ĐỘNG</b>\n\n💳 <b>ĐƠN HÀNG ${orderId}</b>\n🏦 TPBank: <code>${BANK.account}</code>\n👤 ${BANK.name}\n💰 <b>${Number(pkg.amount).toLocaleString('vi-VN')}đ</b>\n📝 Nội dung: <code>${addInfo}</code>\n\n<a href=\"${esc(qr)}\">MỞ MÃ QR VIETQR</a>\n\n${esc(err.message)}\nBạn vẫn có thể thanh toán theo thông tin trên rồi bấm DONE.`, {
+    return send(chatId, `⚠️ <b>QR TẠM THỜI KHÔNG TẢI ĐƯỢC</b>
+🏦 TPBank: <code>${BANK.account}</code> • ${esc(BANK.name)}
+💰 <b>${fmt(pkg.amount)}đ</b> • ${Number(pkg.hours) || 24} giờ
+📝 Mã CK: <code>${esc(addInfo)}</code>
+🧾 Đơn: <code>${orderId}</code>
+<a href=\"${esc(qr)}\">📲 Mở QR thanh toán</a>
+Sau khi chuyển khoản, chọn <b>ĐÃ THANH TOÁN</b>.`, {
       reply_markup: replyMarkup,
       disable_web_page_preview: false
     });
   }
 }
 
+async function deliverKeyOrder(order, source = 'admin') {
+  if (!order.key) {
+    const created = createKeyForUser(order.uid, Number(order.hours) || 24);
+    order.key = created.key;
+    order.keyUntil = created.until;
+  }
+  order.status = 'processing';
+  saveOrders();
+  const exp = new Date(Number(order.keyUntil || (keysDB[order.key] && keysDB[order.key].until) || Date.now())).toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
+  const delivered = await send(order.uid, `🎉 <b>THANH TOÁN THÀNH CÔNG — TPBANK</b>\n━━━━━━━━━━━━━━━━━━\n🔑 KEY CỦA BẠN:\n<code>${esc(order.key)}</code>\n⏳ Hạn sử dụng: <b>${exp}</b>\n✅ Đơn hàng đã được xác nhận.`, kb([
+    [btn('🎮 CHỌN GAME', 'pred:brands', 'primary')],
+    [btn('🏠 MENU', 'menu', 'success')]
+  ]));
+  if (!delivered || !delivered.ok) {
+    order.status = 'checking';
+    order.deliveryError = delivered && delivered.description ? delivered.description : 'Telegram chưa xác nhận gửi KEY';
+    saveOrders();
+    return { ok: false, message: 'KEY đã tạo nhưng gửi Telegram thất bại; admin có thể duyệt lại để gửi lại KEY cũ, không tạo KEY mới.' };
+  }
+  order.status = 'paid'; order.paidAt = order.paidAt || Date.now(); order.deliveredAt = Date.now(); order.deliverySource = source;
+  delete order.deliveryError;
+  saveOrders();
+  return { ok: true, message: 'Đã gửi KEY đến user ' + order.uid + '.' };
+}
+
+async function approveKeyOrder(orderId, adminId) {
+  if (!isAdmin(adminId)) return { ok: false, message: 'Không có quyền admin.' };
+  const order = orders[orderId];
+  if (!order || order.type === 'file') return { ok: false, message: 'Không tìm thấy đơn mua KEY.' };
+  if (order.status === 'paid') return { ok: true, message: 'Đơn đã được cấp KEY trước đó.' };
+  if (!['pending', 'checking', 'timeout', 'processing'].includes(order.status)) return { ok: false, message: 'Đơn không ở trạng thái chờ xử lý.' };
+  order.approvedBy = String(adminId);
+  return deliverKeyOrder(order, 'admin');
+}
+
+async function rejectKeyOrder(orderId, adminId) {
+  if (!isAdmin(adminId)) return { ok: false, message: 'Không có quyền admin.' };
+  const order = orders[orderId];
+  if (!order || order.type === 'file') return { ok: false, message: 'Không tìm thấy đơn mua KEY.' };
+  if (order.status === 'paid' || order.key) return { ok: false, message: 'Đơn đã tạo KEY hoặc đã giao KEY; hãy dùng nút duyệt lại để gửi KEY cũ, không từ chối.' };
+  order.status = 'rejected'; order.rejectedAt = Date.now(); order.rejectedBy = String(adminId); saveOrders();
+  await send(order.uid, `❌ Đơn mua KEY <code>${esc(orderId)}</code> chưa được duyệt. Vui lòng liên hệ admin nếu bạn đã chuyển khoản.`);
+  return { ok: true, message: 'Đã từ chối đơn mua KEY.' };
+}
+
 async function markOrderDone(chatId, uid, orderId) {
   const o = orders[orderId];
-  if (!o || o.uid !== String(uid)) return send(chatId, '❌ Đơn không hợp lệ.');
+  if (!o || o.uid !== String(uid) || o.type === 'file') return send(chatId, '❌ Đơn không hợp lệ.');
   if (o.status === 'paid') return send(chatId, '✅ Đơn đã được xử lý trước đó.');
+  if (o.status === 'processing') return send(chatId, '📤 Bot đang giao KEY cho bạn. Vui lòng đợi tin nhắn KEY.');
+  if (['cancelled', 'rejected'].includes(o.status)) return send(chatId, '⚠️ Đơn đã huỷ hoặc bị từ chối. Hãy tạo đơn mới nếu vẫn muốn mua.');
+  if (o.status === 'checking') return send(chatId, '⏳ Đơn đã được gửi admin đối soát. Bạn không cần bấm DONE thêm lần nữa.');
+  if (!['pending', 'timeout'].includes(o.status)) return send(chatId, '⚠️ Trạng thái đơn không còn hợp lệ. Vui lòng liên hệ admin.');
+  if (o.expire && Date.now() > Number(o.expire) + 30 * 60 * 1000) return send(chatId, '⌛ Đơn đã quá hạn đối soát. Vui lòng tạo đơn mới hoặc liên hệ admin nếu bạn đã chuyển khoản.');
   o.status = 'checking';
   o.checkAt = Date.now();
   saveOrders();
-  await send(chatId, '⏳ <b>Hệ thống đang check xử lí giao dịch</b>\nVui lòng đợi trong vài phút...\n\nNếu sau 10 phút chưa nhận KEY mà đã chuyển, liên hệ admin để đối chiếu thủ công.', kb([
+  await send(chatId, `⏳ <b>BOT ĐANG ĐỐI SOÁT THANH TOÁN</b>\n\n💰 ${fmt(o.amount)} VND\n📝 Nội dung: <code>${esc(o.addInfo || '')}</code>\n🤖 Mã này gắn riêng với tài khoản của bạn. Nếu bot chưa đọc được giao dịch, admin sẽ nhận yêu cầu duyệt thủ công.`, kb([
     [btn('🏠 VỀ MENU', 'menu', 'primary')]
   ]));
+  for (const aid of ADMIN_IDS) {
+    const isFile = o.type === 'file';
+    await send(aid, `🧾 <b>USER ĐÃ BẤM DONE — CHỜ ĐỐI SOÁT</b>\nLoại: <b>${isFile ? 'KHO FILE' : 'MUA KEY'}</b>\nĐơn: <code>${esc(o.id)}</code>\nUser: <code>${esc(o.uid)}</code>\n💰 ${fmt(o.amount)}đ\n📝 <code>${esc(o.addInfo || '')}</code>\n⚠️ Nếu không có thông báo ngân hàng, kiểm tra tài khoản thật trước khi duyệt.`, kb([
+      [btn(isFile ? '✅ DUYỆT + GỬI FILE' : '✅ DUYỆT + CẤP KEY', (isFile ? 'store:approve:' : 'keyorder:approve:') + o.id, 'success')],
+      [btn('❌ TỪ CHỐI', (isFile ? 'store:reject:' : 'keyorder:reject:') + o.id, 'danger')]
+    ]));
+  }
   setTimeout(async () => {
     const ord = orders[orderId];
     if (ord && ord.status === 'checking') {
@@ -1116,223 +1661,275 @@ async function markOrderDone(chatId, uid, orderId) {
 }
 
 function tryMatchPayment(text) {
-  const mAmount = text.match(/\+?\s*([\d.,]+)\s*VND/i) || text.match(/\+\s*([\d.,]+)/);
+  const raw = String(text || '');
+  // Ngân hàng có thể gửi +2.500 VND, +10,000 VND hoặc +10000.
+  const mAmount = raw.match(/[+]\s*([\d.,]+)\s*VND/i) || raw.match(/[+]\s*([\d.,]+)/i);
   if (!mAmount) return null;
   const amount = Number(String(mAmount[1]).replace(/[.,]/g, ''));
-  if (!amount) return null;
-  const nd = (text.match(/(?:ND|Nội dung(?: chuyển khoản)?|Description|Transfer content)\s*[:=]\s*([^\n|]+)/i) || text.match(/Napas(\d+)/i) || [])[1] || ''; 
-  const uidMatch = String(nd).match(/(\d{6,})/);
-  return { amount, nd: String(nd).trim(), uid: uidMatch ? uidMatch[1] : null };
+  if (!Number.isSafeInteger(amount) || amount <= 0) return null;
+
+  // Chấp nhận nhiều nhãn nội dung. Nếu không có nhãn, vẫn giữ raw để dò mã ở bất kỳ vị trí nào.
+  const ndMatch = raw.match(/(?:\bND\b|Nội dung(?: chuyển khoản)?|Noi dung(?: chuyen khoan)?|Description|Transfer content|Add.?info|Memo|Content)\s*[:=\-]\s*([^\r\n]+)/i);
+  const nd = ndMatch ? String(ndMatch[1]).trim() : raw;
+  const parts = raw.split('|').map(x => x.trim()).filter(Boolean);
+  const dateIndex = parts.findIndex(x => /\d{2}[/-]\d{2}[/-]\d{4}/.test(x));
+  let ref = '';
+  if (dateIndex >= 0) {
+    const afterDate = parts.slice(dateIndex + 1);
+    ref = afterDate.find(x => !/(?:^\s*(?:ND|Nội dung|Description|Memo)\s*[:=])/i.test(x) && /^[A-Z0-9_-]{7,}$/i.test(x)) || '';
+  }
+  if (!ref) {
+    const beforeMemoText = ndMatch ? raw.slice(0, ndMatch.index) : raw;
+    const candidates = beforeMemoText.split('|').map(x => x.trim()).filter(x => /^[A-Z0-9_-]{8,}$/i.test(x));
+    ref = candidates[candidates.length - 1] || '';
+  }
+  // Mã Napas + Telegram ID cũng có thể nằm sau tiền tố/suffix do hệ thống ngân hàng nối thêm.
+  const uidMatch = String(nd + ' ' + raw).match(/Napas(\d{6,})(?!\d)/i);
+  return {
+    amount,
+    nd,
+    uid: uidMatch ? uidMatch[1] : null,
+    ref: ref || crypto.createHash('sha256').update(raw).digest('hex').slice(0, 24),
+    raw
+  };
+}
+
+function normalizeTransferText(value) {
+  return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+function transferMemoIncluded(messageContent, requiredMemo) {
+  const haystack = normalizeTransferText(messageContent);
+  const needle = normalizeTransferText(requiredMemo);
+  return Boolean(needle) && haystack.includes(needle);
+}
+
+async function notifyPaymentReview(parsed, matches, reason) {
+  const base = `🏦 <b>THÔNG BÁO TPBANK CẦN ĐỐI SOÁT</b>\n━━━━━━━━━━━━━━━━━━\n💰 Số tiền: <b>${fmt(parsed.amount)} VND</b>\n📝 Nội dung: <code>${esc(parsed.nd || 'Không đọc được')}</code>\n🔖 Mã giao dịch: <code>${esc(parsed.ref)}</code>\n⚠️ ${esc(reason)}`;
+  for (const aid of ADMIN_IDS) {
+    await send(aid, base);
+    for (const order of matches.slice(0, 8)) {
+      const isFile = order.type === 'file';
+      const approveData = (isFile ? 'store:approve:' : 'keyorder:approve:') + order.id;
+      const rejectData = (isFile ? 'store:reject:' : 'keyorder:reject:') + order.id;
+      await send(aid, `🧾 <b>ĐƠN CÓ THỂ LIÊN QUAN</b>\nLoại: <b>${isFile ? 'KHO FILE' : 'MUA KEY'}</b>\nĐơn: <code>${esc(order.id)}</code>\nUser: <code>${esc(order.uid)}</code>\nSố tiền: <b>${fmt(order.amount)}đ</b>\nMemo: <code>${esc(order.addInfo)}</code>\nTrạng thái: <b>${esc(order.status)}</b>`, kb([
+        [btn(isFile ? '✅ DUYỆT + GỬI FILE' : '✅ DUYỆT + CẤP KEY', approveData, 'success')],
+        [btn('❌ TỪ CHỐI', rejectData, 'danger')]
+      ]));
+    }
+  }
+}
+
+function isTrustedBankSender(msg) {
+  const sourceIds = [msg && msg.from && msg.from.id, msg && msg.sender_chat && msg.sender_chat.id]
+    .filter(value => value != null).map(String);
+  const allowlist = Array.isArray(settings.bankSenderIds) ? settings.bankSenderIds.map(String) : [];
+  if (allowlist.length) return sourceIds.some(id => allowlist.includes(id));
+  // Safe default: only bot-authored bank alerts or messages sent by a configured admin are trusted.
+  return Boolean((msg && msg.from && msg.from.is_bot) || (msg && msg.from && isAdmin(msg.from.id)));
 }
 
 async function onBankMessage(msg) {
-  if (!settings.bankGroupId) return;
-  if (String(msg.chat.id) !== String(settings.bankGroupId)) return;
+  if (!settings.bankGroupId || String(msg.chat && msg.chat.id) !== String(settings.bankGroupId)) return;
   const text = msg.text || msg.caption || '';
   const parsed = tryMatchPayment(text);
   if (!parsed) return;
-  const now = Date.now();
-  // Nội dung chuyển khoản kho file là chuỗi cố định, không định danh được người gửi.
-  // Chỉ cảnh báo admin; tuyệt đối không tự giao file khi chưa đối chiếu giao dịch thực nhận.
-  if (String(parsed.nd || '').toLowerCase().replace(/\s+/g, '').includes(STORE_TRANSFER_INFO.toLowerCase()) && Number(parsed.amount) === STORE_PRICE) {
-    const matches = Object.values(orders).filter(o => o && o.type === 'file' && ['pending', 'checking'].includes(o.status) && Number(o.amount) === STORE_PRICE && (!o.expire || now <= o.expire + 5 * 60 * 1000));
-    for (const aid of ADMIN_IDS) await send(aid, `🏦 <b>CÓ BIẾN ĐỘNG KHỚP NỘI DUNG KHO FILE</b>\nSố tiền: <b>${fmt(parsed.amount)}đ</b>\nNội dung: <code>${STORE_TRANSFER_INFO}</code>\nĐơn đang chờ: <b>${matches.length}</b>\nVui lòng tự đối chiếu người chuyển và duyệt trong trang admin. Bot không tự gửi file từ thông báo này.`);
+  if (!isTrustedBankSender(msg)) {
+    const sourceId = msg.from && msg.from.id != null ? String(msg.from.id) : (msg.sender_chat && msg.sender_chat.id != null ? String(msg.sender_chat.id) : 'không rõ');
+    for (const aid of ADMIN_IDS) {
+      await send(aid, `🛡️ <b>BẢN TIN GIAO DỊCH CHƯA ĐƯỢC TIN CẬY</b>\nNhóm: <code>${esc(settings.bankGroupId)}</code>\nNgười gửi: <code>${esc(sourceId)}</code>\n💰 Số tiền đọc được: <b>${fmt(parsed.amount)}đ</b>\n📝 Nội dung: <code>${esc(parsed.nd)}</code>\n\nChưa tự động cấp file để tránh giả mạo. Nếu đây là bot ngân hàng hợp lệ, thêm ID người gửi bằng <code>/setbanksenders ${esc(sourceId)}</code>.`);
+    }
     return;
   }
-  for (const id of Object.keys(orders)) {
-    const o = orders[id];
-    if (!o || o.type === 'file' || (o.status !== 'pending' && o.status !== 'checking')) continue;
-    if (o.expire && now > o.expire + 5 * 60 * 1000) continue;
-    if (Number(o.amount) !== Number(parsed.amount)) continue;
-    if (parsed.uid && String(o.uid) !== String(parsed.uid)) continue;
-    o.status = 'paid';
-    o.paidAt = now;
+  const now = Date.now();
+  const transactionKey = `${String(msg.chat.id)}:${parsed.ref}`;
+  if (bankTransactions[transactionKey]) return; // Telegram may deliver the same bank alert more than once.
+  bankTransactions[transactionKey] = { amount: parsed.amount, nd: parsed.nd, seenAt: now, messageId: msg.message_id || null };
+  const txEntries = Object.entries(bankTransactions);
+  if (txEntries.length > 3000) {
+    txEntries.sort((a, b) => Number(a[1].seenAt || 0) - Number(b[1].seenAt || 0));
+    for (const [key] of txEntries.slice(0, txEntries.length - 3000)) delete bankTransactions[key];
+  }
+  saveBankTransactions();
+
+  const matches = Object.values(orders).filter(o =>
+    o && ['pending', 'checking', 'timeout'].includes(o.status) &&
+    Number(o.amount) === Number(parsed.amount) &&
+    transferMemoIncluded(parsed.nd + ' ' + parsed.raw, o.addInfo) &&
+    (!o.expire || now <= Number(o.expire) + 30 * 60 * 1000)
+  );
+
+  if (matches.length === 1) {
+    const order = matches[0];
+    order.bankTransactionRef = parsed.ref;
+    order.bankMatchedAt = now;
+    order.bankMessageId = msg.message_id || null;
+    order.status = 'processing';
     saveOrders();
-    const created = createKeyForUser(o.uid, o.hours);
-    const exp = new Date(created.until).toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
-    try {
-      await send(o.uid, `🎉 <b>THANH TOÁN THÀNH CÔNG</b>\n\n🔑 KEY của bạn:\n<code>${created.key}</code>\n⏳ Hạn: <b>${exp}</b>\n\nBẠN ĐÃ MỞ KHOÁ VIP THÀNH CÔNG — MỞ TOOL CHIẾN NGAY THÔI!`, kb([
-        [btn('🚀 VÀO TOOL ALL GAME', 'pred:brands', 'primary')],
-        [btn('🏠 MENU', 'menu', 'success')]
-      ]));
-    } catch (e) {}
-    for (const aid of ADMIN_IDS) {
-      try { await send(aid, `✅ Đơn <code>${id}</code> paid ${o.amount}đ → user <code>${o.uid}</code> KEY <code>${created.key}</code>`); } catch (e) {}
+
+    if (order.type === 'file') {
+      const result = await approveFileOrder(order.id, 'bank-auto', true);
+      if (result.ok) {
+        await send(order.uid, `🎉 <b>TPBANK ĐÃ XÁC NHẬN THANH TOÁN!</b>\n\n💰 Số tiền: <b>${fmt(parsed.amount)} VND</b>\n🧾 Mã đơn: <code>${esc(order.id)}</code>\n✅ Nội dung chuyển khoản khớp duy nhất đơn của bạn.\n📦 File đã được gửi vào Telegram.`, kb([[btn('🏠 VỀ MENU', 'menu', 'success')]]));
+        for (const aid of ADMIN_IDS) await send(aid, `✅ <b>TỰ ĐỘNG ĐỐI SOÁT KHO FILE</b>\n🧾 Đơn: <code>${esc(order.id)}</code>\n👤 User: <code>${esc(order.uid)}</code>\n💰 ${fmt(parsed.amount)}đ\n🔖 GD: <code>${esc(parsed.ref)}</code>\n📦 Đã gửi file.`);
+      } else {
+        order.status = 'checking'; saveOrders();
+        await notifyAdminsAboutFileOrder(order, 'Đã thấy giao dịch khớp nhưng gửi file thất bại: ' + result.message);
+        await send(order.uid, '✅ Bot đã nhận giao dịch. File đang được admin hỗ trợ gửi do Telegram gặp lỗi tạm thời.');
+      }
+      return;
     }
-    break;
-  }
-}
 
-async function showBrandMenu(chatId) {
-  const brands = [
-    ['sunwin', 'Sunwin'], ['789club', '789 Club'], ['b52', 'B52'], ['hitclub', 'Hitclub'],
-    ['xocdia88', 'Xóc Đĩa 88'], ['max789', 'Max789'], ['lc79', 'LC79'], ['betvip', 'Betvip'],
-    ['sumclub', 'Sumclub']
-  ];
-  const rows = []; let row = [];
-  for (let i = 0; i < brands.length; i++) {
-    row.push(btn(`🎲 ${brands[i][1]}`, 'predbrand:' + brands[i][0], 'primary'));
-    if (row.length === 2) { rows.push(row); row = []; }
-  }
-  if (row.length) rows.push(row);
-  rows.push([btn('🏠 VỀ MENU', 'menu', 'danger')]);
-  return send(chatId, '📊 <b>TX • DANH SÁCH SÀNH</b>\n\n👇 Chọn sàn muốn xem phiên:', kb(rows));
-}
-
-async function showTables(chatId, brand, uid) {
-  if (!isVip(uid)) return send(chatId, '🔒 <b>MUA KEY ĐÊ RỒI XEM</b>', kb([[btn('💳 THUÊ TOOL', 'rent:menu', 'primary'), btn('🔑 NHẬP KEY', 'key:input', 'success')], [btn('◀️ QUAY LẠI', 'menu', 'danger')]]));
-  const list = games.filter(g => String(g.brand).toLowerCase() === String(brand).toLowerCase());
-  if (!list.length) return send(chatId, '📭 Sòng này éo có bàn nào.', kb([[btn('◀️ QUAY LẠI', 'pred:brands', 'primary')]]));
-
-  const rows = []; let row = []; let t = true;
-  for (const g of list) {
-    const f = FEEDS[g.id], bad = !g.url || g.enabled === false || (f && f.lastError);
-    row.push(btn(`${bad ? '🔴' : '🟢'} ${g.variant}`, bad ? 'pred:off:' + g.id : 'pred:' + g.id, bad ? 'danger' : (t ? 'success' : 'primary')));
-    t = !t;
-    if (row.length === 2) { rows.push(row); row = []; }
-  }
-  if (row.length) rows.push(row);
-  rows.push([btn('◀️ CHỌN SÀNH KHÁC', 'pred:brands', 'primary'), btn('🏠 VỀ MENU', 'menu', 'danger')]);
-  return send(chatId, `🎰 <b>SÀNH ${esc(brand.toUpperCase())}</b>\n👇 Chọn bàn mà cày:`, kb(rows));
-}
-
-async function pushPredCard(chatId, gameId, uid, fromAuto) {
-  if (!isVip(uid)) return send(chatId, '🔒 <b>MUA KEY ĐÊ RỒI XEM</b>', kb([[btn('💳 THUÊ TOOL', 'rent:menu', 'primary'), btn('🔑 NHẬP KEY', 'key:input', 'success')], [btn('◀️ QUAY LẠI', 'menu', 'danger')]]));
-  const g = games.find(x => x.id === gameId), f = FEEDS[gameId];
-  if (!g || !f || !f.lastPred) return;
-  // Thống kê sử dụng
-  const u = ensureUser(uid);
-  u.predCount = (u.predCount || 0) + 1;
-  u.lastActive = Date.now();
-  if (!fromAuto) saveUsers();
-  const p = f.lastPred;
-  const live = f.lastLive || {};
-  const nextSess = live.session ? String(Number(live.session) + 1) : '—';
-  const prevSess = live.session ? String(live.session) : '—';
-
-  // Phiên trước: dự đoán / KQ / đúng-sai / xúc xắc
-  let prevBlock = '📋 Phiên trước: <i>chưa có</i>\n';
-  const lastLog = f.engine.log.length ? f.engine.log[f.engine.log.length - 1] : null;
-  if (lastLog) {
-    const prevPred = lastLog.pred === 'T' ? 'TÀI' : 'XỈU';
-    const prevActual = lastLog.actual === 'T' ? 'TÀI' : 'XỈU';
-    const prevIcon = lastLog.ok ? '✅ ĐÚNG' : '❌ SAI';
-    const diceArr = (lastLog.dice && lastLog.dice.length >= 3)
-      ? lastLog.dice
-      : (live.dice && live.dice.length >= 3 ? live.dice : null);
-    const diceTxt = diceArr ? diceArr.join('-') : '—';
-    const sumTxt = lastLog.sum ? ` · Tổng ${lastLog.sum}` : (live.sum ? ` · Tổng ${live.sum}` : '');
-    prevBlock =
-`📋 Phiên trước: <code>#${esc(String(lastLog.session || prevSess).slice(-8))}</code>
-├ Dự: <b>${prevPred}</b>
-├ KQ: <b>${prevActual}</b> ${prevIcon}
-└ 🎲 Xúc xắc: <b>${diceTxt}</b>${sumTxt}
-`;
+    // Key/rental order: the memo uniquely identifies the order, so username and Telegram ID
+    // are informational only and are not parsed from bank-specific text formats.
+    order.paidAt = now;
+    const delivery = await deliverKeyOrder(order, 'bank-auto');
+    for (const aid of ADMIN_IDS) await send(aid, `✅ <b>ĐƠN MUA KEY TỰ ĐỘNG</b>\n🧾 Đơn: <code>${esc(order.id)}</code>\n👤 User: <code>${esc(order.uid)}</code>\n💰 ${fmt(parsed.amount)}đ\n📝 Memo: <code>${esc(order.addInfo)}</code>\n🔑 KEY: <code>${esc(order.key || 'chưa tạo')}</code>\n📌 ${esc(delivery.message)}`);
+    if (!delivery.ok) await notifyPaymentReview(parsed, [order], delivery.message);
+    return;
   }
 
-  const sideTxt = p.side === 'T' ? '🔴 TÀI' : '🔵 XỈU';
-  const isSicbo = isSicboGame(g);
-  const viLine = (isSicbo && p.vi && Array.isArray(p.vi))
-    ? `\n🎲 Vị: <b>${p.vi.join('-')}</b>`
-    : '';
-  const cau = cauStr(f.engine.history, 16, g) || '—';
+  if (matches.length > 1) {
+    await notifyPaymentReview(parsed, matches, 'Nhiều đơn cùng khớp số tiền và nội dung. Bot không tự chọn người nhận để tránh cấp nhầm KEY/file.');
+    return;
+  }
 
-  const text = `${fromAuto ? '⚡️ <i>Live update</i>\n' : ''}╔══ <b>TOOL TX BY FEE</b> ══╗
-🎮 <b>${g.brandLabel}</b> · ${g.variant}
-━━━━━━━━━━━━━━
-${prevBlock}━━━━━━━━━━━━━━
-📦 Phiên mới: <code>#${nextSess}</code>
-🎯 Dự đoán: <b>${sideTxt}</b>${viLine}
-📊 Độ tin: <b>${p.conf}%</b>
-📊 Cầu: ${cau}`;
+  const transferText = parsed.nd + ' ' + parsed.raw;
+  const hasCompactMemo = /(?:^|[^A-Z0-9])[NM]-?[A-F0-9]{6}(?:$|[^A-Z0-9])/i.test(transferText) || /(?:^|[^A-Z0-9])[NM][A-F0-9]{12}(?:$|[^A-Z0-9])/i.test(transferText);
+  const knownPrefix = hasCompactMemo ||
+    transferMemoIncluded(transferText, STORE_TRANSFER_PREFIX) ||
+    transferMemoIncluded(transferText, KEY_TRANSFER_PREFIX);
+  if (knownPrefix) {
+    await notifyPaymentReview(parsed, [], 'Đã nhận diện tiền tố đơn hàng nhưng không tìm thấy đơn còn hiệu lực khớp số tiền/mã giao dịch. Cần admin đối soát tài khoản thật.');
+  }
 
-  const rows = [
-    [btn('🔄 LÀM MỚI', 'pred:' + gameId, 'success'), btn('⏹ DỪNG', 'pred:stop:' + g.id, 'danger')],
-    [btn('🎲 ĐỔI GAME', 'pred:brands', 'primary'), btn('🏠 MENU', 'menu', 'primary')]
-  ];
-
-  const key = uid + ':' + gameId;
-  if (predMsg[key]) await delMsg(chatId, predMsg[key]);
-  const sent = await send(chatId, text, kb(rows));
-  if (sent && sent.result) predMsg[key] = sent.result.message_id;
-}
-
-// TX / MD5: ● đen = Tài, ○ trắng = Xỉu
-// Sicbo: 🔴 đỏ = Tài, 🔵 xanh = Xỉu
-function cauStr(h, n = 20, g = null) {
-  const isSicbo = g && (g.group === 'sicbo' || String(g.variant || '').toLowerCase().includes('sicbo'));
-  return h.slice(-n).map(x => {
-    if (isSicbo) return x === 'T' ? '🔴' : '🔵';
-    return x === 'T' ? '●' : '○';
-  }).join('');
-}
-function isSicboGame(g) { return g.group === 'sicbo' || String(g.variant).includes('Sicbo'); }
-
-function stopAuto(uid) { if (autoWatch[uid]) { clearInterval(autoWatch[uid]); delete autoWatch[uid]; } }
-function startAuto(uid, chatId, gameId) {
-  stopAuto(uid);
-  autoWatch[uid] = setInterval(async () => {
-    const g = games.find(x => x.id === gameId), f = FEEDS[gameId];
-    if (!g || !f) return;
-    await pollGame(g);
-    if (f.lastLive && f.lastLive.session !== f.lastShown) {
-      f.lastShown = f.lastLive.session;
-      await pushPredCard(chatId, gameId, uid, true);
-    }
-  }, 5000);
-}
-
-async function showLc79Menu(chatId, uid) {
-  const s = LC79.sessions[uid];
-  if (!s) return send(chatId, '🤖 AUTO CƯỢC LC79\n🔐 Chưa đăng nhập\nGõ /login hoặc bấm nút:', kb([[btn('🔐 ĐĂNG NHẬP', 'lc79:login', 'success')]]));
-  return send(chatId, `🤖 <b>AUTO CƯỢC LC79</b>\n📛 ${s.nickname} • 💰 ${fmt(s.balance)}\n⚡ Auto: ${s.autoBet ? '🟢 BẬT' : '🔴 TẮT'}`, kb([
-    [btn(s.autoBet ? '🔴 TẮT AUTO' : '🟢 BẬT AUTO', 'lc79:auto', s.autoBet ? 'danger' : 'success')],
-    [btn('⏹ THOÁT', 'lc79:stop', 'danger')]
-  ]));
 }
 
 async function showHashTool(chatId) {
-  return send(chatId, `╭━━ 🧩 <b>HASH LAB</b> ━━╮\n\n🔐 <b>Phân tích mã MD5 / SHA-256</b>\n\n📌 Gửi mã hash dạng ký tự hex: \n├ MD5: 32 ký tự\n└ SHA-256: 64 ký tự\n\n💡 Sau khi nhận mã hợp lệ, bot mới hiển thị kết quả và nút xác nhận ĐÚNG / SAI.\n\n👇 <i>Gửi mã hash của bạn ngay tại đây.</i>`,
-  kb([[btn('🏠 THOÁT VỀ MENU', 'menu', 'danger')]]));
-}
-
-function revokeVip(uid) {
-  const u = ensureUser(uid);
-  u.vipUntil = 0;
-  saveUsers();
+  return send(chatId, `╭━━ 🧩 <b>HASH LAB</b> ━━╮\n\n🔐 <b>Phân tích mã MD5 / SHA-256</b>\n\n📌 Gửi mã hash dạng ký tự hex:\n├ MD5: 32 ký tự\n└ SHA-256: 64 ký tự\n\n👇 <i>Gửi mã hash của bạn ngay tại đây.</i>`,
+    kb([[btn('🏠 THOÁT VỀ MENU', 'menu', 'danger')]]));
 }
 
 async function showAdmin(chatId) {
+  if (!isAdmin(chatId)) return send(chatId, '⛔ Tài khoản không có quyền quản trị.');
   const now = Date.now();
   const allIds = Object.keys(users);
   const activeVip = allIds.filter(id => Number(users[id].vipUntil || 0) > now);
-  let lines = [];
-  lines.push('🛠 <b>TOOL TX BY FEE — ADMIN</b>');
-  lines.push('━━━━━━━━━━━━━━━');
-  lines.push('👥 Tổng users: <b>' + allIds.length + '</b>');
-  lines.push('🔓 VIP active: <b>' + activeVip.length + '</b>');
-  lines.push('📦 Đơn pending: <b>' + Object.values(orders).filter(o => o.status === 'pending' || o.status === 'checking').length + '</b>');
-  lines.push('🎫 Codes: <b>' + Object.keys(codesDB).length + '</b>');
-  lines.push('📢 Groups force: <b>' + (settings.groups || []).length + '</b>');
-  lines.push('🏦 Bank group: <code>' + (settings.bankGroupId || 'chưa set') + '</code>');
-  lines.push('💬 Support: @' + (settings.support || '—'));
-  lines.push('━━━━━━━━━━━━━━━');
-  lines.push('\n💡 <b>Lệnh admin:</b>');
-  lines.push('• <code>/grant ID Giờ</code> — cấp VIP + tạo key');
-  lines.push('• <code>/revoke ID</code> — thu hồi');
-  lines.push('• <code>/user ID</code> — chi tiết user');
-  lines.push('• <code>/genkey Giờ</code> — tạo key trống');
-  lines.push('• <code>/mkcode CODE Giờ [max]</code> — tạo code');
-  lines.push('• <code>/setsupport username</code>');
-  lines.push('• <code>/setbankgroup ID_nhóm</code>');
-  lines.push('• <code>/addgroup ID|TITLE|LINK</code>');
-  lines.push('• <code>/cleargroups</code>');
-  lines.push('• <code>/broadcast nội dung</code>');
-  lines.push('• <code>/setprice 1d|2d|2w amount hours label</code>');
+  const pendingFiles = Object.values(orders).filter(o => o && o.type === 'file' && ['pending', 'checking', 'timeout'].includes(o.status));
+  const pendingKeys = Object.values(orders).filter(o => o && o.type !== 'file' && ['pending', 'checking', 'timeout'].includes(o.status));
+  const activeFile = storeFiles[String(storeProduct.activeFileId || '')];
+  const channels = settings.feedbackChannels || [];
+  const lines = [
+    '👑 <b>TRUNG TÂM ADMIN BOT</b>',
+    '━━━━━━━━━━━━━━━━━━',
+    `👥 Tổng người dùng: <b>${allIds.length}</b>`,
+    `🔓 VIP đang hoạt động: <b>${activeVip.length}</b>`,
+    `🧾 Đơn kho file chờ xử lý: <b>${pendingFiles.length}</b>`,
+    `🔑 Đơn mua KEY chờ xử lý: <b>${pendingKeys.length}</b>`,
+    `📦 File đang bán: <b>${esc(activeFile ? activeFile.originalName : 'Chưa có file')}</b>`,
+    `💰 Giá kho file: <b>${fmt(STORE_PRICE)}đ</b>`,
+    `🔑 Mã CK KEY: <code>${esc(memoToken(KEY_TRANSFER_PREFIX, 1) || 'N')}-XXXXXX</code>`,
+    `📦 Mã CK FILE: <code>${esc(memoToken(STORE_TRANSFER_PREFIX, 1) || 'M')}-XXXXXX</code>`,
+    `🏦 Nhóm TPBank: <code>${esc(settings.bankGroupId || 'Chưa cài')}</code>`,
+    `⭐ Kênh feedback: <b>${channels.length}</b>`,
+    '━━━━━━━━━━━━━━━━━━',
+    '<b>⚙️ LỆNH CẤU HÌNH</b>',
+    '• Gửi tài liệu kèm caption <code>/setfile</code> để thay file đang bán',
+    '• <code>/setfileprice 10000</code> — đổi giá kho file',
+    '• <code>/setfilememo M</code> — đặt mã đầu đơn FILE (M-XXXXXX)',
+    '• <code>/setkeyprefix N</code> — đặt mã đầu đơn KEY (N-XXXXXX)',
+    '• <code>/setbankgroup -100...</code> — nhóm nhận biến động số dư',
+    '• <code>/setbanksenders ID1,ID2</code> — whitelist nguồn gửi thông báo ngân hàng',
+    '• <code>/setbank BIN|STK|CHỦ TK</code> — đổi tài khoản nhận tiền',
+    '• <code>/setproduct Tên sản phẩm</code> — đổi tên sản phẩm',
+    '• <code>/fbchannel add ID</code> / <code>/fbchannel remove ID</code>',
+    '• <code>/fbchannel add_here</code> — đăng ký nhóm hiện tại',
+    '• <code>/fbchannels</code> — xem kênh feedback',
+    '• <code>/grant ID Giờ</code>, <code>/revoke ID</code>, <code>/user ID</code>',
+    '• <code>/genkey Giờ</code>, <code>/mkcode CODE Giờ [max]</code>',
+    '• <code>/setsupport username</code>, <code>/broadcast nội dung</code>',
+    '• <code>/setprice ID amount hours label</code> — gói thuê tool'
+  ];
   return send(chatId, lines.join('\n'), kb([
-    [btn('🔄 LÀM MỚI', 'adm:home', 'success')],
-    [btn('👤 VỀ MENU', 'menu', 'danger')]
+    [btn('🧾 ĐƠN KHO FILE CHỜ DUYỆT', 'adm:orders', 'success')],
+    [btn('🔑 ĐƠN MUA KEY CHỜ DUYỆT', 'adm:keyorders', 'primary')],
+    [btn('📦 KIỂM TRA KHO FILE', 'adm:files', 'primary'), btn('⭐ KÊNH FEEDBACK', 'adm:feedbackchannels', 'primary')],
+    [btn('🔄 LÀM MỚI', 'adm:home', 'success')]
   ]));
+}
+
+async function showPendingFileOrders(chatId) {
+  if (!isAdmin(chatId)) return send(chatId, '⛔ Không có quyền admin.');
+  const list = Object.values(orders).filter(o => o && o.type === 'file' && ['pending', 'checking', 'timeout'].includes(o.status)).sort((a,b) => Number(a.created||0)-Number(b.created||0));
+  if (!list.length) return send(chatId, '✅ Hiện không có đơn kho file nào chờ duyệt.', kb([[btn('◀️ ADMIN', 'adm:home', 'primary')]]));
+  await send(chatId, `🧾 <b>ĐƠN KHO FILE CHỜ XỬ LÝ</b>\nCó ${list.length} đơn đang chờ. Chỉ xác nhận sau khi kiểm tra tiền vào tài khoản TPBank.`);
+  for (const order of list.slice(0, 15)) {
+    await send(chatId, `📦 <b>${esc(order.product || STORE_PRODUCT_NAME)}</b>\n🧾 Đơn: <code>${esc(order.id)}</code>\n👤 User: <code>${esc(order.uid)}</code>\n💰 ${fmt(order.amount)}đ\n📝 <code>${esc(order.addInfo)}</code>\n📌 Trạng thái: <b>${esc(order.status)}</b>`, kb([
+      [btn('✅ XÁC NHẬN + GỬI FILE', 'store:approve:' + order.id, 'success')],
+      [btn('❌ TỪ CHỐI ĐƠN', 'store:reject:' + order.id, 'danger')]
+    ]));
+  }
+  return send(chatId, 'Quản lý xong các đơn phía trên thì quay lại đây để làm mới danh sách.', kb([[btn('🔄 LÀM MỚI ĐƠN', 'adm:orders', 'success'), btn('◀️ ADMIN', 'adm:home', 'primary')]]));
+}
+
+async function showPendingKeyOrders(chatId) {
+  if (!isAdmin(chatId)) return send(chatId, '⛔ Không có quyền admin.');
+  const list = Object.values(orders).filter(o => o && o.type !== 'file' && ['pending', 'checking', 'timeout'].includes(o.status)).sort((a, b) => Number(a.created || 0) - Number(b.created || 0));
+  if (!list.length) return send(chatId, '✅ Hiện không có đơn mua KEY nào chờ duyệt.', kb([[btn('◀️ ADMIN', 'adm:home', 'primary')]]));
+  await send(chatId, `🔑 <b>ĐƠN MUA KEY CHỜ XỬ LÝ</b>\nCó ${list.length} đơn. Chỉ duyệt sau khi xác nhận tiền vào tài khoản thật.`);
+  for (const order of list.slice(0, 20)) {
+    await send(chatId, `💳 <b>ĐƠN MUA KEY</b>\n🧾 ${esc(order.id)}\n👤 User: <code>${esc(order.uid)}</code> ${order.username ? '(@' + esc(order.username) + ')' : ''}\n💰 ${fmt(order.amount)}đ • ${Number(order.hours) || 24} giờ\n📝 <code>${esc(order.addInfo || '')}</code>\n📌 ${esc(order.status)}`, kb([
+      [btn('✅ XÁC NHẬN + CẤP KEY', 'keyorder:approve:' + order.id, 'success')],
+      [btn('❌ TỪ CHỐI', 'keyorder:reject:' + order.id, 'danger')]
+    ]));
+  }
+  return send(chatId, 'Hoàn tất đối soát thì bấm làm mới để cập nhật danh sách.', kb([[btn('🔄 LÀM MỚI', 'adm:keyorders', 'success'), btn('◀️ ADMIN', 'adm:home', 'primary')]]));
+}
+
+async function showAdminFiles(chatId) {
+  if (!isAdmin(chatId)) return send(chatId, '⛔ Không có quyền admin.');
+  const file = storeFiles[String(storeProduct.activeFileId || '')];
+  return send(chatId, `📦 <b>QUẢN LÝ KHO FILE</b>\n\n📁 File đang bán: <b>${esc(file ? file.originalName : 'Chưa có')}</b>\n💰 Giá: <b>${fmt(STORE_PRICE)}đ</b>\n📝 Mã CK: <code>${esc(memoToken(STORE_TRANSFER_PREFIX, 1) || 'M')}-XXXXXX</code>\n\n📤 Để thêm hoặc thay file, gửi tài liệu trực tiếp cho bot trong chat riêng và ghi caption <code>/setfile</code>. File mới sẽ tự động được chọn làm file đang bán.`, kb([[btn('🧾 ĐƠN CHỜ DUYỆT', 'adm:orders', 'success')], [btn('◀️ ADMIN', 'adm:home', 'primary')]]));
+}
+
+async function showFeedbackChannels(chatId) {
+  if (!isAdmin(chatId)) return send(chatId, '⛔ Không có quyền admin.');
+  const list = (settings.feedbackChannels || []).map(x => `<code>${esc(x)}</code>`);
+  return send(chatId, `⭐ <b>KÊNH NHẬN FEEDBACK ĐÃ DUYỆT</b>\n\n${list.length ? list.join('\n') : 'Chưa đăng ký kênh nào.'}\n\nDùng <code>/fbchannel add ID</code> để thêm hoặc <code>/fbchannel add_here</code> khi nhắn trong nhóm. Bot phải có quyền đăng bài tại kênh/nhóm nhận feedback.`, kb([[btn('◀️ ADMIN', 'adm:home', 'primary')]]));
+}
+
+async function publishApprovedFeedback(fb) {
+  const title = '⭐ <b>FEEDBACK NGƯỜI DÙNG</b>\n━━━━━━━━━━━━━━━━━━';
+  const name = fb.username ? '@' + esc(fb.username) : esc(fb.name || 'Người dùng');
+  const body = `${title}\n👤 ${name}\n🌟 Đánh giá: <b>${Number(fb.star || 0)}/5</b>\n💬 Nội dung: ${esc(fb.note || 'Người dùng không để lại ghi chú.')}\n\n💙 Cảm ơn bạn đã sử dụng dịch vụ!`;
+  const targets = settings.feedbackChannels || [];
+  const results = [];
+  for (const target of targets) {
+    const result = fb.photo
+      ? await tg('sendPhoto', { chat_id: target, photo: fb.photo, caption: body, parse_mode: 'HTML' })
+      : await send(target, body);
+    results.push({ target, ok: Boolean(result && result.ok), error: result && result.description });
+  }
+  return results;
+}
+
+async function reviewFeedback(feedbackId, adminId, approve) {
+  if (!isAdmin(adminId)) return { ok: false, message: 'Không có quyền admin.' };
+  const fb = feedbacks[feedbackId];
+  if (!fb) return { ok: false, message: 'Không tìm thấy feedback.' };
+  if (fb.status !== 'pending') return { ok: false, message: 'Feedback này đã được xử lý.' };
+  if (!approve) {
+    fb.status = 'rejected'; fb.reviewedAt = Date.now(); fb.reviewedBy = String(adminId); saveFeedbacks();
+    await send(fb.uid, '🙏 Feedback của bạn đã được admin xem xét. Cảm ơn bạn đã đóng góp ý kiến!');
+    return { ok: true, message: 'Đã từ chối feedback.' };
+  }
+  fb.status = 'approved'; fb.reviewedAt = Date.now(); fb.reviewedBy = String(adminId); saveFeedbacks();
+  const published = await publishApprovedFeedback(fb);
+  fb.publishedTo = published.filter(x => x.ok).map(x => String(x.target));
+  fb.publishErrors = published.filter(x => !x.ok);
+  saveFeedbacks();
+  await send(fb.uid, '🎉 Cảm ơn bạn! Feedback đã được admin duyệt. 💙');
+  return { ok: true, message: `Đã duyệt feedback và đăng lên ${fb.publishedTo.length}/${published.length} kênh đã cấu hình.` };
 }
 
 /* ═══════════════ CALLBACKS & MESSAGES ═══════════════ */
@@ -1344,16 +1941,20 @@ async function onCallback(cq) {
 
   if (data === 'menu') { stopAuto(uid); delete sessions[uid]; return showUserMenu(chatId, from); }
   if (data === 'hash:start') {
-    if (!isVip(uid)) return send(chatId, '🔒 <b>MUA KEY ĐÊ RỒI XEM</b>', kb([[btn('💳 THUÊ TOOL', 'rent:menu', 'primary'), btn('🔑 NHẬP KEY', 'key:input', 'success')], [btn('◀️ QUAY LẠI', 'menu', 'danger')]]));
+    if (!isVip(uid)) return send(chatId, '🔒 <b>MUA KEY ĐÊ RỒI XEM</b>', kb([[btn('💳 GÓI SỬ DỤNG', 'rent:menu', 'primary'), btn('🔑 KÍCH HOẠT KEY', 'key:input', 'success')], [btn('◀️ QUAY LẠI', 'menu', 'danger')]]));
     sessions[uid] = { await: 'hash_input' };
     return showHashTool(chatId);
   }
   if (data === 'adm:home' && isAdmin(uid)) return showAdmin(chatId);
+  if (data === 'adm:orders' && isAdmin(uid)) return showPendingFileOrders(chatId);
+  if (data === 'adm:keyorders' && isAdmin(uid)) return showPendingKeyOrders(chatId);
+  if (data === 'adm:files' && isAdmin(uid)) return showAdminFiles(chatId);
+  if (data === 'adm:feedbackchannels' && isAdmin(uid)) return showFeedbackChannels(chatId);
   if (data === 'store:open') return showFileStore(chatId);
   if (data === 'store:confirm') {
     const active = storeFiles[String(storeProduct.activeFileId || '')];
-    if (!active || !fs.existsSync(path.join(STORE_UPLOADS, active.storedName))) return showFileStore(chatId);
-    return send(chatId, `🛒 <b>XÁC NHẬN MUA KHO FILE</b>\n\n📦 ${esc(STORE_PRODUCT_NAME)}\n💰 Giá: <b>${fmt(STORE_PRICE)}đ</b>\n📝 Nội dung chuyển khoản: <code>${STORE_TRANSFER_INFO}</code>\n\nSau khi thanh toán và admin xác nhận, bot gửi file trực tiếp cho bạn.`, kb([
+    if (!storeFileExists(active)) return showFileStore(chatId);
+    return send(chatId, `🛒 <b>XÁC NHẬN MUA KHO FILE</b>\n\n📦 ${esc(STORE_PRODUCT_NAME)}\n💰 Giá: <b>${fmt(STORE_PRICE)}đ</b>\n📝 Mã chuyển khoản: <code>M-XXXXXX</code>\n\nMã riêng cho đơn này. Thông tin người mua và thời gian được lưu trong hệ thống.`, kb([
       [btn('✅ TẠO MÃ QR THANH TOÁN', 'store:buy', 'success')],
       [btn('◀️ QUAY LẠI', 'store:open', 'danger')]
     ]));
@@ -1375,6 +1976,16 @@ async function onCallback(cq) {
     const result = await rejectFileOrder(data.slice(13), uid);
     return send(chatId, (result.ok ? '✅ ' : '❌ ') + esc(result.message));
   }
+  if (data.startsWith('keyorder:approve:')) {
+    if (!isAdmin(uid)) return send(chatId, '⛔ Bạn không có quyền.');
+    const result = await approveKeyOrder(data.slice(17), uid);
+    return send(chatId, (result.ok ? '✅ ' : '❌ ') + esc(result.message));
+  }
+  if (data.startsWith('keyorder:reject:')) {
+    if (!isAdmin(uid)) return send(chatId, '⛔ Bạn không có quyền.');
+    const result = await rejectKeyOrder(data.slice(16), uid);
+    return send(chatId, (result.ok ? '✅ ' : '❌ ') + esc(result.message));
+  }
   if (data === 'pred:brands') { stopAuto(uid); return showBrandMenu(chatId); }
   if (data.startsWith('predbrand:')) { stopAuto(uid); return showTables(chatId, data.slice(10), uid); }
   if (data.startsWith('predhist:')) return exportHistory(chatId, data.slice(9));
@@ -1392,9 +2003,10 @@ async function onCallback(cq) {
   if (data.startsWith('rent:yes:')) return createRentOrder(chatId, uid, data.slice(9));
   if (data.startsWith('rent:done:')) return markOrderDone(chatId, uid, data.slice(10));
   if (data.startsWith('rent:cancel:')) {
-    const oid = data.slice(12);
-    if (orders[oid] && orders[oid].uid === String(uid)) { orders[oid].status = 'cancelled'; saveOrders(); }
-    return send(chatId, '🗑 Đã huỷ đơn.', kb([[btn('◀️ QUAY LẠI', 'rent:menu', 'primary')]]));
+    const oid = data.slice(12), order = orders[oid];
+    if (order && order.uid === String(uid) && ['pending', 'checking', 'timeout'].includes(order.status)) { order.status = 'cancelled'; order.cancelledAt = Date.now(); saveOrders(); }
+    else if (order && order.uid === String(uid)) return send(chatId, '⚠️ Đơn đã được xử lý hoặc đang giao KEY, không thể huỷ bằng nút này.');
+    return send(chatId, '🗑 Đã huỷ đơn nếu đơn vẫn còn chờ thanh toán.', kb([[btn('◀️ QUAY LẠI', 'rent:menu', 'primary')]]));
   }
   if (data === 'support:go') {
     const s = settings.support || 'SunNetWin';
@@ -1431,15 +2043,30 @@ async function onCallback(cq) {
     ]));
   }
   if (data.startsWith('fb:star:')) {
-    const star = data.slice(8);
-    const fb = (sessions[uid] && sessions[uid].fb) || {};
+    const star = Number(data.slice(8));
+    const draft = (sessions[uid] && sessions[uid].fb) || {};
     delete sessions[uid];
+    const feedbackId = 'FB' + Date.now().toString(36).toUpperCase() + crypto.randomBytes(2).toString('hex').toUpperCase();
+    const record = {
+      id: feedbackId, uid: String(uid), username: from.username || '', name: displayName(from),
+      star: Math.max(1, Math.min(5, star)), note: String(draft.note || '').slice(0, 600), photo: draft.photo || null,
+      createdAt: Date.now(), status: 'pending'
+    };
+    feedbacks[feedbackId] = record; saveFeedbacks();
+    const body = `⭐ <b>FEEDBACK CHỜ ADMIN DUYỆT</b>\n━━━━━━━━━━━━━━━━━━\n🧾 Mã: <code>${feedbackId}</code>\n👤 ${esc(record.name)} ${record.username ? '(@' + esc(record.username) + ')' : ''}\n🆔 User: <code>${uid}</code>\n🌟 Đánh giá: <b>${record.star}/5</b>\n💬 Nội dung: ${esc(record.note || 'Không có ghi chú')}\n\nChọn duyệt để đăng lên các kênh feedback đã cấu hình.`;
     for (const aid of ADMIN_IDS) {
-      try {
-        await send(aid, `⭐ <b>FEEDBACK</b>\nUser: <code>${uid}</code>\nSao: ${star}/5\nNote: ${esc(fb.note || '—')}`);
-      } catch (e) {}
+      const markup = kb([[btn('✅ DUYỆT & ĐĂNG KÊNH', 'fb:approve:' + feedbackId, 'success'), btn('❌ TỪ CHỐI', 'fb:reject:' + feedbackId, 'danger')]]);
+      if (record.photo) await tg('sendPhoto', { chat_id: aid, photo: record.photo, caption: body, parse_mode: 'HTML', reply_markup: markup.reply_markup });
+      else await send(aid, body, markup);
     }
-    return send(chatId, 'Cảm Ơn Quý Khách Đã Gửi Feedback Tới Admin\nChúc Bạn Chơi Vui Vẻ Thắng Lớn DCM bạn!!', kb([[btn('🏠 MENU', 'menu', 'primary')]]));
+    return send(chatId, '✅ <b>FEEDBACK ĐÃ ĐƯỢC GỬI ĐẾN ADMIN</b>\n\n⏳ Sau khi admin duyệt, nội dung sẽ được đăng lên các kênh đã cài đặt. Cảm ơn bạn đã đóng góp ý kiến! 💙', kb([[btn('🏠 MENU', 'menu', 'primary')]]));
+  }
+  if (data.startsWith('fb:approve:') || data.startsWith('fb:reject:')) {
+    if (!isAdmin(uid)) return send(chatId, '⛔ Bạn không có quyền admin.');
+    const approve = data.startsWith('fb:approve:');
+    const feedbackId = data.slice(approve ? 11 : 10);
+    const result = await reviewFeedback(feedbackId, uid, approve);
+    return send(chatId, (result.ok ? '✅ ' : '❌ ') + esc(result.message));
   }
   if (data === 'hash:ok' || data === 'hash:bad') {
     const predictionKey = `${chatId}:${msgId}`;
@@ -1447,21 +2074,38 @@ async function onCallback(cq) {
     if (!prediction || prediction.uid !== String(uid)) {
       return send(chatId, '⚠️ Kết quả này không còn ở trạng thái chờ xác nhận. Hãy gửi mã hash mới để phân tích.');
     }
-    delete hashPredictions[predictionKey];
-    saveHashPredictions();
-    const isCorrect = data === 'hash:ok';
-    hashFeedbacks.push({
-      uid: String(uid), hash: prediction.hash, type: prediction.type,
-      prediction: prediction.side, confidence: prediction.conf,
-      feedback: isCorrect ? 'correct' : 'incorrect', createdAt: Date.now()
-    });
-    if (hashFeedbacks.length > 1000) hashFeedbacks = hashFeedbacks.slice(-1000);
-    saveHashFeedbacks();
+    if (data === 'hash:bad') {
+      sessions[uid] = { await: 'hash_actual', predictionKey };
+      return send(chatId, '🧾 <b>XÁC NHẬN KẾT QUẢ THỰC TẾ</b>\n\nBạn báo dự đoán sai. Kết quả thật của ván đó là gì?', kb([
+        [btn('🔴 THỰC TẾ TÀI', 'hash:actual:T', 'danger')],
+        [btn('🔵 THỰC TẾ XỈU', 'hash:actual:X', 'primary')]
+      ]));
+    }
+    const actual = prediction.side;
+    const hashSave = recordHashOutcome({ uid: String(uid), hash: prediction.hash, type: prediction.type, prediction: prediction.side, actual, feedback: 'correct', confidence: prediction.conf, createdAt: Date.now() });
+    delete hashPredictions[predictionKey]; saveHashPredictions();
+    if (hashSave.reason === 'conflict') return send(chatId, '⚠️ Mã này đã có phản hồi thực tế mâu thuẫn trước đó nên được loại khỏi dữ liệu huấn luyện. Hãy dùng mã và kết quả đã xác minh khác.');
     sessions[uid] = { await: 'hash_input' };
-    return send(chatId, isCorrect
-      ? '✅ <b>ĐÃ GHI NHẬN: DỰ ĐOÁN ĐÚNG</b>\nGửi mã hash tiếp theo để phân tích.'
-      : '❌ <b>ĐÃ GHI NHẬN: DỰ ĐOÁN SAI</b>\nGửi mã hash tiếp theo để phân tích.',
-      kb([[btn('🧩 PHÂN TÍCH MÃ TIẾP', 'hash:again', 'success')], [btn('🏠 THOÁT', 'menu', 'danger')]]));
+    return send(chatId, hashSave.saved ? '✅ <b>ĐÃ GHI NHẬN KẾT QUẢ THỰC TẾ</b>\nMẫu mới đã được thêm vào dữ liệu kiểm định của Tool Hash. Gửi mã hash tiếp theo để phân tích.' : '✅ <b>ĐÃ GHI NHẬN PHẢN HỒI</b>\nMã này đã có trong dữ liệu; bot cập nhật số lần xác nhận nhưng không nhân đôi mẫu huấn luyện. Gửi mã hash tiếp theo để phân tích.', kb([
+      [btn('🧩 PHÂN TÍCH MÃ TIẾP', 'hash:again', 'success')], [btn('🏠 THOÁT', 'menu', 'danger')]
+    ]));
+  }
+  if (data.startsWith('hash:actual:')) {
+    const st = sessions[uid];
+    if (!st || st.await !== 'hash_actual' || !st.predictionKey) return send(chatId, '⚠️ Phiên xác nhận đã hết hạn. Hãy gửi mã hash mới.');
+    const prediction = hashPredictions[st.predictionKey];
+    if (!prediction || prediction.uid !== String(uid)) { delete sessions[uid]; return send(chatId, '⚠️ Không tìm thấy dự đoán cần xác nhận.'); }
+    const actual = data.slice('hash:actual:'.length);
+    if (actual !== 'T' && actual !== 'X') return send(chatId, '⚠️ Kết quả thực tế không hợp lệ.');
+    const hashSave = recordHashOutcome({ uid: String(uid), hash: prediction.hash, type: prediction.type, prediction: prediction.side, actual, feedback: actual === prediction.side ? 'correct' : 'incorrect', confidence: prediction.conf, createdAt: Date.now() });
+    delete hashPredictions[st.predictionKey]; delete sessions[uid];
+    saveHashPredictions();
+    if (hashSave.reason === 'conflict') return send(chatId, '⚠️ Mã hash này từng được xác nhận với kết quả khác. Mẫu đã bị loại khỏi huấn luyện để tránh làm sai mô hình.');
+    sessions[uid] = { await: 'hash_input' };
+    const correct = actual === prediction.side;
+    return send(chatId, `${correct ? '✅' : '❌'} <b>ĐÃ LƯU KẾT QUẢ THỰC TẾ: ${actual === 'T' ? 'TÀI' : 'XỈU'}</b>\n📚 Dữ liệu phản hồi đã được kiểm tra trùng/mâu thuẫn trước khi dùng huấn luyện.`, kb([
+      [btn('🧩 PHÂN TÍCH MÃ TIẾP', 'hash:again', 'success')], [btn('🏠 THOÁT', 'menu', 'danger')]
+    ]));
   }
   if (data === 'hash:again') {
     sessions[uid] = { await: 'hash_input' };
@@ -1472,7 +2116,7 @@ async function onCallback(cq) {
     const gameId = data.slice(5);
     if (gameId === 'brands') return;
     if (gameId.startsWith('stop:')) { stopAuto(uid); return send(chatId, '⏹ Đã dừng cập nhật.'); }
-    if (!isVip(uid)) return send(chatId, '🔒 <b>MUA KEY ĐÊ RỒI XEM</b>', kb([[btn('💳 THUÊ TOOL', 'rent:menu', 'primary'), btn('🔑 NHẬP KEY', 'key:input', 'success')], [btn('◀️ QUAY LẠI', 'menu', 'danger')]]));
+    if (!isVip(uid)) return send(chatId, '🔒 <b>MUA KEY ĐÊ RỒI XEM</b>', kb([[btn('💳 GÓI SỬ DỤNG', 'rent:menu', 'primary'), btn('🔑 KÍCH HOẠT KEY', 'key:input', 'success')], [btn('◀️ QUAY LẠI', 'menu', 'danger')]]));
     const g = games.find(x => x.id === gameId);
     if (!g) return;
     const load = await send(chatId, '⏳ Đang lấy dữ liệu...');
@@ -1489,16 +2133,96 @@ async function onCallback(cq) {
 
 async function onMessage(msg) {
   if (!msg || !msg.chat) return;
-  try { await onBankMessage(msg); } catch (e) {}
+  try { await onBankMessage(msg); } catch (e) { console.error('[BANK MESSAGE]', e.message); }
   if (!msg.from) return;
   const chatId = msg.chat.id, from = msg.from, uid = uidOf(from), text = (msg.text || '').trim();
+
+  // In groups, only accept the admin command used to register the current feedback group.
+  if (msg.chat.type !== 'private') {
+    if (isAdmin(uid) && /^\/fbchannel(?:@\w+)?\s+add_here$/i.test(text)) {
+      settings.feedbackChannels = settings.feedbackChannels || [];
+      if (!settings.feedbackChannels.map(String).includes(String(chatId))) settings.feedbackChannels.push(String(chatId));
+      saveSettings();
+      await send(chatId, '✅ Đã đăng ký nhóm này làm nơi nhận feedback đã duyệt.');
+    }
+    return;
+  }
+
   ensureUser(uid, from);
+  if (isAdmin(uid) && msg.document && ((sessions[uid] && sessions[uid].await === 'admin_file') || /^\/setfile(?:@\w+)?$/i.test(String(msg.caption || '').trim()))) {
+    const doc = msg.document;
+    const id = crypto.randomBytes(8).toString('hex');
+    storeFiles[id] = {
+      id, telegramFileId: doc.file_id, originalName: String(doc.file_name || 'kho-file').slice(0, 180),
+      size: Number(doc.file_size || 0), mimeType: doc.mime_type || 'application/octet-stream', uploadedAt: Date.now(), source: 'telegram'
+    };
+    storeProduct.activeFileId = id;
+    if (sessions[uid] && sessions[uid].await === 'admin_file') delete sessions[uid];
+    saveStoreFiles(); saveStoreProduct();
+    return send(chatId, `✅ <b>ĐÃ CẬP NHẬT KHO FILE</b>\n\n📁 Tệp: <b>${esc(storeFiles[id].originalName)}</b>\n📏 Dung lượng: ${(storeFiles[id].size / (1024*1024)).toFixed(2)} MB\n💰 Giá bán: <b>${fmt(STORE_PRICE)}đ</b>\n\nFile này hiện đã được chọn làm sản phẩm đang bán.`, kb([[btn('📦 KIỂM TRA KHO FILE', 'adm:files', 'primary')], [btn('👑 ADMIN', 'adm:home', 'success')]]));
+  }
 
   if (text === '/start' || text === '/menu') {
     saveUsers(); delete sessions[uid];
     return showUserMenu(chatId, from);
   }
   if (text === '/admin' && isAdmin(uid)) return showAdmin(chatId);
+  if (text === '/setfile' && isAdmin(uid)) {
+    sessions[uid] = { await: 'admin_file' };
+    return send(chatId, '📤 <b>GỬI FILE SẢN PHẨM</b>\n\nHãy gửi một tài liệu (Document) ngay trong chat này. File mới sẽ thay file đang bán trong KHO FILE.');
+  }
+  if (text.startsWith('/setfileprice ') && isAdmin(uid)) {
+    const price = Number(text.split(/\s+/)[1]);
+    if (!Number.isSafeInteger(price) || price < 1000 || price > 100000000) return send(chatId, '⚠️ Dùng: <code>/setfileprice 10000</code> (từ 1.000đ đến 100.000.000đ).');
+    STORE_PRICE = price; settings.storePrice = price; saveSettings();
+    return send(chatId, `✅ Đã đặt giá kho file: <b>${fmt(STORE_PRICE)}đ</b>.`);
+  }
+  if (text.startsWith('/setfilememo ') && isAdmin(uid)) {
+    const prefix = memoToken(text.slice('/setfilememo '.length), 12);
+    if (!prefix) return send(chatId, '⚠️ Vui lòng nhập tiền tố. Ví dụ <code>/setfilememo M</code>');
+    STORE_TRANSFER_PREFIX = prefix; settings.storeTransferPrefix = prefix; saveSettings();
+    return send(chatId, `✅ Mã đầu đơn FILE: <code>${esc(prefix)}</code>. Mỗi đơn dùng dạng <code>${esc(memoToken(prefix, 1) || 'M')}-XXXXXX</code>; thời gian được lưu trong đơn.`);
+  }
+  if (text.startsWith('/setkeyprefix ') && isAdmin(uid)) {
+    const prefix = memoToken(text.slice('/setkeyprefix '.length), 12);
+    if (!prefix) return send(chatId, '⚠️ Vui lòng nhập tiền tố. Ví dụ <code>/setkeyprefix N</code>');
+    KEY_TRANSFER_PREFIX = prefix; settings.keyTransferPrefix = prefix; saveSettings();
+    return send(chatId, `✅ Mã đầu đơn KEY: <code>${esc(prefix)}</code>. Mỗi đơn dùng dạng <code>${esc(memoToken(prefix, 1) || 'N')}-XXXXXX</code>; username/ID được lưu riêng trong đơn.`);
+  }
+  if (text.startsWith('/setproduct ') && isAdmin(uid)) {
+    const name = text.slice('/setproduct '.length).trim().slice(0, 80);
+    if (!name) return send(chatId, '⚠️ Dùng: <code>/setproduct Tên sản phẩm</code>');
+    STORE_PRODUCT_NAME = name; settings.storeProductName = name; saveSettings();
+    return send(chatId, `✅ Tên sản phẩm: <b>${esc(name)}</b>`);
+  }
+  if (text.startsWith('/setbank ') && isAdmin(uid)) {
+    const parts = text.slice('/setbank '.length).split('|').map(x => x.trim());
+    if (parts.length < 3 || !/^\d{6}$/.test(parts[0]) || !/^\d{6,20}$/.test(parts[1]) || !parts[2]) return send(chatId, '⚠️ Dùng: <code>/setbank BIN|SO_TAI_KHOAN|CHU_TAI_KHOAN</code>');
+    BANK = { ...BANK, bin: parts[0], account: parts[1], name: parts.slice(2).join('|').slice(0, 80) };
+    settings.bank = BANK; saveSettings();
+    return send(chatId, `✅ Đã cập nhật tài khoản nhận tiền.\n🏦 BIN: <code>${BANK.bin}</code>\n💳 STK: <code>${BANK.account}</code>\n👤 Chủ TK: <b>${esc(BANK.name)}</b>`);
+  }
+  if (text.startsWith('/fbchannel ' ) && isAdmin(uid)) {
+    const parts = text.split(/\s+/);
+    const action = (parts[1] || '').toLowerCase();
+    const target = parts[2];
+    settings.feedbackChannels = settings.feedbackChannels || [];
+    if (action === 'add' && target) {
+      if (!/^-?\d+$/.test(target)) return send(chatId, '⚠️ Chat ID phải là số. Dùng <code>/fbchannel add -100...</code>');
+      if (!settings.feedbackChannels.map(String).includes(String(target))) settings.feedbackChannels.push(String(target));
+      saveSettings();
+      const test = await send(target, '✅ Bot đã kết nối kênh feedback này.');
+      if (!test || !test.ok) return send(chatId, `⚠️ Đã lưu ID nhưng bot chưa gửi thử được: ${esc(test && test.description || 'Không rõ lỗi')}. Hãy kiểm tra bot đã tham gia và có quyền đăng bài.`);
+      return send(chatId, `✅ Đã thêm kênh nhận feedback <code>${esc(target)}</code>.`);
+    }
+    if (action === 'remove' && target) {
+      settings.feedbackChannels = settings.feedbackChannels.filter(x => String(x) !== String(target)); saveSettings();
+      return send(chatId, `✅ Đã xoá kênh <code>${esc(target)}</code>.`);
+    }
+    return send(chatId, '⚠️ Dùng <code>/fbchannel add ID</code> hoặc <code>/fbchannel remove ID</code>. Có thể dùng <code>/fbchannel add_here</code> trong nhóm.');
+  }
+  if (text === '/fbchannels' && isAdmin(uid)) return showFeedbackChannels(chatId);
+  if (text === '/orders' && isAdmin(uid)) return showPendingFileOrders(chatId);
   if (text === '/stop') {
     stopAuto(uid);
     return send(chatId, '⏹ <b>Đã dừng tất cả hoạt động.</b>');
@@ -1559,7 +2283,23 @@ async function onMessage(msg) {
   if (text.startsWith('/setbankgroup ') && isAdmin(uid)) {
     settings.bankGroupId = text.split(/\s+/)[1];
     saveSettings();
-    return send(chatId, '✅ Bank group <code>' + settings.bankGroupId + '</code>');
+    return send(chatId, '✅ Nhóm biến động số dư đã đặt: <code>' + esc(settings.bankGroupId) + '</code>');
+  }
+
+  if (text.startsWith('/setbanksenders') && isAdmin(uid)) {
+    const value = text.slice('/setbanksenders'.length).trim();
+    if (!value) {
+      const current = settings.bankSenderIds.length ? settings.bankSenderIds.join(', ') : 'Mặc định: chỉ nhận tin do bot hoặc admin gửi';
+      return send(chatId, `🛡️ <b>NGUỒN THÔNG BÁO NGÂN HÀNG ĐƯỢC TIN CẬY</b>\n${esc(current)}\n\nDùng <code>/setbanksenders ID1,ID2</code> để đặt danh sách cho phép.\nDùng <code>/setbanksenders clear</code> để quay về chế độ mặc định.`);
+    }
+    if (value.toLowerCase() === 'clear') {
+      settings.bankSenderIds = []; saveSettings();
+      return send(chatId, '✅ Đã xóa danh sách riêng. Bot chỉ tự tin cậy tin nhắn do bot hoặc admin gửi.');
+    }
+    const ids = value.split(/[,;\s]+/).map(x => x.trim()).filter(Boolean);
+    if (!ids.length || ids.some(x => !/^-?\d+$/.test(x))) return send(chatId, '⚠️ ID phải là số. Ví dụ: <code>/setbanksenders 123456789</code>');
+    settings.bankSenderIds = [...new Set(ids)]; saveSettings();
+    return send(chatId, `✅ Đã cập nhật nguồn ngân hàng tin cậy: <code>${esc(settings.bankSenderIds.join(', '))}</code>`);
   }
   if (text.startsWith('/addgroup ') && isAdmin(uid)) {
     const body = text.slice(10);
@@ -1603,7 +2343,7 @@ async function onMessage(msg) {
       delete sessions[uid];
       if (!r.ok) return send(chatId, '❌ ' + r.msg, kb([[btn('🔑 THỬ LẠI', 'key:input', 'success'), btn('◀️ MENU', 'menu', 'danger')]]));
       return send(chatId, '🎉 <b>BẠN ĐÃ MỞ KHOÁ VIP THÀNH CÔNG</b>\nMỞ TOOL CHIẾN NGAY THÔI!', kb([
-        [btn('🚀 VÀO TOOL ALL GAME', 'pred:brands', 'primary')],
+        [btn('🎮 CHỌN GAME', 'pred:brands', 'primary')],
         [btn('🏠 MENU', 'menu', 'success')]
       ]));
     }
@@ -1648,21 +2388,23 @@ async function onMessage(msg) {
     if (st.await === 'hash_input') {
       const hashStr = text.toLowerCase();
       if (!/^[a-f0-9]{32}$/.test(hashStr) && !/^[a-f0-9]{64}$/.test(hashStr)) {
-        return send(chatId, '❌ <b>MÃ HASH ĐÉO HỢP LỆ!</b>\nYêu cầu MD5 (32) hoặc SHA256 (64).');
+        return send(chatId, '⚠️ <b>ĐỊNH DẠNG HASH CHƯA ĐÚNG</b>\nVui lòng gửi mã MD5 gồm 32 ký tự hoặc SHA-256 gồm 64 ký tự hệ 16.');
       }
       const type = hashStr.length === 32 ? 'MD5' : 'SHA256';
       const pred = predictHash(hashStr);
       const sideTxt = pred.side === 'T' ? 'TÀI' : 'XỈU';
       const sideIcon = pred.side === 'T' ? '🔴' : '🔵';
-      const filled = Math.max(0, Math.min(10, Math.round((pred.conf || 52) / 10)));
+      const filled = Math.max(0, Math.min(10, Math.round((pred.conf || 50) / 10)));
       const bar = '█'.repeat(filled) + '░'.repeat(10 - filled);
-      const sent = await send(chatId, `🧩 <b>KẾT QUẢ PHÂN TÍCH ${type}</b>\n\n🔑 <b>Hash:</b> <code>${esc(hashStr)}</code>\n\n🎯 <b>DỰ ĐOÁN:</b> ${sideIcon} <b>${sideTxt}</b>\n⚡ <b>Điểm tham khảo:</b> <b>${pred.conf}%</b>\n<code>${bar}</code>\n💡 <b>Phân tích:</b> ${esc(pred.reason)}\n\n👇 <i>Xác nhận kết quả dự đoán bên dưới:</i>`,
-      kb([[btn('✅ DỰ ĐOÁN ĐÚNG', 'hash:ok', 'success'), btn('❌ DỰ ĐOÁN SAI', 'hash:bad', 'danger')], [btn('🏠 THOÁT', 'menu', 'danger')]]));
+      const modelLine = pred.model === 'learned' ? `🧠 Mẫu đã kiểm định: <b>${pred.samples}</b> • Balanced accuracy: <b>${pred.validationAccuracy.toFixed(1)}%</b> • Brier: <b>${Number(pred.validationBrier || 0).toFixed(3)}</b>` : '🧪 Chế độ an toàn • Chưa vượt ngưỡng kiểm định ngoài mẫu';
+      const sent = await send(chatId, `╭━━━━━━━━━━━━━━━━━━╮\n       🧩 <b>HASH LAB PREMIUM</b>\n╰━━━━━━━━━━━━━━━━━━╯\n\n🔐 <b>Loại mã:</b> ${type} • ${hashStr.length} ký tự\n🔑 <code>${esc(hashStr)}</code>\n\n🎯 <b>TÍN HIỆU THAM KHẢO</b>\n${sideIcon} <b>${sideTxt}</b>\n📊 Mức nghiêng thống kê: <b>${pred.conf}%</b>\n<code>${bar}</code>\n${modelLine}\n\n💡 ${esc(pred.reason)}\n\n👇 <i>Chỉ gửi phản hồi sau khi đã có kết quả thực tế để đối chiếu.</i>`,
+      kb([[btn('✅ ĐÚNG — THỰC TẾ TRÙNG', 'hash:ok', 'success'), btn('❌ SAI — NHẬP KẾT QUẢ THẬT', 'hash:bad', 'danger')], [btn('🏠 THOÁT', 'menu', 'danger')]]));
       if (sent && sent.ok && sent.result && sent.result.message_id) {
         const predictionKey = `${chatId}:${sent.result.message_id}`;
         hashPredictions[predictionKey] = {
           uid: String(uid), hash: hashStr, type, side: pred.side,
-          conf: pred.conf, createdAt: Date.now()
+          conf: pred.conf, model: pred.model || 'neutral', samples: pred.samples || 0,
+          validationAccuracy: pred.validationAccuracy, createdAt: Date.now()
         };
         const entries = Object.entries(hashPredictions);
         if (entries.length > 500) {
@@ -1686,125 +2428,25 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: '2mb' }));
 
-function safeCompare(a, b) {
-  const aa = Buffer.from(String(a || ''));
-  const bb = Buffer.from(String(b || ''));
-  return aa.length === bb.length && crypto.timingSafeEqual(aa, bb);
-}
-function createAdminToken() {
-  const payload = Buffer.from(JSON.stringify({ exp: Date.now() + 12 * 60 * 60 * 1000 })).toString('base64url');
-  const sig = crypto.createHmac('sha256', ADMIN_WEB_SECRET).update(payload).digest('base64url');
-  return payload + '.' + sig;
-}
-function validAdminToken(token) {
-  if (!ADMIN_WEB_PASSWORD || !ADMIN_WEB_SECRET || !token || !String(token).includes('.')) return false;
-  const [payload, sig] = String(token).split('.');
-  const expected = crypto.createHmac('sha256', ADMIN_WEB_SECRET).update(payload).digest('base64url');
-  if (!safeCompare(sig, expected)) return false;
-  try { const data = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')); return Number(data.exp) > Date.now(); }
-  catch { return false; }
-}
-function requireWebAdmin(req, res, next) {
-  const token = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
-  if (!validAdminToken(token)) return res.status(401).json({ ok: false, error: 'Phiên admin hết hạn hoặc không hợp lệ.' });
-  next();
-}
-const adminLoginAttempts = new Map();
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 45 * 1024 * 1024, files: 1 },
-  fileFilter: (_req, file, cb) => {
-    const name = String(file.originalname || 'file').replace(/[\r\n\0]/g, '').slice(0, 180);
-    file.originalname = name || 'file';
-    cb(null, true);
-  }
-});
-function handleStoreUpload(req, res, next) {
-  upload.single('file')(req, res, err => {
-    if (err) {
-      const message = err.code === 'LIMIT_FILE_SIZE' ? 'File vượt giới hạn 45 MB.' : (err.message || 'Không tải được file.');
-      return res.status(400).json({ ok: false, error: message });
-    }
-    next();
-  });
-}
+// Public read-only game monitor. All administration is performed in the Telegram bot.
+app.get('/', (_req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 
-app.post('/api/admin/login', (req, res) => {
-  if (!ADMIN_WEB_PASSWORD) return res.status(503).json({ ok: false, error: 'Chưa cấu hình ADMIN_WEB_PASSWORD trên máy chủ.' });
-  const ip = String(req.ip || req.socket.remoteAddress || 'unknown');
-  const attempt = adminLoginAttempts.get(ip) || { count: 0, resetAt: Date.now() + 15 * 60 * 1000 };
-  if (Date.now() > attempt.resetAt) { attempt.count = 0; attempt.resetAt = Date.now() + 15 * 60 * 1000; }
-  if (attempt.count >= 8) return res.status(429).json({ ok: false, error: 'Thử quá nhiều lần. Vui lòng đợi 15 phút.' });
-  const password = String((req.body || {}).password || '');
-  if (!safeCompare(password, ADMIN_WEB_PASSWORD)) {
-    attempt.count++; adminLoginAttempts.set(ip, attempt);
-    return res.status(401).json({ ok: false, error: 'Mật khẩu admin không chính xác.' });
-  }
-  adminLoginAttempts.delete(ip);
-  res.json({ ok: true, token: createAdminToken(), expiresIn: 12 * 60 * 60 });
-});
-app.get('/api/admin/session', requireWebAdmin, (_req, res) => res.json({ ok: true, product: STORE_PRODUCT_NAME, price: STORE_PRICE }));
-app.get('/api/admin/files', requireWebAdmin, (_req, res) => {
-  const files = Object.values(storeFiles).map(f => ({ ...f, active: String(f.id) === String(storeProduct.activeFileId), exists: fs.existsSync(path.join(STORE_UPLOADS, f.storedName)) })).sort((a, b) => Number(b.uploadedAt || 0) - Number(a.uploadedAt || 0));
-  res.json({ ok: true, files, activeFileId: storeProduct.activeFileId || '' });
-});
-app.post('/api/admin/files', requireWebAdmin, handleStoreUpload, (req, res) => {
-  if (!req.file) return res.status(400).json({ ok: false, error: 'Vui lòng chọn một file để tải lên.' });
-  const id = crypto.randomBytes(8).toString('hex');
-  const originalName = String(req.file.originalname || 'file').replace(/[\/\\]/g, '_').slice(0, 180);
-  const ext = path.extname(originalName).slice(0, 16);
-  const storedName = id + ext;
-  try {
-    fs.writeFileSync(path.join(STORE_UPLOADS, storedName), req.file.buffer, { flag: 'wx' });
-    storeFiles[id] = { id, originalName, storedName, size: req.file.size, mimeType: req.file.mimetype || 'application/octet-stream', uploadedAt: Date.now() };
-    storeProduct.activeFileId = id; // file mới tải lên sẽ trở thành file đang bán
-    saveStoreFiles(); saveStoreProduct();
-    res.json({ ok: true, file: { ...storeFiles[id], active: true } });
-  } catch (e) { res.status(500).json({ ok: false, error: 'Không lưu được file: ' + e.message }); }
-});
-app.post('/api/admin/files/:id/activate', requireWebAdmin, (req, res) => {
-  const f = storeFiles[String(req.params.id || '')];
-  if (!f || !fs.existsSync(path.join(STORE_UPLOADS, f.storedName))) return res.status(404).json({ ok: false, error: 'Không tìm thấy file.' });
-  storeProduct.activeFileId = f.id; saveStoreProduct();
-  res.json({ ok: true, activeFileId: f.id });
-});
-app.delete('/api/admin/files/:id', requireWebAdmin, (req, res) => {
-  const id = String(req.params.id || ''), f = storeFiles[id];
-  if (!f) return res.status(404).json({ ok: false, error: 'Không tìm thấy file.' });
-  const used = Object.values(orders).some(o => o && o.type === 'file' && String(o.fileId) === id && ['pending', 'checking', 'delivering'].includes(o.status));
-  if (used) return res.status(409).json({ ok: false, error: 'File đang gắn với đơn chưa xử lý, không thể xoá.' });
-  try { fs.unlinkSync(path.join(STORE_UPLOADS, f.storedName)); } catch {}
-  delete storeFiles[id];
-  if (String(storeProduct.activeFileId) === id) storeProduct.activeFileId = Object.keys(storeFiles)[0] || '';
-  saveStoreFiles(); saveStoreProduct();
-  res.json({ ok: true });
-});
-app.get('/api/admin/orders', requireWebAdmin, (_req, res) => {
-  const list = Object.values(orders).filter(o => o && o.type === 'file').map(o => ({ id: o.id, uid: o.uid, product: o.product || STORE_PRODUCT_NAME, amount: o.amount, addInfo: o.addInfo, status: o.status, created: o.created, checkAt: o.checkAt, paidAt: o.paidAt, fileId: o.fileId, deliveryError: o.deliveryError || '' })).sort((a, b) => Number(b.created || 0) - Number(a.created || 0));
-  res.json({ ok: true, orders: list });
-});
-app.post('/api/admin/orders/:id/approve', requireWebAdmin, async (req, res) => {
-  try { const result = await approveFileOrder(String(req.params.id || ''), 'web-admin', true); res.status(result.ok ? 200 : 400).json(result); }
-  catch (e) { res.status(500).json({ ok: false, message: e.message }); }
-});
-app.post('/api/admin/orders/:id/reject', requireWebAdmin, async (req, res) => {
-  try { const result = await rejectFileOrder(String(req.params.id || ''), 'web-admin', 'Admin từ chối sau khi đối soát.', true); res.status(result.ok ? 200 : 400).json(result); }
-  catch (e) { res.status(500).json({ ok: false, message: e.message }); }
-});
-
-// Root is the private admin dashboard; bot users never need to open this page.
-app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
-
-// Các API cho Web — cần đăng nhập admin
-app.get('/api/games', requireWebAdmin, (req, res) => {
+app.get('/api/games', (_req, res) => {
   const list = games.map(g => {
     const f = FEEDS[g.id], p = f.lastPred || {};
-    return { id: g.id, name: `${g.brandLabel} - ${g.variant}`, group: g.group, pred: p.side ? (p.side === 'T' ? 'TÀI' : 'XỈU') : 'Đang lấy...', conf: p.conf || 0, acc: f.engine.accuracy() };
+    return {
+      id: g.id, name: `${g.brandLabel} - ${g.variant}`, group: g.group,
+      pred: p.side ? (p.side === 'T' ? 'TÀI' : 'XỈU') : 'Đang lấy...',
+      conf: p.conf || 0, acc: f.engine.accuracy(), total: f.engine.total,
+      correct: f.engine.correct, dicePrediction: p.dicePrediction || null,
+      reason: p.reason || '', qualityLabel: p.qualityLabel || 'CHƯA CÓ DỮ LIỆU', modelVersion: p.modelVersion || 'adaptive-18',
+      updatedAt: f.lastLive ? nowVN() : 'Chưa có dữ liệu'
+    };
   });
   res.json({ games: list });
 });
 
-app.post('/api/data', requireWebAdmin, (req, res) => {
+app.post('/api/data', (req, res) => {
   const { apiId } = req.body;
   const g = games.find(x => x.id === apiId), feed = FEEDS[apiId];
   if (!g || !feed) return res.json({ rows: [] });
@@ -1825,16 +2467,32 @@ app.post('/api/data', requireWebAdmin, (req, res) => {
     const verifyTxt = log.ok ? 'ĐÚNG' : 'SAI';
     rows.push({ game: g.brandLabel, phien: log.session || '---', time: log.time, prediction: predTxt, result: resTxt, verify: verifyTxt, isCorrect: log.ok });
   }
-  res.json({ rows });
+  const p = feed.lastPred || {};
+  res.json({
+    rows,
+    current: {
+      prediction: p.side === 'T' ? 'TÀI' : p.side === 'X' ? 'XỈU' : 'ĐANG LẤY DỮ LIỆU',
+      confidence: p.conf || 0, reason: p.reason || '', qualityLabel: p.qualityLabel || 'CHƯA CÓ DỮ LIỆU', modelVersion: p.modelVersion || 'adaptive-18', regimeShift: p.regimeShift || 0,
+      dicePrediction: p.dicePrediction || null,
+      session: feed.lastLive ? String(Number(feed.lastLive.session) + 1) : '—',
+      updatedAt: nowVN(), sampleSize: feed.engine.history.length,
+      sicboStats: g.group === 'sicbo' ? {
+        tests: feed.engine.sicbo.tests,
+        exactRate: feed.engine.sicbo.tests ? Number((feed.engine.sicbo.exactHits / feed.engine.sicbo.tests * 100).toFixed(1)) : null,
+        top3Rate: feed.engine.sicbo.tests ? Number((feed.engine.sicbo.top3Hits / feed.engine.sicbo.tests * 100).toFixed(1)) : null,
+        sumTop3Rate: feed.engine.sicbo.sumTop3Tests ? Number((feed.engine.sicbo.sumTop3Hits / feed.engine.sicbo.sumTop3Tests * 100).toFixed(1)) : null,
+        sumTop3Tests: feed.engine.sicbo.sumTop3Tests,
+        sideRate: feed.engine.sicbo.sideTests ? Number((feed.engine.sicbo.sideHits / feed.engine.sicbo.sideTests * 100).toFixed(1)) : null,
+        brierScore: feed.engine.sicbo.sideTests ? Number((feed.engine.sicbo.brierTotal / feed.engine.sicbo.sideTests).toFixed(4)) : null,
+        sideTests: feed.engine.sicbo.sideTests,
+        faceRate: feed.engine.sicbo.faceSlots ? Number((feed.engine.sicbo.faceHits / feed.engine.sicbo.faceSlots * 100).toFixed(1)) : null,
+        sumRate: feed.engine.sicbo.tests ? Number((feed.engine.sicbo.sumHits / feed.engine.sicbo.tests * 100).toFixed(1)) : null
+      } : null
+    }
+  });
 });
 
-app.post('/reset-learn', requireWebAdmin, (req, res) => {
-  const { apiId } = req.body;
-  if (FEEDS[apiId]) { FEEDS[apiId].engine = new Engine(apiId); FEEDS[apiId].lastSession = null; }
-  res.json({ ok: true });
-});
-
-app.get('/health', (_, res) => res.json({ ok: true, bot: 'TOOL TX BY FEE v16.2', games: games.length }));
+app.get('/health', (_, res) => res.json({ ok: true, bot: 'TOOL TX BY FEE v16.8 ALL-GAME ADAPTIVE ENGINE', games: games.length }));
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log('🔥 TOOL TX BY FEE running on port', PORT);
@@ -1846,16 +2504,26 @@ async function loop() {
   if (!BOT_TOKEN) return;
   try {
     const j = await tg('getUpdates', { offset, timeout: 25, allowed_updates: ['message', 'callback_query'] });
+    if (j && j.ok === false) {
+      console.error('[TELEGRAM POLLING]', j.description || 'getUpdates failed');
+      if (/webhook|409/i.test(String(j.description || ''))) {
+        console.error('[TELEGRAM POLLING] Bot đang có webhook. Hãy gỡ webhook cũ trước khi dùng long polling: https://api.telegram.org/bot<TOKEN>/deleteWebhook?drop_pending_updates=false');
+        await new Promise(r => setTimeout(r, 10000));
+      }
+    }
     if (j && j.result) {
       for (const u of j.result) {
         offset = u.update_id + 1;
         try {
           if (u.callback_query) await onCallback(u.callback_query);
           else if (u.message) await onMessage(u.message);
-        } catch (e) { console.error(e); }
+        } catch (e) { console.error('[TELEGRAM UPDATE]', e); }
       }
     }
-  } catch (e) { await new Promise(r => setTimeout(r, 2000)); }
+  } catch (e) {
+    console.error('[TELEGRAM POLLING ERROR]', e.message || e);
+    await new Promise(r => setTimeout(r, 2000));
+  }
   setImmediate(loop);
 }
 loop();
