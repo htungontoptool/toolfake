@@ -22,6 +22,8 @@ const recordCode = extract('function recordHashOutcome(row) {', '\n\nfunction sa
 const paymentCode = extract('function tryMatchPayment(text) {', '\n\nasync function notifyPaymentReview');
 const sessionCode = source.slice(source.indexOf('function compareSessionIds(a, b) {'), source.indexOf('\nasync function fetchJson') );
 const parserCode = source.slice(source.indexOf('function parseHistoryArray(json) {'), source.indexOf('\nfunction compareSessionIds') - 1);
+const previousRoundCode = source.slice(source.indexOf('function getPreviousRoundSummary(live) {'), source.indexOf('\nfunction appendNewGameResults', source.indexOf('function getPreviousRoundSummary(live) {')));
+
 
 const gameListCodeStart = source.indexOf('const DEFAULT_GAMES = [');
 const gameListCodeEnd = source.indexOf('];', gameListCodeStart) + 2;
@@ -45,6 +47,15 @@ vm.runInContext(recordCode + '\nthis.recordHashOutcome = recordHashOutcome;', co
 vm.runInContext(paymentCode + '\nthis.tryMatchPayment = tryMatchPayment; this.transferMemoIncluded = transferMemoIncluded; this.normalizeTransferText = normalizeTransferText;', context);
 vm.runInContext(sessionCode + '\nthis.appendNewGameResults = appendNewGameResults; this.compareSessionIds = compareSessionIds;', context);
 vm.runInContext(parserCode + '\nthis.parseHistoryArray = parseHistoryArray;', context);
+vm.runInContext(previousRoundCode + '\nthis.getPreviousRoundSummary = getPreviousRoundSummary;', context);
+
+// Compact previous-round summary must format real result, dice and triple outcomes.
+const previousTai = context.getPreviousRoundSummary({ session: '12345', side: 'T', sum: 12, dice: [3, 4, 5] });
+if (previousTai.session !== '12345' || previousTai.result !== 'TÀI' || !previousTai.dice.includes('Tổng 12')) throw new Error('Previous Tài round summary failed');
+const previousTriple = context.getPreviousRoundSummary({ session: '12346', side: 'T', sum: 3, dice: [1, 1, 1] });
+if (previousTriple.result !== 'BỘ BA') throw new Error('Previous Sicbo triple must not be shown as Big/Small');
+const missingPrevious = context.getPreviousRoundSummary(null);
+if (missingPrevious.result !== 'Chưa có' || missingPrevious.diceValues.length !== 0) throw new Error('Missing previous round summary failed');
 
 // Every configured game receives its own adaptive engine and rolling model score.
 const allGameIds = context.DEFAULT_GAMES.map(g => g.id);
@@ -181,7 +192,7 @@ const conflict = context.recordHashOutcome({ type: 'MD5', hash: rows[0].hash, ac
 if (conflict.reason !== 'conflict') throw new Error('Conflicting hash feedback not detected');
 
 console.log(JSON.stringify({
-  version: '16.8.2',
+  version: '16.8.3',
   engine: { allGameEnginesTested: allGameIds, transitionModel: true, isolatedPerGame: true, confidenceRange: [50, 62], duplicateSessionsIgnored: true, tripleVoided: true },
   sicbo: { topSumsT: fair.topSumsBySide.T.map(x => x.sum), topSumsX: fair.topSumsBySide.X.map(x => x.sum) },
   payment: { keyMemo: keyMemo1, fileMemo, length: keyMemo1.length, unique: keyMemo1 !== keyMemo2, legacyMemoMatch: true, screenshotFormatsParsed: parsedBank.length },
