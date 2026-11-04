@@ -1,5 +1,5 @@
 /**
- * TOOL TX BY FEE — v16.8 ALL-GAME ADAPTIVE ENGINE
+ * TOOL TX BY FEE • v16.8 ALL-GAME ADAPTIVE ENGINE
  * Dynamic VietQR memos • Sicbo dice ensemble • Calibrated hash feedback
  */
 'use strict';
@@ -17,7 +17,7 @@ const { io } = require('socket.io-client');
 try { dns.setDefaultResultOrder('ipv4first'); } catch (e) {}
 
 const ROOT = __dirname;
-const DATA = path.join(ROOT, 'data');
+const DATA = process.env.DATA_DIR || path.join(ROOT, 'data');
 const STORE_UPLOADS = path.join(DATA, 'kho_files');
 if (!fs.existsSync(DATA)) fs.mkdirSync(DATA, { recursive: true });
 if (!fs.existsSync(STORE_UPLOADS)) fs.mkdirSync(STORE_UPLOADS, { recursive: true });
@@ -32,7 +32,7 @@ let STORE_TRANSFER_PREFIX = 'MUAFILE';
 let KEY_TRANSFER_PREFIX = 'NAPASS';
 const DEFAULT_BANK_GROUP_ID = String(process.env.BANK_GROUP_ID || '-1003806492891');
 const POLL_MS = Number(process.env.POLL_MS || 5000);
-const TRIAL_HOURS = 0; // không dùng trial theo giờ — dùng KEY
+const TRIAL_HOURS = 0; // không dùng trial theo giờ • dùng KEY
 // Bank VietQR
 let BANK = {
   bin: '970423', // TPBank
@@ -42,6 +42,24 @@ let BANK = {
 };
 
 const TG = `https://api.telegram.org/bot${BOT_TOKEN}`;
+// Telegram Bot API accepts one ordinary emoji reaction per message for a standard bot.
+// Keep the random pool to supported standard emoji; a failed reaction never blocks the bot.
+const REACTION_POOL = ['👍','👎','❤','🔥','🥰','👏','😁','🤔','🤯','😱','🤬','😢','🎉','🤩','🤮','💩','🙏','👌','🕊','🤡','🥱','🥴','😍','🐳','❤‍🔥','🌚','🌭','💯','🤣','⚡','🍌','🏆','💔','🤨','😐','🍓','🍾','💋','🖕','😈','😴','😭','🤓','👻','👨‍💻','👀','🎃','🙈','😇','😨','🤝','✍','🤗','🫡','🎅','🎄','☃','💅','🤪','🗿','🆒','💘','🙉','🦄','😘','💊','🙊','😎','👾','🤷‍♂','🤷','🤷‍♀','😡','🫶','🫠','🧠','💥','🌈'];
+function randomReaction() { return REACTION_POOL[crypto.randomInt(0, REACTION_POOL.length)]; }
+function queueReaction(chatId, messageId) {
+  if (!BOT_TOKEN || chatId == null || !messageId || (typeof settings !== 'undefined' && settings.reactionsEnabled === false)) return;
+  const emoji = randomReaction();
+  setTimeout(async () => {
+    const result = await tg('setMessageReaction', {
+      chat_id: chatId, message_id: messageId,
+      reaction: [{ type: 'emoji', emoji }], is_big: false
+    }).catch(() => null);
+    // Some chats restrict reactions; fall back to a common emoji without interrupting message delivery.
+    if (!result || result.ok !== true) await tg('setMessageReaction', {
+      chat_id: chatId, message_id: messageId, reaction: [{ type: 'emoji', emoji: '👍' }], is_big: false
+    }).catch(() => null);
+  }, 0).unref?.();
+}
 
 /* ═══════════════ HELPERS ═══════════════ */
 function loadJSON(file, fallback) {
@@ -81,7 +99,16 @@ async function tg(method, body) {
     }, (res) => {
       let chunks = '';
       res.on('data', c => chunks += c);
-      res.on('end', () => { try { resolve(JSON.parse(chunks)); } catch { resolve(null); } });
+      res.on('end', () => {
+        try {
+          const parsed = JSON.parse(chunks);
+          if (parsed && parsed.ok && /^send(?:Message|Photo|Document|Video|Audio|Animation|Voice|Sticker)$/.test(method)) {
+            const sentMessage = parsed.result;
+            if (sentMessage && sentMessage.message_id) queueReaction(sentMessage.chat && sentMessage.chat.id || body.chat_id, sentMessage.message_id);
+          }
+          resolve(parsed);
+        } catch { resolve(null); }
+      });
     });
     req.on('timeout', () => req.destroy(new Error(method === 'getUpdates' ? 'Telegram long polling timed out' : 'Telegram request timed out')));
     req.on('error', () => resolve(null));
@@ -95,6 +122,10 @@ async function send(chatId, text, extra = {}) {
 async function delMsg(chatId, messageId) {
   if (!messageId) return;
   return tg('deleteMessage', { chat_id: chatId, message_id: messageId });
+}
+async function clearInlineKeyboard(chatId, messageId) {
+  if (!messageId) return;
+  return tg('editMessageReplyMarkup', { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: [] } });
 }
 async function answerCb(id, text) {
   return tg('answerCallbackQuery', { callback_query_id: id, text: text || '', show_alert: false });
@@ -110,9 +141,9 @@ let storeProduct = loadJSON('store_product.json', { activeFileId: '' });
 let settings = loadJSON('settings.json', {
   support: 'SunNetWin',
   packages: [
-    { id: '1d', label: '2.5K — 1 NGÀY', amount: 2500, hours: 24 },
-    { id: '2d', label: '5K — 2 NGÀY', amount: 5000, hours: 48 },
-    { id: '2w', label: '20K — 2 TUẦN', amount: 20000, hours: 336 }
+    { id: '1d', label: '2.5K • 1 NGÀY', amount: 2500, hours: 24 },
+    { id: '2d', label: '5K • 2 NGÀY', amount: 5000, hours: 48 },
+    { id: '2w', label: '20K • 2 TUẦN', amount: 20000, hours: 336 }
   ],
   groups: [], // [{id, title, link}]
   bankGroupId: DEFAULT_BANK_GROUP_ID, // nhóm nhận thông báo biến động số dư
@@ -122,9 +153,26 @@ let settings = loadJSON('settings.json', {
   storeProductName: 'FULL SCR AUTOCUOCLC79',
   storeTransferPrefix: 'MUAFILE',
   keyTransferPrefix: 'NAPASS',
-  channelFeedback: ''
+  channelFeedback: '',
+  maintenance: false,
+  maintenanceMessage: 'Bot đang bảo trì, vui lòng quay lại sau.',
+  reactionsEnabled: true,
+  pollMs: POLL_MS,
+  botTitle: 'TOOL TX BY FEE',
+  welcomeText: ''
 });
 if (!settings.bankGroupId) settings.bankGroupId = DEFAULT_BANK_GROUP_ID;
+if (typeof settings.maintenance !== 'boolean') settings.maintenance = false;
+if (typeof settings.reactionsEnabled !== 'boolean') settings.reactionsEnabled = true;
+if (!Number.isFinite(Number(settings.pollMs))) settings.pollMs = POLL_MS;
+if (!Array.isArray(settings.groups)) settings.groups = [];
+if (!Array.isArray(settings.packages) || !settings.packages.length) settings.packages = [
+  { id: '1d', label: '2.5K • 1 NGÀY', amount: 2500, hours: 24 },
+  { id: '2d', label: '5K • 2 NGÀY', amount: 5000, hours: 48 },
+  { id: '2w', label: '20K • 2 TUẦN', amount: 20000, hours: 336 }
+];
+if (!settings.maintenanceMessage) settings.maintenanceMessage = 'Bot đang bảo trì, vui lòng quay lại sau.';
+if (!settings.botTitle) settings.botTitle = 'TOOL TX BY FEE';
 settings.feedbackChannels = Array.isArray(settings.feedbackChannels) ? settings.feedbackChannels : [];
 settings.bankSenderIds = Array.isArray(settings.bankSenderIds) ? settings.bankSenderIds.map(String) : [];
 STORE_PRICE = Math.max(1000, Number(settings.storePrice) || 10000);
@@ -143,8 +191,10 @@ const hashModelCache = {};
 if (!Array.isArray(hashFeedbacks)) hashFeedbacks = [];
 let feedbacks = loadJSON('feedbacks.json', {});
 let bankTransactions = loadJSON('bank_transactions.json', {});
+let bankMonitor = loadJSON('bank_monitor.json', { receivedAt: 0, lastMessageId: null, chatId: '', senderId: '', senderName: '', isBot: false, amount: null, ref: '', raw: '', trusted: false, matchedOrder: '' });
 function saveFeedbacks() { saveJSON('feedbacks.json', feedbacks); }
 function saveBankTransactions() { saveJSON('bank_transactions.json', bankTransactions); }
+function saveBankMonitor() { saveJSON('bank_monitor.json', bankMonitor); }
 function storeFileExists(file) {
   if (!file) return false;
   if (file.telegramFileId) return true;
@@ -208,7 +258,7 @@ function vipText(uid) {
   if (Number(u.vipUntil || 0) > Date.now()) {
     return { active: true, line: '🔓 ĐÃ MỞ KHOÁ VIP', expire: '⏳ Hết hạn: ' + new Date(u.vipUntil).toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' }) };
   }
-  return { active: false, line: '🔒 CHƯA CÓ KEY', expire: '—' };
+  return { active: false, line: '🔒 CHƯA CÓ KEY', expire: 'Chưa có' };
 }
 function grantVip(uid, hours) {
   const u = ensureUser(uid);
@@ -357,8 +407,11 @@ function tgMultipart(method, fields, file) {
       const parts = [];
       res.on('data', c => parts.push(c));
       res.on('end', () => {
-        try { resolve(JSON.parse(Buffer.concat(parts).toString('utf8'))); }
-        catch { resolve({ ok: false, description: 'Telegram trả dữ liệu không hợp lệ (HTTP ' + res.statusCode + ')' }); }
+        try {
+          const parsed = JSON.parse(Buffer.concat(parts).toString('utf8'));
+          if (parsed && parsed.ok && parsed.result && parsed.result.message_id) queueReaction(parsed.result.chat && parsed.result.chat.id || fields.chat_id, parsed.result.message_id);
+          resolve(parsed);
+        } catch { resolve({ ok: false, description: 'Telegram trả dữ liệu không hợp lệ (HTTP ' + res.statusCode + ')' }); }
       });
     });
     req.on('timeout', () => req.destroy(new Error('Telegram gửi tệp quá thời gian')));
@@ -412,6 +465,23 @@ const DEFAULT_GAMES = [
 
 let games = loadJSON('games.json', null);
 if (!Array.isArray(games) || !games.length) games = DEFAULT_GAMES.map(g => ({ ...g }));
+
+/* Weighted sampling without replacement: 3 distinct totals, probability-weighted by the fitted Sicbo distribution. */
+function sampleWeightedSums(rows, count = 3, randomFn = Math.random) {
+  const pool = rows.map(row => ({ ...row, weight: Math.max(0, Number(row.mass ?? row.probability ?? 0)) }));
+  const chosen = [];
+  while (pool.length && chosen.length < count) {
+    const total = pool.reduce((sum, row) => sum + row.weight, 0);
+    let pick = Math.max(0, Math.min(0.999999999, Number(randomFn()) || 0)) * (total || pool.length);
+    let index = 0;
+    if (total > 0) {
+      for (; index < pool.length - 1; index++) { pick -= pool[index].weight; if (pick < 0) break; }
+    } else index = Math.floor(pick);
+    const [row] = pool.splice(index, 1);
+    chosen.push({ sum: row.sum, probability: Number(row.probability || 0), percent: Number(row.percent || 0) });
+  }
+  return chosen;
+}
 
 /* ═══════════════ SICBO ANALYZER ═══════════════ */
 class SicboAnalyzer {
@@ -542,7 +612,16 @@ class SicboAnalyzer {
         .slice(0, 3)
         .map(([sum, mass]) => ({ sum, probability: mass / total, percent: Number((mass / total * 100).toFixed(2)) }));
     };
-    const topSumsBySide = { T: rankSums(sideSums.T), X: rankSums(sideSums.X) };
+    const rankedSumsBySide = { T: rankSums(sideSums.T), X: rankSums(sideSums.X) };
+    const weightedRows = map => {
+      const total = [...map.values()].reduce((a, b) => a + b, 0) || 1;
+      return [...map.entries()].map(([sum, mass]) => ({ sum, mass, probability: mass / total, percent: Number((mass / total * 100).toFixed(2)) }));
+    };
+    const sampledSumsBySide = {
+      T: sampleWeightedSums(weightedRows(sideSums.T), 3),
+      X: sampleWeightedSums(weightedRows(sideSums.X), 3)
+    };
+    const topSumsBySide = sampledSumsBySide;
     const sortedByProbability = [...candidates].sort((a, b) => b.probability - a.probability || a.sum - b.sum || a.dice.join('').localeCompare(b.dice.join('')));
     const bestBySide = {
       T: sortedByProbability.find(x => x.sum >= 11 && x.dice[0] !== x.dice[2]) || sortedByProbability[0],
@@ -562,7 +641,7 @@ class SicboAnalyzer {
     const result = {
       dice: [...chosen.dice], sum: chosen.sum,
       top: topDice, topSums: sumProbabilities.map(x => x.sum),
-      topSumsBySide, topBySide, bestBySide,
+      topSumsBySide, rankedSumsBySide, sampledSumsBySide, topBySide, bestBySide,
       selectedSide: defaultSide,
       selectedTopSums: sumProbabilities,
       exactProbability: Number((chosen.probability * 100).toFixed(3)),
@@ -587,7 +666,7 @@ class SicboAnalyzer {
   }
 }
 
-/* ═══════════════ ENGINE v16.8 — ALL-GAME ADAPTIVE ENSEMBLE ═══════════════ */
+/* ═══════════════ ENGINE v16.8 • ALL-GAME ADAPTIVE ENSEMBLE ═══════════════ */
 class Engine {
   constructor(id) {
     this.id = id || '';
@@ -605,7 +684,7 @@ class Engine {
     this.recentPreds = [];
     this.transition = { TT: 0, TX: 0, XT: 0, XX: 0 };
     // Per-model rolling Brier scores. These are updated only after the next real result arrives.
-    this.modelLosses = { base: [], short: [], mid: [], ewma: [], markov1: [], markov2: [], transition: [], pattern: [], streak: [], sicbo: [] };
+    this.modelLosses = { base: [], short: [], mid: [], ewma: [], markov1: [], markov2: [], transition: [], pattern: [], streak: [], reversal: [], sicbo: [] };
   }
 
   push(side, sum, dice, session) {
@@ -749,6 +828,29 @@ class Engine {
     return { p: (t + priorP * 12) / (count + 12), count };
   }
 
+  _reversalProbability(last, streak, priorP) {
+    const h = this.history;
+    const targetBucket = Math.min(Math.max(1, streak), 6);
+    let count = 0, t = 0, opposite = 0;
+    // Inspect the final item of every historical run of the same current side.
+    // The old implementation skipped all non-singleton run tails, so its run length
+    // was always 1 and the anti-streak model never learned real reversals.
+    for (let i = 0; i < h.length - 1; i++) {
+      if (h[i] !== last) continue;
+      let run = 1;
+      for (let j = i - 1; j >= 0 && h[j] === last; j--) run++;
+      if (Math.min(run, 6) !== targetBucket) continue;
+      count++;
+      if (h[i + 1] === 'T') t++;
+      if (h[i + 1] !== last) opposite++;
+    }
+    return {
+      p: (t + priorP * 16) / (count + 16),
+      count, oppositeCount: opposite,
+      observedOppositeRate: count ? opposite / count : null
+    };
+  }
+
   _transitionProbability(last, priorP) {
     const h = this.history;
     const start = Math.max(0, h.length - 360);
@@ -794,6 +896,7 @@ class Engine {
       if (candidate.count >= 5) { pattern = { ...candidate, length: k }; break; }
     }
     const streakSignal = this._streakProbability(last, streak, base);
+    const reversalSignal = this._reversalProbability(last, streak, base);
     const transitionSignal = this._transitionProbability(last, base);
     const regimeShift = Math.min(1, Math.abs(shortRate - longRate) / 0.18);
     return {
@@ -806,6 +909,7 @@ class Engine {
       transition: { p: transitionSignal.p, count: transitionSignal.count, reliability: this._supportReliability(transitionSignal.count, 18) },
       pattern: { p: pattern.p, count: pattern.count, reliability: this._supportReliability(pattern.count, 12), length: pattern.length },
       streak: { p: streakSignal.p, count: streakSignal.count, reliability: this._supportReliability(streakSignal.count, 12), run: streak },
+      reversal: { p: reversalSignal.p, count: reversalSignal.count, reliability: this._supportReliability(reversalSignal.count, 18), run: streak },
       regimeShift
     };
   }
@@ -830,8 +934,9 @@ class Engine {
       markov1: 0.11,
       markov2: 0.08,
       transition: 0.09,
-      pattern: 0.07,
-      streak: 0.06
+      pattern: 0.065,
+      streak: 0.05,
+      reversal: 0.065
     };
     let weighted = 0, totalWeight = 0;
     const modelProbabilities = {};
@@ -887,7 +992,8 @@ class Engine {
     const shortPct = (signals.short.p * 100).toFixed(1);
     const midPct = (signals.mid.p * 100).toFixed(1);
     const qualityLabel = n < 12 ? 'CẦN THÊM DỮ LIỆU' : n < 50 ? 'ĐANG TÍCH LŨY' : 'ĐỦ LỊCH SỬ ĐÁNH GIÁ';
-    const reason = `Tài ${longPct}% ở dữ liệu dài hạn • ${shortPct}% trong 24 phiên gần • ${midPct}% trong 72 phiên. Các nhánh Markov, chuyển trạng thái và mẫu chuỗi được cân trọng số theo kết quả kiểm định riêng của game này.`;
+    const reversePct = (signals.reversal.p * 100).toFixed(1);
+    const reason = `Tài ${longPct}% dài hạn • ${shortPct}% trong 24 phiên • ${midPct}% trong 72 phiên • tín hiệu đảo sau chuỗi hiện tại nghiêng Tài ${reversePct}%. Markov, mẫu chuỗi, chuyển trạng thái và đảo chiều được cân theo kiểm định riêng của game; không ép luân phiên Tài/Xỉu.`;
     const out = {
       side, conf: confidence, probability: pT, vi, streak, reason,
       modelProbabilities, qualityLabel, sampleSize: n,
@@ -1023,7 +1129,14 @@ async function pollGame(g) {
   } catch (e) { f.lastError = e.message; }
 }
 
-setInterval(() => Promise.all(games.map(pollGame)), POLL_MS);
+let gamePollTimer = null;
+function scheduleGamePolling() {
+  if (gamePollTimer) clearInterval(gamePollTimer);
+  const interval = Math.max(5000, Math.min(120000, Number(settings.pollMs) || POLL_MS));
+  gamePollTimer = setInterval(() => Promise.all(games.map(pollGame)), interval);
+  return interval;
+}
+scheduleGamePolling();
 setTimeout(() => Promise.all(games.map(pollGame)), 1500);
 
 /* ═══════════════ LC79 AUTO-BET ═══════════════ */
@@ -1285,6 +1398,91 @@ function predictHash(hashStr) {
   };
 }
 
+/* ═══════════════ GAME MENU + AUTO UPDATES ═══════════════ */
+async function showBrandMenu(chatId) {
+  const seen = new Map();
+  for (const g of games.filter(x => x.enabled !== false)) {
+    if (!seen.has(g.brand)) seen.set(g.brand, { label: g.brandLabel || g.brand.toUpperCase(), count: 0 });
+    seen.get(g.brand).count++;
+  }
+  if (!seen.size) return send(chatId, '⚠️ Hiện chưa có game nào được bật.', kb([[btn('🏠 MENU', 'menu', 'primary')]]));
+  const rows = [...seen.entries()].sort((a, b) => a[1].label.localeCompare(b[1].label)).map(([brand, item]) => [btn(`🎮 ${item.label} · ${item.count} loại`, 'predbrand:' + brand, 'primary')]);
+  rows.push([btn('🏠 MENU CHÍNH', 'menu', 'danger')]);
+  return send(chatId, `🎮 <b>CHỌN NHÀ GAME</b>\n\nChọn thương hiệu để xem các bàn Tài Xỉu, MD5 hoặc Sicbo đang bật:`, kb(rows));
+}
+
+async function showTables(chatId, brand, uid) {
+  const list = games.filter(g => g.brand === brand && g.enabled !== false);
+  if (!list.length) return send(chatId, '⚠️ Nhà game này hiện chưa có bàn hoạt động.', kb([[btn('◀️ DANH SÁCH GAME', 'pred:brands', 'primary')]]));
+  const label = list[0].brandLabel || String(brand).toUpperCase();
+  const rows = list.map(g => [btn(`📊 ${g.variant}`, 'pred:' + g.id, 'primary')]);
+  rows.push([btn('◀️ NHÀ GAME', 'pred:brands', 'danger'), btn('🏠 MENU', 'menu', 'primary')]);
+  return send(chatId, `🎮 <b>${esc(label)}</b>
+
+Chọn loại bàn muốn phân tích:`, kb(rows));
+}
+
+function stopAuto(uid) {
+  const key = String(uid);
+  const task = autoWatch[key];
+  if (task && task.timer) clearInterval(task.timer);
+  delete autoWatch[key];
+}
+
+async function pushPredCard(chatId, gameId, uid, force = false) {
+  const g = games.find(x => x.id === gameId && x.enabled !== false);
+  const feed = FEEDS[gameId];
+  if (!g || !feed) return send(chatId, '⚠️ Không tìm thấy bàn game hoặc bàn đang tắt.', kb([[btn('◀️ DANH SÁCH GAME', 'pred:brands', 'primary')]]));
+  if (!feed.lastPred) await pollGame(g);
+  const p = feed.lastPred || feed.engine.predict();
+  const side = p.side === 'T' ? 'TÀI' : 'XỈU';
+  const icon = p.side === 'T' ? '🔴' : '🔵';
+  const session = feed.lastLive ? String(Number(feed.lastLive.session) + 1) : 'đang chờ';
+  const sicboLines = p.dicePrediction && Array.isArray(p.dicePrediction.selectedTopSums)
+    ? '\n🎲 <b>3 TỔNG SICBO:</b> ' + p.dicePrediction.selectedTopSums.map(x => `${x.sum} (${Number(x.percent || 0).toFixed(1)}%)`).join(' • ')
+    : '';
+  const text = `╭━━━━━━━━━━━━━━━━━━╮
+   🎯 <b>${esc(g.brandLabel)} • ${esc(g.variant)}</b>
+╰━━━━━━━━━━━━━━━━━━╯
+
+🆔 <b>Phiên kế tiếp:</b> <code>${esc(session)}</code>
+📌 <b>Tín hiệu:</b> ${icon} <b>${side}</b>
+📊 <b>Độ nghiêng mô hình:</b> ${Number(p.conf || 50)}%
+📚 <b>Lịch sử:</b> ${feed.engine.history.length} phiên
+${sicboLines}
+
+🧠 ${esc(p.reason || 'Đang chờ dữ liệu phiên hợp lệ.')}
+
+<i>Chỉ là thống kê tham khảo; kết quả game ngẫu nhiên không thể được bảo đảm.</i>`;
+  return send(chatId, text, kb([
+    [btn('📜 LỊCH SỬ ĐÚNG/SAI', 'predhist:' + gameId, 'success')],
+    [btn('⏹ DỪNG CẬP NHẬT', 'pred:stop:' + gameId, 'danger'), btn('◀️ CHỌN BÀN', 'predbrand:' + g.brand, 'primary')],
+    [btn('🏠 MENU CHÍNH', 'menu', 'primary')]
+  ]));
+}
+
+function startAuto(uid, chatId, gameId) {
+  stopAuto(uid);
+  const key = String(uid), state = { chatId, gameId, lastSession: FEEDS[gameId] && FEEDS[gameId].lastSession, timer: null, busy: false };
+  state.timer = setInterval(async () => {
+    if (state.busy) return;
+    state.busy = true;
+    try {
+      const g = games.find(x => x.id === gameId && x.enabled !== false);
+      const f = FEEDS[gameId];
+      if (!g || !f) { stopAuto(key); return; }
+      await pollGame(g);
+      if (f.lastSession && f.lastSession !== state.lastSession) {
+        state.lastSession = f.lastSession;
+        await pushPredCard(chatId, gameId, key, true);
+      }
+    } catch (e) { console.error('[AUTO PREDICTION]', e.message); }
+    finally { state.busy = false; }
+  }, Math.max(15000, POLL_MS * 3));
+  state.timer.unref?.();
+  autoWatch[key] = state;
+}
+
 /* ═══════════════ EXPORT HISTORY (TELEGRAM) ═══════════════ */
 async function exportHistory(chatId, gameId) {
   const g = games.find(x => x.id === gameId);
@@ -1297,14 +1495,14 @@ async function exportHistory(chatId, gameId) {
   if (!logs.length) return send(chatId, `📭 <b>Chưa có phiên nào đã dự đoán</b>\n⏳ Đợi tool dự đoán thêm vài phiên.`);
 
   const lines = [];
-  lines.push(`📜 <b>LỊCH SỬ ĐÃ DỰ ĐOÁN — ${esc(g.brandLabel)}</b>`);
+  lines.push(`📜 <b>LỊCH SỬ ĐÃ DỰ ĐOÁN • ${esc(g.brandLabel)}</b>`);
   lines.push(`━━━━━━━━━━━━━━━`);
   lines.push(`⏰ ${nowVN()}`);
   lines.push(`📈 Độ chuẩn: <b>${eng.accuracy()}%</b> (${eng.correct}/${eng.total})`);
   lines.push(`━━━━━━━━━━━━━━━`);
 
   for (const log of logs) {
-    const sess = String(log.session || '—').slice(-6);
+    const sess = String(log.session || 'Chưa có').slice(-6);
     const predSide = log.pred === 'T' ? 'TÀI' : 'XỈU';
     const actSide = log.actual === 'T' ? 'TÀI' : 'XỈU';
     const okStr = log.ok ? '✅ ĐÚNG' : '❌ SAI';
@@ -1340,10 +1538,12 @@ async function showUserMenu(chatId, from) {
   const v = vipText(uid);
   const uname = from.username ? '@' + from.username : 'Chưa đặt username';
   const display = esc(displayName(from));
+  const botTitle = esc(settings.botTitle || 'TOOL TX BY FEE');
+  const welcomeText = esc(settings.welcomeText || 'Chọn chức năng bạn cần');
   const accessLine = isAdmin(uid) ? '👑 <b>ADMIN VĨNH VIỄN</b>' : (v.active ? '🟢 <b>ĐANG HOẠT ĐỘNG</b>' : '🔒 <b>CHƯA KÍCH HOẠT KEY</b>');
   const text =
 `╭━━━━━━━━━━━━━━━━━━━━╮
-       🔥 <b>TOOL TX BY FEE</b>
+       🔥 <b>${botTitle}</b>
 ╰━━━━━━━━━━━━━━━━━━━━╯
 
 👤 <b>TÀI KHOẢN CỦA BẠN</b>
@@ -1353,20 +1553,20 @@ async function showUserMenu(chatId, from) {
 ├ Trạng thái: ${accessLine}
 └ Thời hạn: <b>${esc(v.expire.replace(/^.*?: /, ''))}</b>
 
-┌── ✨ <b>TIỆN ÍCH TÀI KHOẢN</b>
+┌── ✨ <b>CÁC CHỨC NĂNG CỦA BOT BY FEE</b>
 ├ 🎮 Nhận định TX • MD5 • Sicbo
 ├ 🧩 Phân tích mã Hash
 ├ 📊 Lịch sử phiên và đối chiếu
 └ 📦 Tải tệp từ Kho File
 
-👇 <b>Chọn chức năng bạn cần</b>`;
+👇 <b>${welcomeText}</b>`;
 
   const rows = [
     [btn('🎮 CHỌN GAME', 'pred:brands', 'primary')],
-    [btn('🧩 KIỂM TRA HASH', 'hash:start', 'success'), btn('📦 KHO FILE', 'store:open', 'primary')],
-    [btn('💳 GÓI SỬ DỤNG', 'rent:menu', 'primary'), btn('🔑 KÍCH HOẠT KEY', 'key:input', 'success')],
-    [btn('🎫 KÍCH HOẠT CODE', 'code:input', 'success'), btn('💬 TRỢ GIÚP', 'support:go', 'primary')],
-    [btn('⭐ GỬI ĐÁNH GIÁ', 'fb:start', 'success')]
+    [btn('🧩 TOOL MD5/SHA256', 'hash:start', 'success'), btn('📦 KHO FILE', 'store:open', 'primary')],
+    [btn('💳 THUÊ TOOL', 'rent:menu', 'primary'), btn('🔑 NHẬP KEY', 'key:input', 'success')],
+    [btn('🎫 NHẬP CODE', 'code:input', 'success'), btn('💬 TRỢ GIÚP', 'support:go', 'primary')],
+    [btn('⭐ FEEDBACK', 'fb:start', 'success')]
   ];
   return send(chatId, text, kb(rows));
 }
@@ -1514,8 +1714,8 @@ async function rejectFileOrder(orderId, adminId, reason = 'Giao dịch chưa đ�
 async function showRentMenu(chatId) {
   const pkgs = settings.packages || [];
   const rows = pkgs.map(pk => [btn('💰 ' + pk.label, 'rent:pkg:' + pk.id, 'primary')]);
-  rows.push([btn('◀️ QUAY LẠI', 'menu', 'danger')]);
-  return send(chatId, '💳 <b>THUÊ TOOL — BẢNG GIÁ</b>\n\nChọn gói phù hợp:', kb(rows));
+  rows.push([btn('◀️ QUAY LẠI', 'menu', 'primary')]);
+  return send(chatId, '💳 <b>THUÊ TOOL • BẢNG GIÁ</b>\n\nChọn gói phù hợp:', kb(rows));
 }
 
 async function showRentConfirm(chatId, pkgId) {
@@ -1592,7 +1792,7 @@ async function deliverKeyOrder(order, source = 'admin') {
   order.status = 'processing';
   saveOrders();
   const exp = new Date(Number(order.keyUntil || (keysDB[order.key] && keysDB[order.key].until) || Date.now())).toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
-  const delivered = await send(order.uid, `🎉 <b>THANH TOÁN THÀNH CÔNG — TPBANK</b>\n━━━━━━━━━━━━━━━━━━\n🔑 KEY CỦA BẠN:\n<code>${esc(order.key)}</code>\n⏳ Hạn sử dụng: <b>${exp}</b>\n✅ Đơn hàng đã được xác nhận.`, kb([
+  const delivered = await send(order.uid, `🎉 <b>THANH TOÁN THÀNH CÔNG • TPBANK</b>\n━━━━━━━━━━━━━━━━━━\n🔑 KEY CỦA BẠN:\n<code>${esc(order.key)}</code>\n⏳ Hạn sử dụng: <b>${exp}</b>\n✅ Đơn hàng đã được xác nhận.`, kb([
     [btn('🎮 CHỌN GAME', 'pred:brands', 'primary')],
     [btn('🏠 MENU', 'menu', 'success')]
   ]));
@@ -1645,7 +1845,7 @@ async function markOrderDone(chatId, uid, orderId) {
   ]));
   for (const aid of ADMIN_IDS) {
     const isFile = o.type === 'file';
-    await send(aid, `🧾 <b>USER ĐÃ BẤM DONE — CHỜ ĐỐI SOÁT</b>\nLoại: <b>${isFile ? 'KHO FILE' : 'MUA KEY'}</b>\nĐơn: <code>${esc(o.id)}</code>\nUser: <code>${esc(o.uid)}</code>\n💰 ${fmt(o.amount)}đ\n📝 <code>${esc(o.addInfo || '')}</code>\n⚠️ Nếu không có thông báo ngân hàng, kiểm tra tài khoản thật trước khi duyệt.`, kb([
+    await send(aid, `🧾 <b>USER ĐÃ BẤM DONE • CHỜ ĐỐI SOÁT</b>\nLoại: <b>${isFile ? 'KHO FILE' : 'MUA KEY'}</b>\nĐơn: <code>${esc(o.id)}</code>\nUser: <code>${esc(o.uid)}</code>\n💰 ${fmt(o.amount)}đ\n📝 <code>${esc(o.addInfo || '')}</code>\n⚠️ Nếu không có thông báo ngân hàng, kiểm tra tài khoản thật trước khi duyệt.`, kb([
       [btn(isFile ? '✅ DUYỆT + GỬI FILE' : '✅ DUYỆT + CẤP KEY', (isFile ? 'store:approve:' : 'keyorder:approve:') + o.id, 'success')],
       [btn('❌ TỪ CHỐI', (isFile ? 'store:reject:' : 'keyorder:reject:') + o.id, 'danger')]
     ]));
@@ -1661,34 +1861,31 @@ async function markOrderDone(chatId, uid, orderId) {
 }
 
 function tryMatchPayment(text) {
-  const raw = String(text || '');
-  // Ngân hàng có thể gửi +2.500 VND, +10,000 VND hoặc +10000.
+  const raw = String(text || '').replace(/\u00a0/g, ' ');
   const mAmount = raw.match(/[+]\s*([\d.,]+)\s*VND/i) || raw.match(/[+]\s*([\d.,]+)/i);
   if (!mAmount) return null;
   const amount = Number(String(mAmount[1]).replace(/[.,]/g, ''));
   if (!Number.isSafeInteger(amount) || amount <= 0) return null;
 
-  // Chấp nhận nhiều nhãn nội dung. Nếu không có nhãn, vẫn giữ raw để dò mã ở bất kỳ vị trí nào.
-  const ndMatch = raw.match(/(?:\bND\b|Nội dung(?: chuyển khoản)?|Noi dung(?: chuyen khoan)?|Description|Transfer content|Add.?info|Memo|Content)\s*[:=\-]\s*([^\r\n]+)/i);
-  const nd = ndMatch ? String(ndMatch[1]).trim() : raw;
+  // Read the full transfer description after ND:, including wrapped/new lines and Napas suffixes.
+  const ndLabel = /(?:\bND\b|Nội dung(?: chuyển khoản)?|Noi dung(?: chuyen khoan)?|Description|Transfer content|Add.?info|Memo|Content)\s*[:=\-]\s*/i;
+  const ndMatch = ndLabel.exec(raw);
+  const nd = ndMatch ? raw.slice(ndMatch.index + ndMatch[0].length).trim() : raw;
   const parts = raw.split('|').map(x => x.trim()).filter(Boolean);
   const dateIndex = parts.findIndex(x => /\d{2}[/-]\d{2}[/-]\d{4}/.test(x));
   let ref = '';
   if (dateIndex >= 0) {
     const afterDate = parts.slice(dateIndex + 1);
-    ref = afterDate.find(x => !/(?:^\s*(?:ND|Nội dung|Description|Memo)\s*[:=])/i.test(x) && /^[A-Z0-9_-]{7,}$/i.test(x)) || '';
+    ref = afterDate.find(x => /^[A-Z0-9_-]{7,}$/i.test(x) && !/^(?:ND|NAPAS)/i.test(x)) || '';
   }
   if (!ref) {
     const beforeMemoText = ndMatch ? raw.slice(0, ndMatch.index) : raw;
     const candidates = beforeMemoText.split('|').map(x => x.trim()).filter(x => /^[A-Z0-9_-]{8,}$/i.test(x));
     ref = candidates[candidates.length - 1] || '';
   }
-  // Mã Napas + Telegram ID cũng có thể nằm sau tiền tố/suffix do hệ thống ngân hàng nối thêm.
   const uidMatch = String(nd + ' ' + raw).match(/Napas(\d{6,})(?!\d)/i);
   return {
-    amount,
-    nd,
-    uid: uidMatch ? uidMatch[1] : null,
+    amount, nd, uid: uidMatch ? uidMatch[1] : null,
     ref: ref || crypto.createHash('sha256').update(raw).digest('hex').slice(0, 24),
     raw
   };
@@ -1725,8 +1922,9 @@ function isTrustedBankSender(msg) {
     .filter(value => value != null).map(String);
   const allowlist = Array.isArray(settings.bankSenderIds) ? settings.bankSenderIds.map(String) : [];
   if (allowlist.length) return sourceIds.some(id => allowlist.includes(id));
-  // Safe default: only bot-authored bank alerts or messages sent by a configured admin are trusted.
-  return Boolean((msg && msg.from && msg.from.is_bot) || (msg && msg.from && isAdmin(msg.from.id)));
+  // Do not trust every bot in the group by default. First inspect /bankstatus,
+  // then explicitly whitelist the VietQR sender ID with /setbanksenders.
+  return Boolean(msg && msg.from && !msg.from.is_bot && isAdmin(msg.from.id));
 }
 
 async function onBankMessage(msg) {
@@ -1734,13 +1932,22 @@ async function onBankMessage(msg) {
   const text = msg.text || msg.caption || '';
   const parsed = tryMatchPayment(text);
   if (!parsed) return;
-  if (!isTrustedBankSender(msg)) {
+  const sender = msg.from || {};
+  bankMonitor = {
+    receivedAt: Date.now(), lastMessageId: msg.message_id || null, chatId: String(msg.chat.id),
+    senderId: String(sender.id != null ? sender.id : (msg.sender_chat && msg.sender_chat.id != null ? msg.sender_chat.id : '')),
+    senderName: String([sender.first_name, sender.last_name].filter(Boolean).join(' ') || sender.username || (msg.sender_chat && msg.sender_chat.title) || 'không rõ').slice(0, 100),
+    isBot: Boolean(sender.is_bot), amount: parsed.amount, ref: parsed.ref, raw: parsed.raw.slice(0, 1200), trusted: false, matchedOrder: ''
+  };
+  if (!isTrustedBankSender(msg)) { saveBankMonitor();
     const sourceId = msg.from && msg.from.id != null ? String(msg.from.id) : (msg.sender_chat && msg.sender_chat.id != null ? String(msg.sender_chat.id) : 'không rõ');
     for (const aid of ADMIN_IDS) {
       await send(aid, `🛡️ <b>BẢN TIN GIAO DỊCH CHƯA ĐƯỢC TIN CẬY</b>\nNhóm: <code>${esc(settings.bankGroupId)}</code>\nNgười gửi: <code>${esc(sourceId)}</code>\n💰 Số tiền đọc được: <b>${fmt(parsed.amount)}đ</b>\n📝 Nội dung: <code>${esc(parsed.nd)}</code>\n\nChưa tự động cấp file để tránh giả mạo. Nếu đây là bot ngân hàng hợp lệ, thêm ID người gửi bằng <code>/setbanksenders ${esc(sourceId)}</code>.`);
     }
     return;
   }
+  bankMonitor.trusted = true;
+  saveBankMonitor();
   const now = Date.now();
   const transactionKey = `${String(msg.chat.id)}:${parsed.ref}`;
   if (bankTransactions[transactionKey]) return; // Telegram may deliver the same bank alert more than once.
@@ -1764,6 +1971,7 @@ async function onBankMessage(msg) {
     order.bankTransactionRef = parsed.ref;
     order.bankMatchedAt = now;
     order.bankMessageId = msg.message_id || null;
+    bankMonitor.matchedOrder = order.id; saveBankMonitor();
     order.status = 'processing';
     saveOrders();
 
@@ -1795,18 +2003,19 @@ async function onBankMessage(msg) {
   }
 
   const transferText = parsed.nd + ' ' + parsed.raw;
+  const sameAmountOrders = Object.values(orders).filter(o => o && ['pending', 'checking', 'timeout'].includes(o.status) && Number(o.amount) === Number(parsed.amount) && (!o.expire || now <= Number(o.expire) + 30 * 60 * 1000));
   const hasCompactMemo = /(?:^|[^A-Z0-9])[NM]-?[A-F0-9]{6}(?:$|[^A-Z0-9])/i.test(transferText) || /(?:^|[^A-Z0-9])[NM][A-F0-9]{12}(?:$|[^A-Z0-9])/i.test(transferText);
   const knownPrefix = hasCompactMemo ||
     transferMemoIncluded(transferText, STORE_TRANSFER_PREFIX) ||
     transferMemoIncluded(transferText, KEY_TRANSFER_PREFIX);
-  if (knownPrefix) {
-    await notifyPaymentReview(parsed, [], 'Đã nhận diện tiền tố đơn hàng nhưng không tìm thấy đơn còn hiệu lực khớp số tiền/mã giao dịch. Cần admin đối soát tài khoản thật.');
+  if (knownPrefix || sameAmountOrders.length) {
+    await notifyPaymentReview(parsed, sameAmountOrders, knownPrefix ? 'Đã nhận diện mã/tiền tố đơn hàng nhưng không tìm thấy đơn còn hiệu lực khớp chính xác. Admin cần đối soát tài khoản thật.' : 'Có đơn chờ cùng số tiền nhưng phần ND không chứa mã đơn riêng. Không tự cấp KEY/FILE; admin cần kiểm tra giao dịch.');
   }
 
 }
 
 async function showHashTool(chatId) {
-  return send(chatId, `╭━━ 🧩 <b>HASH LAB</b> ━━╮\n\n🔐 <b>Phân tích mã MD5 / SHA-256</b>\n\n📌 Gửi mã hash dạng ký tự hex:\n├ MD5: 32 ký tự\n└ SHA-256: 64 ký tự\n\n👇 <i>Gửi mã hash của bạn ngay tại đây.</i>`,
+  return send(chatId, `╭━━ 🧩 <b>TOOL MD5/SHA256</b> ━━╮\n\n🔐 <b>Phân tích mã MD5 / SHA-256</b>\n\n📌 Gửi mã hash dạng ký tự hex:\n├ MD5: 32 ký tự\n└ SHA-256: 64 ký tự\n\n👇 <i>Gửi mã hash của bạn ngay tại đây.</i>`,
     kb([[btn('🏠 THOÁT VỀ MENU', 'menu', 'danger')]]));
 }
 
@@ -1835,25 +2044,35 @@ async function showAdmin(chatId) {
     '━━━━━━━━━━━━━━━━━━',
     '<b>⚙️ LỆNH CẤU HÌNH</b>',
     '• Gửi tài liệu kèm caption <code>/setfile</code> để thay file đang bán',
-    '• <code>/setfileprice 10000</code> — đổi giá kho file',
-    '• <code>/setfilememo M</code> — đặt mã đầu đơn FILE (M-XXXXXX)',
-    '• <code>/setkeyprefix N</code> — đặt mã đầu đơn KEY (N-XXXXXX)',
-    '• <code>/setbankgroup -100...</code> — nhóm nhận biến động số dư',
-    '• <code>/setbanksenders ID1,ID2</code> — whitelist nguồn gửi thông báo ngân hàng',
-    '• <code>/setbank BIN|STK|CHỦ TK</code> — đổi tài khoản nhận tiền',
-    '• <code>/setproduct Tên sản phẩm</code> — đổi tên sản phẩm',
+    '• <code>/setfileprice 10000</code> • đổi giá kho file',
+    '• <code>/setfilememo M</code> • đặt mã đầu đơn FILE (M-XXXXXX)',
+    '• <code>/setkeyprefix N</code> • đặt mã đầu đơn KEY (N-XXXXXX)',
+    '• <code>/setbankgroup -100...</code> / <code>/setbankgroup_here</code> • nhóm biến động số dư',
+    '• <code>/bankstatus</code> • xem bot có nhận được tin VietQR gần nhất không',
+    '• <code>/setbanksenders ID1,ID2</code> • whitelist nguồn gửi thông báo ngân hàng',
+    '• <code>/setbank BIN|STK|CHỦ TK</code> • đổi tài khoản nhận tiền',
+    '• <code>/setproduct Tên sản phẩm</code> • đổi tên sản phẩm',
     '• <code>/fbchannel add ID</code> / <code>/fbchannel remove ID</code>',
-    '• <code>/fbchannel add_here</code> — đăng ký nhóm hiện tại',
-    '• <code>/fbchannels</code> — xem kênh feedback',
+    '• <code>/fbchannel add_here</code> • đăng ký nhóm hiện tại',
+    '• <code>/fbchannels</code> • xem kênh feedback',
     '• <code>/grant ID Giờ</code>, <code>/revoke ID</code>, <code>/user ID</code>',
     '• <code>/genkey Giờ</code>, <code>/mkcode CODE Giờ [max]</code>',
     '• <code>/setsupport username</code>, <code>/broadcast nội dung</code>',
-    '• <code>/setprice ID amount hours label</code> — gói thuê tool'
+    '• <code>/setprice ID amount hours label</code> | chỉnh giá và thời hạn gói',
+    '• <code>/maintenance on/off</code> | bật hoặc tắt bảo trì',
+    '• <code>/game list</code>, <code>/game on/off ID</code> | quản lý game',
+    '• <code>/gameurl ID HTTPS_URL</code> | thay API game',
+    '• <code>/setpoll 5..120</code> | chỉnh chu kỳ cập nhật giây',
+    '• <code>/reactions on/off</code> | bật hoặc tắt reaction',
+    '• <code>/settitle</code>, <code>/setwelcome</code>, <code>/maintmsg</code> | chỉnh nội dung bot'
   ];
   return send(chatId, lines.join('\n'), kb([
     [btn('🧾 ĐƠN KHO FILE CHỜ DUYỆT', 'adm:orders', 'success')],
     [btn('🔑 ĐƠN MUA KEY CHỜ DUYỆT', 'adm:keyorders', 'primary')],
     [btn('📦 KIỂM TRA KHO FILE', 'adm:files', 'primary'), btn('⭐ KÊNH FEEDBACK', 'adm:feedbackchannels', 'primary')],
+    [btn('🛠 VẬN HÀNH BOT', 'adm:operations', 'primary'), btn('🎮 GAME / API', 'adm:games', 'primary')],
+    [btn('⚙️ CÀI ĐẶT CHUNG', 'adm:settings', 'primary'), btn('💳 GÓI THUÊ', 'adm:packages', 'primary')],
+    [btn('👥 NGƯỜI DÙNG', 'adm:users', 'primary'), btn('🏦 CHECK BANK', 'adm:bank', 'primary')],
     [btn('🔄 LÀM MỚI', 'adm:home', 'success')]
   ]));
 }
@@ -1898,6 +2117,66 @@ async function showFeedbackChannels(chatId) {
   return send(chatId, `⭐ <b>KÊNH NHẬN FEEDBACK ĐÃ DUYỆT</b>\n\n${list.length ? list.join('\n') : 'Chưa đăng ký kênh nào.'}\n\nDùng <code>/fbchannel add ID</code> để thêm hoặc <code>/fbchannel add_here</code> khi nhắn trong nhóm. Bot phải có quyền đăng bài tại kênh/nhóm nhận feedback.`, kb([[btn('◀️ ADMIN', 'adm:home', 'primary')]]));
 }
 
+async function showAdminOperations(chatId) {
+  const maintenance = settings.maintenance === true;
+  const reactions = settings.reactionsEnabled !== false;
+  const pollSeconds = Math.round((Number(settings.pollMs) || POLL_MS) / 1000);
+  return send(chatId, `🛠 <b>ĐIỀU KHIỂN VẬN HÀNH BOT</b>\n\n${maintenance ? '🔴 BẢO TRÌ ĐANG BẬT' : '🟢 BOT ĐANG MỞ CHO USER'}\n${reactions ? '🎭 Reaction tự động: BẬT' : '🎭 Reaction tự động: TẮT'}\n⏱ Chu kỳ cập nhật game: <b>${pollSeconds} giây</b>\n\n<b>Lệnh nhanh</b>\n<code>/maintenance on</code> hoặc <code>/maintenance off</code>\n<code>/maintmsg Nội dung bảo trì</code>\n<code>/reactions on</code> hoặc <code>/reactions off</code>\n<code>/setpoll 10</code> để đặt chu kỳ 10 giây\n<code>/broadcast Nội dung</code> để gửi thông báo đến user`, kb([
+    [btn(maintenance ? '🟢 TẮT BẢO TRÌ' : '🔴 BẬT BẢO TRÌ', maintenance ? 'adm:maint:off' : 'adm:maint:on', maintenance ? 'success' : 'danger')],
+    [btn(reactions ? '🎭 TẮT REACTION' : '🎭 BẬT REACTION', reactions ? 'adm:reaction:off' : 'adm:reaction:on', 'primary')],
+    [btn('🎮 QUẢN LÝ GAME / API', 'adm:games', 'primary')],
+    [btn('◀️ ADMIN', 'adm:home', 'primary')]
+  ]));
+}
+
+async function showAdminGames(chatId) {
+  if (!isAdmin(chatId)) return send(chatId, '⛔ Không có quyền admin.');
+  const rows = [];
+  for (const g of games) {
+    const icon = g.enabled === false ? '⚫' : '🟢';
+    rows.push([btn(`${icon} ${g.brandLabel || g.brand} • ${g.variant}`, 'adm:game:toggle:' + g.id, 'primary')]);
+  }
+  rows.push([btn('◀️ ADMIN', 'adm:home', 'primary')]);
+  return send(chatId, `🎮 <b>QUẢN LÝ GAME VÀ API</b>\n\nChạm một game để bật hoặc tắt.\n🟢 Đang bật  •  ⚫ Đang tắt\n\nĐổi API bằng lệnh:\n<code>/gameurl ID https://domain/api/path</code>\nVí dụ: <code>/gameurl betvip_tx https://api.example.com/tx</code>\nXem ID bằng <code>/game list</code>.`, kb(rows));
+}
+
+async function showAdminSettings(chatId) {
+  const support = settings.support ? '@' + settings.support : 'Chưa cài';
+  const bank = settings.bank || BANK;
+  const msg = settings.maintenanceMessage || 'Bot đang bảo trì, vui lòng quay lại sau.';
+  return send(chatId, `⚙️ <b>CÀI ĐẶT CHUNG</b>\n\n🏷 Tên bot: <b>${esc(settings.botTitle || 'TOOL TX BY FEE')}</b>\n💬 Support: <b>${esc(support)}</b>\n🏦 Ngân hàng: <b>${esc(bank.bankCode || bank.bin || 'TPBank')}</b>\n💳 STK: <code>${esc(bank.account || '')}</code>\n📣 Nhóm bắt buộc: <b>${(settings.groups || []).length}</b>\n📝 Lời chào: <b>${esc(settings.welcomeText || 'Mặc định')}</b>\n\n<b>Lệnh điều chỉnh</b>\n<code>/settitle Tên bot</code>\n<code>/setwelcome Nội dung lời chào</code>\n<code>/setsupport username</code>\n<code>/setbank BIN|STK|CHU_TK</code>\n<code>/addgroup ID|TÊN|LINK</code>\n<code>/removegroup ID</code>\n<code>/groups</code>\n\n<b>Nội dung bảo trì hiện tại</b>\n${esc(msg)}`, kb([
+    [btn('🛠 VẬN HÀNH', 'adm:operations', 'primary'), btn('🎮 GAME / API', 'adm:games', 'primary')],
+    [btn('💳 GÓI THUÊ', 'adm:packages', 'primary'), btn('👥 NGƯỜI DÙNG', 'adm:users', 'primary')],
+    [btn('◀️ ADMIN', 'adm:home', 'primary')]
+  ]));
+}
+
+async function showAdminPackages(chatId) {
+  const rows = (settings.packages || []).map(p => `• <code>${esc(p.id)}</code> | ${esc(p.label || p.id)} | <b>${fmt(p.amount)}đ</b> | ${Number(p.hours) || 0} giờ`);
+  return send(chatId, `💳 <b>QUẢN LÝ GÓI THUÊ TOOL</b>\n\n${rows.length ? rows.join('\n') : 'Chưa có gói thuê.'}\n\nThêm hoặc sửa gói bằng:\n<code>/setprice ID SOTIEN GIO TEN_GOI</code>\nVí dụ: <code>/setprice 1d 2500 24 2.5K 1 NGAY</code>`, kb([
+    [btn('🔄 LÀM MỚI', 'adm:packages', 'success')],
+    [btn('◀️ ADMIN', 'adm:home', 'primary')]
+  ]));
+}
+
+async function showAdminUsers(chatId) {
+  const list = Object.entries(users).sort((a,b) => Number(b[1].lastActive || 0) - Number(a[1].lastActive || 0)).slice(0, 12);
+  const active = Object.values(users).filter(u => Number(u.vipUntil || 0) > Date.now()).length;
+  const rows = list.map(([id, u]) => [btn(`${u.username ? '@' + u.username : id} • ${Number(u.vipUntil || 0) > Date.now() ? 'VIP' : 'FREE'}`, 'adm:user:view:' + id, 'primary')]);
+  rows.push([btn('◀️ ADMIN', 'adm:home', 'primary')]);
+  return send(chatId, `👥 <b>QUẢN LÝ NGƯỜI DÙNG</b>\n\nTổng user: <b>${Object.keys(users).length}</b>\nVIP còn hạn: <b>${active}</b>\n\nLệnh quản lý:\n<code>/user ID</code> xem hồ sơ\n<code>/grant ID GIO</code> cấp thời gian\n<code>/revoke ID</code> thu hồi quyền\n<code>/broadcast Nội dung</code> gửi thông báo`, kb(rows));
+}
+
+async function showAdminBank(chatId) {
+  const age = bankMonitor.receivedAt ? Math.max(0, Math.round((Date.now() - bankMonitor.receivedAt) / 60000)) + ' phút trước' : 'chưa ghi nhận';
+  const pending = Object.values(orders).filter(o => o && ['pending','checking','timeout'].includes(o.status)).length;
+  return send(chatId, `🏦 <b>TRẠNG THÁI CHECK BANK</b>\n\nNhóm: <code>${esc(settings.bankGroupId || 'Chưa cài')}</code>\nTin mới nhất: <b>${age}</b>\nNguồn gửi: <code>${esc(bankMonitor.senderId || 'Chưa có')}</code>\nBot gửi: <b>${bankMonitor.isBot ? 'Có' : 'Không'}</b>\nTin cậy: <b>${bankMonitor.trusted ? 'Có' : 'Chưa xác nhận'}</b>\nSố tiền: <b>${bankMonitor.amount ? fmt(bankMonitor.amount) + 'đ' : 'Chưa đọc được'}</b>\nMã giao dịch: <code>${esc(bankMonitor.ref || 'Chưa có')}</code>\nĐơn chờ: <b>${pending}</b>\n\nLệnh: <code>/bankstatus</code>, <code>/setbankgroup ID</code>, <code>/setbanksenders ID1,ID2</code>`, kb([
+    [btn('🔄 KIỂM TRA LẠI', 'adm:bank', 'success')],
+    [btn('🧾 ĐƠN CHỜ DUYỆT', 'adm:orders', 'primary'), btn('🔑 ĐƠN KEY', 'adm:keyorders', 'primary')],
+    [btn('◀️ ADMIN', 'adm:home', 'primary')]
+  ]));
+}
+
 async function publishApprovedFeedback(fb) {
   const title = '⭐ <b>FEEDBACK NGƯỜI DÙNG</b>\n━━━━━━━━━━━━━━━━━━';
   const name = fb.username ? '@' + esc(fb.username) : esc(fb.name || 'Người dùng');
@@ -1936,16 +2215,42 @@ async function reviewFeedback(feedbackId, adminId, approve) {
 async function onCallback(cq) {
   const chatId = cq.message.chat.id, msgId = cq.message.message_id;
   const from = cq.from, uid = uidOf(from), data = String(cq.data || '');
-  await delMsg(chatId, msgId);
   await answerCb(cq.id);
+  // Keep the clicked message visible; remove only its old buttons so Back never leaves a blank chat.
+  await clearInlineKeyboard(chatId, msgId);
+  if (settings.maintenance && !isAdmin(uid)) return send(chatId, `🛠 <b>BOT ĐANG BẢO TRÌ</b>\n\n${esc(settings.maintenanceMessage || 'Bot đang bảo trì, vui lòng quay lại sau.')}`);
 
   if (data === 'menu') { stopAuto(uid); delete sessions[uid]; return showUserMenu(chatId, from); }
   if (data === 'hash:start') {
-    if (!isVip(uid)) return send(chatId, '🔒 <b>MUA KEY ĐÊ RỒI XEM</b>', kb([[btn('💳 GÓI SỬ DỤNG', 'rent:menu', 'primary'), btn('🔑 KÍCH HOẠT KEY', 'key:input', 'success')], [btn('◀️ QUAY LẠI', 'menu', 'danger')]]));
+    if (!isVip(uid)) return send(chatId, '🔒 <b>MUA KEY ĐÊ RỒI XEM</b>', kb([[btn('💳 THUÊ TOOL', 'rent:menu', 'primary'), btn('🔑 NHẬP KEY', 'key:input', 'success')], [btn('◀️ QUAY LẠI', 'menu', 'primary')]]));
     sessions[uid] = { await: 'hash_input' };
     return showHashTool(chatId);
   }
   if (data === 'adm:home' && isAdmin(uid)) return showAdmin(chatId);
+  if (data === 'adm:operations' && isAdmin(uid)) return showAdminOperations(chatId);
+  if (data === 'adm:games' && isAdmin(uid)) return showAdminGames(chatId);
+  if (data === 'adm:settings' && isAdmin(uid)) return showAdminSettings(chatId);
+  if (data === 'adm:packages' && isAdmin(uid)) return showAdminPackages(chatId);
+  if (data === 'adm:users' && isAdmin(uid)) return showAdminUsers(chatId);
+  if (data === 'adm:bank' && isAdmin(uid)) return showAdminBank(chatId);
+  if (data === 'adm:maint:on' && isAdmin(uid)) { settings.maintenance = true; saveSettings(); return showAdminOperations(chatId); }
+  if (data === 'adm:maint:off' && isAdmin(uid)) { settings.maintenance = false; saveSettings(); return showAdminOperations(chatId); }
+  if (data === 'adm:reaction:on' && isAdmin(uid)) { settings.reactionsEnabled = true; saveSettings(); return showAdminOperations(chatId); }
+  if (data === 'adm:reaction:off' && isAdmin(uid)) { settings.reactionsEnabled = false; saveSettings(); return showAdminOperations(chatId); }
+  if (data.startsWith('adm:game:toggle:') && isAdmin(uid)) {
+    const id = data.slice('adm:game:toggle:'.length);
+    const game = games.find(g => g.id === id);
+    if (!game) return send(chatId, '⚠️ Không tìm thấy game.');
+    game.enabled = game.enabled === false;
+    saveJSON('games.json', games);
+    return showAdminGames(chatId);
+  }
+  if (data.startsWith('adm:user:view:') && isAdmin(uid)) {
+    const targetUid = data.slice('adm:user:view:'.length);
+    const user = ensureUser(targetUid);
+    const expiry = Number(user.vipUntil || 0) > Date.now() ? new Date(user.vipUntil).toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' }) + ' (GMT+7)' : 'Chưa kích hoạt';
+    return send(chatId, `👤 <b>HỒ SƠ USER</b>\nID: <code>${esc(targetUid)}</code>\nUsername: <b>${esc(user.username || 'Chưa có')}</b>\nTên: <b>${esc(user.name || 'Chưa có')}</b>\nHạn dùng: <b>${esc(expiry)}</b>\nLượt dự đoán: <b>${Number(user.predCount || 0)}</b>\n\nDùng <code>/grant ${esc(targetUid)} 24</code> để cấp 24 giờ hoặc <code>/revoke ${esc(targetUid)}</code> để thu hồi.`, kb([[btn('◀️ NGƯỜI DÙNG', 'adm:users', 'primary')], [btn('👑 ADMIN', 'adm:home', 'success')]]));
+  }
   if (data === 'adm:orders' && isAdmin(uid)) return showPendingFileOrders(chatId);
   if (data === 'adm:keyorders' && isAdmin(uid)) return showPendingKeyOrders(chatId);
   if (data === 'adm:files' && isAdmin(uid)) return showAdminFiles(chatId);
@@ -1992,11 +2297,11 @@ async function onCallback(cq) {
 
   if (data === 'key:input') {
     sessions[uid] = { await: 'key_input' };
-    return send(chatId, '🔑 <b>NHẬP KEY</b>\n\nGửi KEY của bạn:', kb([[btn('◀️ QUAY LẠI', 'menu', 'danger')]]));
+    return send(chatId, '🔑 <b>NHẬP KEY</b>\n\nGửi KEY của bạn:', kb([[btn('◀️ QUAY LẠI', 'menu', 'primary')]]));
   }
   if (data === 'code:input') {
     sessions[uid] = { await: 'code_input' };
-    return send(chatId, '🎫 <b>NHẬP CODE</b>\n\nGửi code:', kb([[btn('◀️ QUAY LẠI', 'menu', 'danger')]]));
+    return send(chatId, '🎫 <b>NHẬP CODE</b>\n\nGửi code:', kb([[btn('◀️ QUAY LẠI', 'menu', 'primary')]]));
   }
   if (data === 'rent:menu') return showRentMenu(chatId);
   if (data.startsWith('rent:pkg:')) return showRentConfirm(chatId, data.slice(9));
@@ -2012,7 +2317,7 @@ async function onCallback(cq) {
     const s = settings.support || 'SunNetWin';
     return send(chatId, '💬 <b>SUPPORT</b>\nLiên hệ admin: @' + s, kb([
       [btnUrl('📩 NHẮN ADMIN', 'https://t.me/' + s, 'primary')],
-      [btn('◀️ QUAY LẠI', 'menu', 'danger')]
+      [btn('◀️ QUAY LẠI', 'menu', 'primary')]
     ]));
   }
   if (data === 'join:check') {
@@ -2022,24 +2327,24 @@ async function onCallback(cq) {
   }
   if (data === 'fb:start') {
     sessions[uid] = { await: 'fb_photo', fb: {} };
-    return send(chatId, '⭐ <b>FEEDBACK — Bước 1</b>\n\nGửi ảnh (hoặc bấm SKIP):', kb([
+    return send(chatId, '⭐ <b>FEEDBACK • Bước 1</b>\n\nGửi ảnh (hoặc bấm SKIP):', kb([
       [btn('⏭ SKIP', 'fb:skipphoto', 'primary')],
-      [btn('◀️ QUAY LẠI', 'menu', 'danger')]
+      [btn('◀️ QUAY LẠI', 'menu', 'primary')]
     ]));
   }
   if (data === 'fb:skipphoto') {
     sessions[uid] = { await: 'fb_note', fb: { photo: null } };
-    return send(chatId, '⭐ <b>FEEDBACK — Bước 2</b>\n\nNote nội dung vào đây:', kb([
+    return send(chatId, '⭐ <b>FEEDBACK • Bước 2</b>\n\nNote nội dung vào đây:', kb([
       [btn('⏭ SKIP', 'fb:skipnote', 'primary')],
-      [btn('◀️ QUAY LẠI', 'menu', 'danger')]
+      [btn('◀️ QUAY LẠI', 'menu', 'primary')]
     ]));
   }
   if (data === 'fb:skipnote') {
     sessions[uid] = { await: null, fb: Object.assign((sessions[uid] && sessions[uid].fb) || {}, { note: '' }) };
-    return send(chatId, '⭐ <b>FEEDBACK — Bước 3</b>\n\nChọn số sao:', kb([
+    return send(chatId, '⭐ <b>FEEDBACK • Bước 3</b>\n\nChọn số sao:', kb([
       [btn('⭐ 1', 'fb:star:1', 'danger'), btn('⭐ 2', 'fb:star:2', 'danger'), btn('⭐ 3', 'fb:star:3', 'primary')],
       [btn('⭐ 4', 'fb:star:4', 'success'), btn('⭐ 5', 'fb:star:5', 'success')],
-      [btn('◀️ QUAY LẠI', 'menu', 'danger')]
+      [btn('◀️ QUAY LẠI', 'menu', 'primary')]
     ]));
   }
   if (data.startsWith('fb:star:')) {
@@ -2116,7 +2421,7 @@ async function onCallback(cq) {
     const gameId = data.slice(5);
     if (gameId === 'brands') return;
     if (gameId.startsWith('stop:')) { stopAuto(uid); return send(chatId, '⏹ Đã dừng cập nhật.'); }
-    if (!isVip(uid)) return send(chatId, '🔒 <b>MUA KEY ĐÊ RỒI XEM</b>', kb([[btn('💳 GÓI SỬ DỤNG', 'rent:menu', 'primary'), btn('🔑 KÍCH HOẠT KEY', 'key:input', 'success')], [btn('◀️ QUAY LẠI', 'menu', 'danger')]]));
+    if (!isVip(uid)) return send(chatId, '🔒 <b>MUA KEY ĐÊ RỒI XEM</b>', kb([[btn('💳 THUÊ TOOL', 'rent:menu', 'primary'), btn('🔑 NHẬP KEY', 'key:input', 'success')], [btn('◀️ QUAY LẠI', 'menu', 'primary')]]));
     const g = games.find(x => x.id === gameId);
     if (!g) return;
     const load = await send(chatId, '⏳ Đang lấy dữ liệu...');
@@ -2136,9 +2441,18 @@ async function onMessage(msg) {
   try { await onBankMessage(msg); } catch (e) { console.error('[BANK MESSAGE]', e.message); }
   if (!msg.from) return;
   const chatId = msg.chat.id, from = msg.from, uid = uidOf(from), text = (msg.text || '').trim();
+  if (msg.chat.type === 'private' && msg.message_id) queueReaction(chatId, msg.message_id);
+  if (msg.chat.type === 'private' && settings.maintenance && !isAdmin(uid)) {
+    return send(chatId, `🛠 <b>BOT ĐANG BẢO TRÌ</b>\n\n${esc(settings.maintenanceMessage || 'Bot đang bảo trì, vui lòng quay lại sau.')}`);
+  }
 
   // In groups, only accept the admin command used to register the current feedback group.
   if (msg.chat.type !== 'private') {
+    if (isAdmin(uid) && /^\/setbankgroup_here(?:@\w+)?$/i.test(text)) {
+      settings.bankGroupId = String(chatId); saveSettings();
+      await send(chatId, '✅ Đã đặt nhóm này làm nơi nhận thông báo ngân hàng: <code>' + esc(chatId) + '</code>');
+      return;
+    }
     if (isAdmin(uid) && /^\/fbchannel(?:@\w+)?\s+add_here$/i.test(text)) {
       settings.feedbackChannels = settings.feedbackChannels || [];
       if (!settings.feedbackChannels.map(String).includes(String(chatId))) settings.feedbackChannels.push(String(chatId));
@@ -2167,6 +2481,92 @@ async function onMessage(msg) {
     return showUserMenu(chatId, from);
   }
   if (text === '/admin' && isAdmin(uid)) return showAdmin(chatId);
+  if (text === '/bankstatus' && isAdmin(uid)) {
+    const age = bankMonitor.receivedAt ? Math.max(0, Math.round((Date.now() - bankMonitor.receivedAt) / 60000)) + ' phút trước' : 'chưa ghi nhận';
+    const pending = Object.values(orders).filter(o => o && ['pending','checking','timeout'].includes(o.status)).length;
+    return send(chatId, `🏦 <b>TRẠNG THÁI ĐỌC GIAO DỊCH</b>\n━━━━━━━━━━━━━━━━━━\nNhóm đang theo dõi: <code>${esc(settings.bankGroupId || 'chưa cài')}</code>\nThông báo gần nhất: <b>${age}</b>\nNgười gửi: <b>${esc(bankMonitor.senderName || 'chưa có')}</b>\nSender ID: <code>${esc(bankMonitor.senderId || 'Chưa có')}</code> • Bot: <b>${bankMonitor.isBot ? 'Có' : 'Không'}</b>\nSố tiền đọc được: <b>${bankMonitor.amount ? fmt(bankMonitor.amount) + 'đ' : 'Chưa có'}</b>\nMã GD: <code>${esc(bankMonitor.ref || 'Chưa có')}</code>\nTin gần nhất được tin cậy: <b>${bankMonitor.trusted ? 'Có' : 'Không'}</b>\nĐơn đang chờ: <b>${pending}</b>\n\n<i>Nếu không thấy tin nhắn từ vietqr_bot: bật Bot-to-Bot Communication trong BotFather và đặt bot này làm admin nhóm. Nếu người gửi chưa được tin cậy, dùng /setbanksenders ID để whitelist.</i>\nRaw: <code>${esc(bankMonitor.raw || 'Chưa có').slice(0, 700)}</code>`);
+  }
+  if (text.startsWith('/maintenance') && isAdmin(uid)) {
+    const mode = text.split(/\s+/)[1] || 'status';
+    if (mode === 'on') settings.maintenance = true;
+    else if (mode === 'off') settings.maintenance = false;
+    else if (mode !== 'status') return send(chatId, 'Dùng <code>/maintenance on</code> hoặc <code>/maintenance off</code>.');
+    saveSettings();
+    return send(chatId, `🛠 Bảo trì: <b>${settings.maintenance ? 'ĐANG BẬT' : 'ĐANG TẮT'}</b>`, kb([[btn('🛠 TRUNG TÂM VẬN HÀNH', 'adm:operations', 'primary')], [btn('👑 ADMIN', 'adm:home', 'success')]]));
+  }
+  if (text.startsWith('/maintmsg ') && isAdmin(uid)) {
+    const body = text.slice('/maintmsg '.length).trim().slice(0, 500);
+    if (!body) return send(chatId, 'Nội dung không được để trống. Dùng <code>/maintmsg Bot đang bảo trì</code>.');
+    settings.maintenanceMessage = body; saveSettings();
+    return send(chatId, '✅ Đã cập nhật nội dung thông báo bảo trì.');
+  }
+  if (text.startsWith('/reactions') && isAdmin(uid)) {
+    const mode = (text.split(/\s+/)[1] || 'status').toLowerCase();
+    if (mode === 'on') settings.reactionsEnabled = true;
+    else if (mode === 'off') settings.reactionsEnabled = false;
+    else if (mode !== 'status') return send(chatId, 'Dùng <code>/reactions on</code> hoặc <code>/reactions off</code>.');
+    saveSettings();
+    return send(chatId, `🎭 Reaction tự động: <b>${settings.reactionsEnabled ? 'BẬT' : 'TẮT'}</b>.`);
+  }
+  if (text.startsWith('/setpoll ') && isAdmin(uid)) {
+    const seconds = Number(text.split(/\s+/)[1]);
+    if (!Number.isInteger(seconds) || seconds < 5 || seconds > 120) return send(chatId, 'Dùng <code>/setpoll 10</code>. Giá trị từ 5 đến 120 giây.');
+    settings.pollMs = seconds * 1000; saveSettings();
+    const interval = scheduleGamePolling();
+    return send(chatId, `✅ Chu kỳ kiểm tra game đã đặt thành <b>${Math.round(interval / 1000)} giây</b>.`);
+  }
+  if (text.startsWith('/settitle ') && isAdmin(uid)) {
+    const title = text.slice('/settitle '.length).trim().slice(0, 48);
+    if (!title) return send(chatId, 'Dùng <code>/settitle TEN_BOT</code>.');
+    settings.botTitle = title; saveSettings();
+    return send(chatId, `✅ Tên hiển thị đã đổi thành <b>${esc(title)}</b>.`);
+  }
+  if (text.startsWith('/setwelcome ') && isAdmin(uid)) {
+    const body = text.slice('/setwelcome '.length).trim().slice(0, 180);
+    settings.welcomeText = body; saveSettings();
+    return send(chatId, `✅ Đã cập nhật lời nhắc ở menu: <b>${esc(body || 'Chọn chức năng bạn cần')}</b>.`);
+  }
+  if (text === '/game list') {
+    if (!isAdmin(uid)) return send(chatId, '⛔ Không có quyền admin.');
+    return showAdminGames(chatId);
+  }
+  if (text.startsWith('/game ') && isAdmin(uid)) {
+    const parts = text.split(/\s+/);
+    const action = (parts[1] || '').toLowerCase(), id = parts[2];
+    if (action === 'list') return showAdminGames(chatId);
+    if (!['on', 'off'].includes(action) || !id) return send(chatId, 'Dùng <code>/game on ID</code>, <code>/game off ID</code> hoặc <code>/game list</code>.');
+    const game = games.find(g => g.id === id);
+    if (!game) return send(chatId, '⚠️ Không tìm thấy ID game. Dùng <code>/game list</code>.');
+    game.enabled = action === 'on'; saveJSON('games.json', games);
+    return send(chatId, `✅ ${esc(game.brandLabel)} ${esc(game.variant)} đã ${action === 'on' ? 'BẬT' : 'TẮT'}.`, kb([[btn('🎮 QUẢN LÝ GAME / API', 'adm:games', 'primary')]]));
+  }
+  if (text.startsWith('/gameurl ') && isAdmin(uid)) {
+    const parts = text.split(/\s+/);
+    const id = parts[1], rawUrl = parts[2];
+    if (!id || !rawUrl) return send(chatId, 'Dùng <code>/gameurl ID https://domain/api</code>.');
+    const game = games.find(g => g.id === id);
+    if (!game) return send(chatId, '⚠️ Không tìm thấy ID game.');
+    let parsed;
+    try { parsed = new URL(rawUrl); } catch { return send(chatId, '⚠️ URL không hợp lệ.'); }
+    if (parsed.protocol !== 'https:' || parsed.username || parsed.password) return send(chatId, '⚠️ Chỉ chấp nhận URL HTTPS hợp lệ.');
+    game.url = parsed.toString(); saveJSON('games.json', games);
+    const feed = FEEDS[id];
+    if (feed) { feed.lastLive = null; feed.lastPred = null; }
+    return send(chatId, `✅ Đã đổi API cho <b>${esc(game.brandLabel)} ${esc(game.variant)}</b>. Bot sẽ lấy dữ liệu ở chu kỳ kế tiếp.`);
+  }
+  if (text.startsWith('/removegroup ') && isAdmin(uid)) {
+    const id = text.split(/\s+/)[1];
+    if (!id) return send(chatId, 'Dùng <code>/removegroup ID</code>.');
+    const before = (settings.groups || []).length;
+    settings.groups = (settings.groups || []).filter(g => String(g.id) !== String(id));
+    saveSettings();
+    return send(chatId, `✅ Đã xóa ${before - settings.groups.length} nhóm bắt buộc.`);
+  }
+  if (text === '/groups' && isAdmin(uid)) {
+    const list = settings.groups || [];
+    return send(chatId, `📢 <b>NHÓM BẮT BUỘC</b>\n\n${list.length ? list.map(g => `• <code>${esc(g.id)}</code> | ${esc(g.title || 'Group')} | ${esc(g.link || '')}`).join('\n') : 'Chưa cài nhóm nào.'}\n\nThêm: <code>/addgroup ID|TEN|LINK</code>\nXóa: <code>/removegroup ID</code>`, kb([[btn('⚙️ CÀI ĐẶT CHUNG', 'adm:settings', 'primary')]]));
+  }
+
   if (text === '/setfile' && isAdmin(uid)) {
     sessions[uid] = { await: 'admin_file' };
     return send(chatId, '📤 <b>GỬI FILE SẢN PHẨM</b>\n\nHãy gửi một tài liệu (Document) ngay trong chat này. File mới sẽ thay file đang bán trong KHO FILE.');
@@ -2253,8 +2653,8 @@ async function onMessage(msg) {
     if (targetUid) {
       const u = ensureUser(targetUid);
       const v = vipText(targetUid);
-      const last = u.lastActive ? new Date(u.lastActive).toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' }) : '—';
-      send(chatId, `👤 <b>USER <code>${targetUid}</code></b>\n🔗 @${esc(u.username || '—')}\n📛 ${esc(u.name || '—')}\n${v.line}\n${v.expire}\n🔑 Key: <code>${u.key || '—'}</code>\n📊 Pred: <b>${u.predCount || 0}</b>\n🕐 Active: ${last}`);
+      const last = u.lastActive ? new Date(u.lastActive).toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' }) : 'Chưa có';
+      send(chatId, `👤 <b>USER <code>${targetUid}</code></b>\n🔗 @${esc(u.username || 'Chưa có')}\n📛 ${esc(u.name || 'Chưa có')}\n${v.line}\n${v.expire}\n🔑 Key: <code>${u.key || 'Chưa có'}</code>\n📊 Pred: <b>${u.predCount || 0}</b>\n🕐 Active: ${last}`);
     } else send(chatId, '⚠️ <code>/user ID</code>');
     return;
   }
@@ -2289,12 +2689,12 @@ async function onMessage(msg) {
   if (text.startsWith('/setbanksenders') && isAdmin(uid)) {
     const value = text.slice('/setbanksenders'.length).trim();
     if (!value) {
-      const current = settings.bankSenderIds.length ? settings.bankSenderIds.join(', ') : 'Mặc định: chỉ nhận tin do bot hoặc admin gửi';
+      const current = settings.bankSenderIds.length ? settings.bankSenderIds.join(', ') : 'Chưa whitelist bot ngân hàng; chỉ tin admin đã cấu hình được tin cậy';
       return send(chatId, `🛡️ <b>NGUỒN THÔNG BÁO NGÂN HÀNG ĐƯỢC TIN CẬY</b>\n${esc(current)}\n\nDùng <code>/setbanksenders ID1,ID2</code> để đặt danh sách cho phép.\nDùng <code>/setbanksenders clear</code> để quay về chế độ mặc định.`);
     }
     if (value.toLowerCase() === 'clear') {
       settings.bankSenderIds = []; saveSettings();
-      return send(chatId, '✅ Đã xóa danh sách riêng. Bot chỉ tự tin cậy tin nhắn do bot hoặc admin gửi.');
+      return send(chatId, '✅ Đã xóa danh sách riêng. Bot chỉ tự tin cậy admin; bot ngân hàng cần được whitelist bằng ID.');
     }
     const ids = value.split(/[,;\s]+/).map(x => x.trim()).filter(Boolean);
     if (!ids.length || ids.some(x => !/^-?\d+$/.test(x))) return send(chatId, '⚠️ ID phải là số. Ví dụ: <code>/setbanksenders 123456789</code>');
@@ -2305,10 +2705,15 @@ async function onMessage(msg) {
     const body = text.slice(10);
     const parts = body.split('|').map(s => s.trim());
     if (parts.length < 3) return send(chatId, '⚠️ <code>/addgroup ID|TITLE|LINK</code>');
+    if (!/^-?\d+$/.test(parts[0])) return send(chatId, '⚠️ Chat ID phải là số.');
+    let groupUrl;
+    try { groupUrl = new URL(parts[2]); } catch { return send(chatId, '⚠️ Link nhóm không hợp lệ.'); }
+    if (!['https:', 'http:'].includes(groupUrl.protocol)) return send(chatId, '⚠️ Link nhóm phải là HTTP hoặc HTTPS.');
     settings.groups = settings.groups || [];
-    settings.groups.push({ id: parts[0], title: parts[1], link: parts[2] });
+    settings.groups = settings.groups.filter(g => String(g.id) !== String(parts[0]));
+    settings.groups.push({ id: parts[0], title: parts[1].slice(0, 60), link: groupUrl.toString() });
     saveSettings();
-    return send(chatId, '✅ Added force group');
+    return send(chatId, `✅ Đã lưu nhóm bắt buộc: <b>${esc(parts[1])}</b> (<code>${esc(parts[0])}</code>).`);
   }
   if (text === '/cleargroups' && isAdmin(uid)) {
     settings.groups = []; saveSettings();
@@ -2325,7 +2730,8 @@ async function onMessage(msg) {
   if (text.startsWith('/setprice ') && isAdmin(uid)) {
     const parts = text.split(/\s+/);
     if (parts.length >= 5) {
-      const row = { id: parts[1], amount: Number(parts[2]), hours: Number(parts[3]), label: parts.slice(4).join(' ') };
+      const row = { id: parts[1], amount: Number(parts[2]), hours: Number(parts[3]), label: parts.slice(4).join(' ').slice(0, 60) };
+      if (!/^[a-zA-Z0-9_-]{1,20}$/.test(row.id) || !Number.isSafeInteger(row.amount) || row.amount < 1000 || row.amount > 100000000 || !Number.isFinite(row.hours) || row.hours <= 0 || row.hours > 8760 || !row.label) return send(chatId, '⚠️ ID không hợp lệ, số tiền 1.000đ đến 100.000.000đ, thời hạn từ 1 đến 8.760 giờ.');
       settings.packages = settings.packages || [];
       const i = settings.packages.findIndex(x => x.id === row.id);
       if (i >= 0) settings.packages[i] = row; else settings.packages.push(row);
@@ -2342,7 +2748,8 @@ async function onMessage(msg) {
       const r = activateKey(uid, text);
       delete sessions[uid];
       if (!r.ok) return send(chatId, '❌ ' + r.msg, kb([[btn('🔑 THỬ LẠI', 'key:input', 'success'), btn('◀️ MENU', 'menu', 'danger')]]));
-      return send(chatId, '🎉 <b>BẠN ĐÃ MỞ KHOÁ VIP THÀNH CÔNG</b>\nMỞ TOOL CHIẾN NGAY THÔI!', kb([
+      const expireText = new Date(r.until).toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
+      return send(chatId, `🎉 <b>BẠN ĐÃ MỞ KHOÁ VIP THÀNH CÔNG</b>\n⏳ Thời hạn đến: <b>${expireText} (GMT+7)</b>\nMỞ TOOL CHIẾN NGAY THÔI!`, kb([
         [btn('🎮 CHỌN GAME', 'pred:brands', 'primary')],
         [btn('🏠 MENU', 'menu', 'success')]
       ]));
@@ -2356,7 +2763,8 @@ async function onMessage(msg) {
       c.used++;
       saveCodes();
       const created = createKeyForUser(uid, c.hours);
-      return send(chatId, `🎉 Code OK!\n🔑 KEY: <code>${created.key}</code>\nBẠN ĐÃ MỞ KHOÁ VIP THÀNH CÔNG`, kb([
+      const expireText = new Date(created.until).toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
+      return send(chatId, `🎉 <b>CODE ĐÃ KÍCH HOẠT</b>\n🔑 KEY: <code>${created.key}</code>\n⏳ Hạn sử dụng: <b>${expireText} (GMT+7)</b>`, kb([
         [btn('🚀 VÀO TOOL', 'pred:brands', 'primary')],
         [btn('🏠 MENU', 'menu', 'success')]
       ]));
@@ -2365,10 +2773,10 @@ async function onMessage(msg) {
       st.fb = st.fb || {};
       st.fb.note = text;
       st.await = null;
-      return send(chatId, '⭐ <b>FEEDBACK — Bước 3</b>\n\nChọn số sao:', kb([
+      return send(chatId, '⭐ <b>FEEDBACK • Bước 3</b>\n\nChọn số sao:', kb([
         [btn('⭐ 1', 'fb:star:1', 'danger'), btn('⭐ 2', 'fb:star:2', 'danger'), btn('⭐ 3', 'fb:star:3', 'primary')],
         [btn('⭐ 4', 'fb:star:4', 'success'), btn('⭐ 5', 'fb:star:5', 'success')],
-        [btn('◀️ QUAY LẠI', 'menu', 'danger')]
+        [btn('◀️ QUAY LẠI', 'menu', 'primary')]
       ]));
     }
     if (st.await === 'fb_photo') {
@@ -2377,9 +2785,9 @@ async function onMessage(msg) {
         st.fb = st.fb || {};
         st.fb.photo = msg.photo[msg.photo.length - 1].file_id;
         st.await = 'fb_note';
-        return send(chatId, '⭐ <b>FEEDBACK — Bước 2</b>\n\nNote nội dung vào đây:', kb([
+        return send(chatId, '⭐ <b>FEEDBACK • Bước 2</b>\n\nNote nội dung vào đây:', kb([
           [btn('⏭ SKIP', 'fb:skipnote', 'primary')],
-          [btn('◀️ QUAY LẠI', 'menu', 'danger')]
+          [btn('◀️ QUAY LẠI', 'menu', 'primary')]
         ]));
       }
       return send(chatId, 'Gửi ảnh hoặc bấm SKIP.', kb([[btn('⏭ SKIP', 'fb:skipphoto', 'primary')]]));
@@ -2397,8 +2805,8 @@ async function onMessage(msg) {
       const filled = Math.max(0, Math.min(10, Math.round((pred.conf || 50) / 10)));
       const bar = '█'.repeat(filled) + '░'.repeat(10 - filled);
       const modelLine = pred.model === 'learned' ? `🧠 Mẫu đã kiểm định: <b>${pred.samples}</b> • Balanced accuracy: <b>${pred.validationAccuracy.toFixed(1)}%</b> • Brier: <b>${Number(pred.validationBrier || 0).toFixed(3)}</b>` : '🧪 Chế độ an toàn • Chưa vượt ngưỡng kiểm định ngoài mẫu';
-      const sent = await send(chatId, `╭━━━━━━━━━━━━━━━━━━╮\n       🧩 <b>HASH LAB PREMIUM</b>\n╰━━━━━━━━━━━━━━━━━━╯\n\n🔐 <b>Loại mã:</b> ${type} • ${hashStr.length} ký tự\n🔑 <code>${esc(hashStr)}</code>\n\n🎯 <b>TÍN HIỆU THAM KHẢO</b>\n${sideIcon} <b>${sideTxt}</b>\n📊 Mức nghiêng thống kê: <b>${pred.conf}%</b>\n<code>${bar}</code>\n${modelLine}\n\n💡 ${esc(pred.reason)}\n\n👇 <i>Chỉ gửi phản hồi sau khi đã có kết quả thực tế để đối chiếu.</i>`,
-      kb([[btn('✅ ĐÚNG — THỰC TẾ TRÙNG', 'hash:ok', 'success'), btn('❌ SAI — NHẬP KẾT QUẢ THẬT', 'hash:bad', 'danger')], [btn('🏠 THOÁT', 'menu', 'danger')]]));
+      const sent = await send(chatId, `╭━━━━━━━━━━━━━━━━━━╮\n       🧩 <b>TOOL MD5/SHA256</b>\n╰━━━━━━━━━━━━━━━━━━╯\n\n🔐 <b>Loại mã:</b> ${type} • ${hashStr.length} ký tự\n🔑 <code>${esc(hashStr)}</code>\n\n🎯 <b>TÍN HIỆU THAM KHẢO</b>\n${sideIcon} <b>${sideTxt}</b>\n📊 Mức nghiêng thống kê: <b>${pred.conf}%</b>\n<code>${bar}</code>\n${modelLine}\n\n💡 ${esc(pred.reason)}\n\n👇 <i>Chỉ gửi phản hồi sau khi đã có kết quả thực tế để đối chiếu.</i>`,
+      kb([[btn('✅ ĐÚNG • THỰC TẾ TRÙNG', 'hash:ok', 'success'), btn('❌ SAI • NHẬP KẾT QUẢ THẬT', 'hash:bad', 'danger')], [btn('🏠 THOÁT', 'menu', 'danger')]]));
       if (sent && sent.ok && sent.result && sent.result.message_id) {
         const predictionKey = `${chatId}:${sent.result.message_id}`;
         hashPredictions[predictionKey] = {
@@ -2428,10 +2836,54 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: '2mb' }));
 
-// Public read-only game monitor. All administration is performed in the Telegram bot.
+// The dashboard shell is public, but all live data endpoints require the INDEX_PASSWORD session.
+const INDEX_PASSWORD = String(process.env.INDEX_PASSWORD || '');
+const INDEX_COOKIE = 'byfee_index';
+const loginAttempts = new Map();
+function signIndexToken(exp) {
+  const payload = Buffer.from(JSON.stringify({ exp })).toString('base64url');
+  const sig = crypto.createHmac('sha256', INDEX_PASSWORD).update(payload).digest('base64url');
+  return payload + '.' + sig;
+}
+function validIndexToken(req) {
+  if (!INDEX_PASSWORD) return false;
+  const cookies = Object.fromEntries(String(req.headers.cookie || '').split(';').map(v => v.trim()).filter(Boolean).map(v => { const i = v.indexOf('='); return [v.slice(0, i), v.slice(i + 1)]; }));
+  const token = cookies[INDEX_COOKIE] || '';
+  const [payload, signature] = token.split('.');
+  if (!payload || !signature) return false;
+  const expected = crypto.createHmac('sha256', INDEX_PASSWORD).update(payload).digest('base64url');
+  const a = Buffer.from(signature), b = Buffer.from(expected);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return false;
+  try { const data = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')); return Number(data.exp) > Date.now(); } catch { return false; }
+}
+function requireIndexAuth(req, res, next) {
+  if (validIndexToken(req)) return next();
+  return res.status(401).json({ ok: false, error: 'UNAUTHORIZED' });
+}
 app.get('/', (_req, res) => res.sendFile(path.join(__dirname, 'index.html')));
+app.get('/api/auth/status', (req, res) => res.json({ configured: Boolean(INDEX_PASSWORD), authenticated: validIndexToken(req) }));
+app.post('/api/login', (req, res) => {
+  if (!INDEX_PASSWORD) return res.status(503).json({ ok: false, error: 'INDEX_PASSWORD_NOT_SET' });
+  const ip = String(req.ip || req.socket.remoteAddress || 'unknown');
+  const state = loginAttempts.get(ip) || { count: 0, until: 0 };
+  if (state.until > Date.now() && state.count >= 8) return res.status(429).json({ ok: false, error: 'TOO_MANY_ATTEMPTS' });
+  const supplied = Buffer.from(String(req.body && req.body.password || ''));
+  const expected = Buffer.from(INDEX_PASSWORD);
+  const ok = supplied.length === expected.length && crypto.timingSafeEqual(supplied, expected);
+  if (!ok) {
+    state.count = state.until > Date.now() ? state.count + 1 : 1;
+    state.until = Date.now() + 10 * 60 * 1000; loginAttempts.set(ip, state);
+    return res.status(401).json({ ok: false, error: 'WRONG_PASSWORD' });
+  }
+  loginAttempts.delete(ip);
+  const token = signIndexToken(Date.now() + 12 * 60 * 60 * 1000);
+  const secure = req.secure || String(req.headers['x-forwarded-proto'] || '').includes('https');
+  res.setHeader('Set-Cookie', `${INDEX_COOKIE}=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=43200${secure ? '; Secure' : ''}`);
+  return res.json({ ok: true });
+});
+app.post('/api/logout', (_req, res) => { res.setHeader('Set-Cookie', `${INDEX_COOKIE}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0`); res.json({ ok: true }); });
 
-app.get('/api/games', (_req, res) => {
+app.get('/api/games', requireIndexAuth, (_req, res) => {
   const list = games.map(g => {
     const f = FEEDS[g.id], p = f.lastPred || {};
     return {
@@ -2446,7 +2898,7 @@ app.get('/api/games', (_req, res) => {
   res.json({ games: list });
 });
 
-app.post('/api/data', (req, res) => {
+app.post('/api/data', requireIndexAuth, (req, res) => {
   const { apiId } = req.body;
   const g = games.find(x => x.id === apiId), feed = FEEDS[apiId];
   if (!g || !feed) return res.json({ rows: [] });
@@ -2474,7 +2926,7 @@ app.post('/api/data', (req, res) => {
       prediction: p.side === 'T' ? 'TÀI' : p.side === 'X' ? 'XỈU' : 'ĐANG LẤY DỮ LIỆU',
       confidence: p.conf || 0, reason: p.reason || '', qualityLabel: p.qualityLabel || 'CHƯA CÓ DỮ LIỆU', modelVersion: p.modelVersion || 'adaptive-18', regimeShift: p.regimeShift || 0,
       dicePrediction: p.dicePrediction || null,
-      session: feed.lastLive ? String(Number(feed.lastLive.session) + 1) : '—',
+      session: feed.lastLive ? String(Number(feed.lastLive.session) + 1) : 'Chưa có',
       updatedAt: nowVN(), sampleSize: feed.engine.history.length,
       sicboStats: g.group === 'sicbo' ? {
         tests: feed.engine.sicbo.tests,
@@ -2492,10 +2944,10 @@ app.post('/api/data', (req, res) => {
   });
 });
 
-app.get('/health', (_, res) => res.json({ ok: true, bot: 'TOOL TX BY FEE v16.8 ALL-GAME ADAPTIVE ENGINE', games: games.length }));
+app.get('/health', (_, res) => res.json({ ok: true, bot: 'TOOL TX BY FEE v16.8.2 ALL-GAME ADMIN CONTROL', games: games.length, indexPasswordConfigured: Boolean(INDEX_PASSWORD), bankGroupId: String(settings.bankGroupId || '') }));
 
 app.listen(PORT, '0.0.0.0', () => {
-  console.log('🔥 TOOL TX BY FEE running on port', PORT);
+  console.log('🔥 TOOL TX BY FEE running on port', PORT, '| data:', DATA, '| index password:', Boolean(INDEX_PASSWORD));
 });
 
 /* ═══════════════ TELEGRAM POLLING ═══════════════ */
