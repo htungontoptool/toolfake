@@ -119,6 +119,9 @@ async function tg(method, body) {
 async function send(chatId, text, extra = {}) {
   return tg('sendMessage', { chat_id: chatId, text, parse_mode: 'HTML', disable_web_page_preview: true, ...extra });
 }
+async function editText(chatId, messageId, text, extra = {}) {
+  return tg('editMessageText', { chat_id: chatId, message_id: messageId, text, parse_mode: 'HTML', disable_web_page_preview: true, ...extra });
+}
 async function delMsg(chatId, messageId) {
   if (!messageId) return;
   return tg('deleteMessage', { chat_id: chatId, message_id: messageId });
@@ -1087,6 +1090,24 @@ function compareSessionIds(a, b) {
   return String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: 'base' });
 }
 
+function getPreviousRoundSummary(live) {
+  if (!live) return { session: 'Chưa có', result: 'Chưa có', dice: 'Chưa có dữ liệu', sum: null, diceValues: [] };
+  const diceValues = Array.isArray(live.dice) && live.dice.length >= 3
+    ? live.dice.slice(0, 3).map(Number)
+    : [];
+  const validDice = diceValues.length === 3 && diceValues.every(n => Number.isInteger(n) && n >= 1 && n <= 6);
+  const sum = Number(live.sum) > 0 ? Number(live.sum) : (validDice ? diceValues.reduce((a, b) => a + b, 0) : null);
+  const triple = validDice && diceValues[0] === diceValues[1] && diceValues[1] === diceValues[2];
+  let result = 'Chưa có';
+  if (triple) result = 'BỘ BA';
+  else if (live.side === 'T') result = 'TÀI';
+  else if (live.side === 'X') result = 'XỈU';
+  else if (sum != null && sum >= 4 && sum <= 17) result = sum >= 11 ? 'TÀI' : 'XỈU';
+  const faces = ['', '⚀', '⚁', '⚂', '⚃', '⚄', '⚅'];
+  const dice = validDice ? `${diceValues.map(n => faces[n]).join(' ')}${sum != null ? ` · Tổng ${sum}` : ''}` : 'Chưa có dữ liệu';
+  return { session: String(live.session || 'Chưa có'), result, dice, sum, diceValues: validDice ? diceValues : [] };
+}
+
 function appendNewGameResults(feed, historyArr) {
   if (!(feed.seenSessions instanceof Set)) feed.seenSessions = new Set();
   let added = 0;
@@ -1406,7 +1427,9 @@ async function showBrandMenu(chatId) {
     seen.get(g.brand).count++;
   }
   if (!seen.size) return send(chatId, '⚠️ Hiện chưa có game nào được bật.', kb([[btn('🏠 MENU', 'menu', 'primary')]]));
-  const rows = [...seen.entries()].sort((a, b) => a[1].label.localeCompare(b[1].label)).map(([brand, item]) => [btn(`🎮 ${item.label} · ${item.count} loại`, 'predbrand:' + brand, 'primary')]);
+  const brandButtons = [...seen.entries()].sort((a, b) => a[1].label.localeCompare(b[1].label)).map(([brand, item]) => btn(`🎮 ${item.label} · ${item.count} loại`, 'predbrand:' + brand, 'primary'));
+  const rows = [];
+  for (let i = 0; i < brandButtons.length; i += 2) rows.push(brandButtons.slice(i, i + 2));
   rows.push([btn('🏠 MENU CHÍNH', 'menu', 'danger')]);
   return send(chatId, `🎮 <b>CHỌN NHÀ GAME</b>\n\nChọn thương hiệu để xem các bàn Tài Xỉu, MD5 hoặc Sicbo đang bật:`, kb(rows));
 }
@@ -1415,7 +1438,9 @@ async function showTables(chatId, brand, uid) {
   const list = games.filter(g => g.brand === brand && g.enabled !== false);
   if (!list.length) return send(chatId, '⚠️ Nhà game này hiện chưa có bàn hoạt động.', kb([[btn('◀️ DANH SÁCH GAME', 'pred:brands', 'primary')]]));
   const label = list[0].brandLabel || String(brand).toUpperCase();
-  const rows = list.map(g => [btn(`📊 ${g.variant}`, 'pred:' + g.id, 'primary')]);
+  const tableButtons = list.map(g => btn(`📊 ${g.variant}`, 'pred:' + g.id, 'primary'));
+  const rows = [];
+  for (let i = 0; i < tableButtons.length; i += 2) rows.push(tableButtons.slice(i, i + 2));
   rows.push([btn('◀️ NHÀ GAME', 'pred:brands', 'danger'), btn('🏠 MENU', 'menu', 'primary')]);
   return send(chatId, `🎮 <b>${esc(label)}</b>
 
@@ -1429,7 +1454,7 @@ function stopAuto(uid) {
   delete autoWatch[key];
 }
 
-async function pushPredCard(chatId, gameId, uid, force = false) {
+async function pushPredCard(chatId, gameId, uid, force = false, replaceMessageId = null) {
   const g = games.find(x => x.id === gameId && x.enabled !== false);
   const feed = FEEDS[gameId];
   if (!g || !feed) return send(chatId, '⚠️ Không tìm thấy bàn game hoặc bàn đang tắt.', kb([[btn('◀️ DANH SÁCH GAME', 'pred:brands', 'primary')]]));
@@ -1437,28 +1462,39 @@ async function pushPredCard(chatId, gameId, uid, force = false) {
   const p = feed.lastPred || feed.engine.predict();
   const side = p.side === 'T' ? 'TÀI' : 'XỈU';
   const icon = p.side === 'T' ? '🔴' : '🔵';
-  const session = feed.lastLive ? String(Number(feed.lastLive.session) + 1) : 'đang chờ';
-  const sicboLines = p.dicePrediction && Array.isArray(p.dicePrediction.selectedTopSums)
-    ? '\n🎲 <b>3 TỔNG SICBO:</b> ' + p.dicePrediction.selectedTopSums.map(x => `${x.sum} (${Number(x.percent || 0).toFixed(1)}%)`).join(' • ')
+  const nextSession = feed.lastLive ? String(Number(feed.lastLive.session) + 1) : 'đang chờ';
+  const previous = getPreviousRoundSummary(feed.lastLive);
+  const isSicbo = String(gameId).startsWith('sicbo_');
+  const sums = isSicbo && p.dicePrediction && Array.isArray(p.dicePrediction.topSums)
+    ? [...new Set(p.dicePrediction.topSums.map(Number).filter(n => Number.isInteger(n) && n >= 3 && n <= 18))].slice(0, 3)
+    : [];
+  const dicePredictionLine = isSicbo
+    ? `\n🎲 <b>BA TỔNG DỄ XUẤT HIỆN:</b> <b>${sums.length ? sums.join(' • ') : 'Đang tính toán'}</b>`
     : '';
   const text = `╭━━━━━━━━━━━━━━━━━━╮
    🎯 <b>${esc(g.brandLabel)} • ${esc(g.variant)}</b>
 ╰━━━━━━━━━━━━━━━━━━╯
 
-🆔 <b>Phiên kế tiếp:</b> <code>${esc(session)}</code>
-📌 <b>Tín hiệu:</b> ${icon} <b>${side}</b>
-📊 <b>Độ nghiêng mô hình:</b> ${Number(p.conf || 50)}%
-📚 <b>Lịch sử:</b> ${feed.engine.history.length} phiên
-${sicboLines}
+📍 <b>PHIÊN TRƯỚC:</b> <code>${esc(previous.session)}</code>
+🏁 <b>KẾT QUẢ:</b> <b>${esc(previous.result)}</b>
+🎲 <b>XÚC XẮC:</b> ${esc(previous.dice)}
 
-🧠 ${esc(p.reason || 'Đang chờ dữ liệu phiên hợp lệ.')}
-
-<i>Chỉ là thống kê tham khảo; kết quả game ngẫu nhiên không thể được bảo đảm.</i>`;
-  return send(chatId, text, kb([
+🔮 <b>PHIÊN TIẾP THEO:</b> <code>${esc(nextSession)}</code>
+🎯 <b>DỰ ĐOÁN:</b> ${icon} <b>${side}</b>${dicePredictionLine}`;
+  const markup = kb([
     [btn('📜 LỊCH SỬ ĐÚNG/SAI', 'predhist:' + gameId, 'success')],
     [btn('⏹ DỪNG CẬP NHẬT', 'pred:stop:' + gameId, 'danger'), btn('◀️ CHỌN BÀN', 'predbrand:' + g.brand, 'primary')],
     [btn('🏠 MENU CHÍNH', 'menu', 'primary')]
-  ]));
+  ]);
+  if (replaceMessageId) {
+    const edited = await editText(chatId, replaceMessageId, text, { reply_markup: markup });
+    if (edited && edited.ok) return { result: { message_id: replaceMessageId }, edited: true };
+    // If Telegram no longer allows editing (e.g. message expired/deleted), send replacement then remove old card.
+    const sent = await send(chatId, text, { reply_markup: markup });
+    if (sent && sent.ok && sent.result && sent.result.message_id) await delMsg(chatId, replaceMessageId);
+    return sent;
+  }
+  return send(chatId, text, { reply_markup: markup });
 }
 
 function startAuto(uid, chatId, gameId) {
@@ -1474,7 +1510,8 @@ function startAuto(uid, chatId, gameId) {
       await pollGame(g);
       if (f.lastSession && f.lastSession !== state.lastSession) {
         state.lastSession = f.lastSession;
-        await pushPredCard(chatId, gameId, key, true);
+        const updatedCard = await pushPredCard(chatId, gameId, key, true, state.messageId);
+        if (updatedCard && updatedCard.result && updatedCard.result.message_id) state.messageId = updatedCard.result.message_id;
       }
     } catch (e) { console.error('[AUTO PREDICTION]', e.message); }
     finally { state.busy = false; }
@@ -2428,7 +2465,9 @@ async function onCallback(cq) {
     await pollGame(g);
     await delMsg(chatId, load.result && load.result.message_id);
     startAuto(uid, chatId, gameId);
-    return pushPredCard(chatId, gameId, uid, true);
+    const card = await pushPredCard(chatId, gameId, uid, true);
+    if (autoWatch[String(uid)] && card && card.result && card.result.message_id) autoWatch[String(uid)].messageId = card.result.message_id;
+    return card;
   }
 
   if (data.startsWith('lc79:')) {
@@ -2887,11 +2926,8 @@ app.get('/api/games', requireIndexAuth, (_req, res) => {
   const list = games.map(g => {
     const f = FEEDS[g.id], p = f.lastPred || {};
     return {
-      id: g.id, name: `${g.brandLabel} - ${g.variant}`, group: g.group,
+      id: g.id, name: `${g.brandLabel} · ${g.variant}`, group: g.group,
       pred: p.side ? (p.side === 'T' ? 'TÀI' : 'XỈU') : 'Đang lấy...',
-      conf: p.conf || 0, acc: f.engine.accuracy(), total: f.engine.total,
-      correct: f.engine.correct, dicePrediction: p.dicePrediction || null,
-      reason: p.reason || '', qualityLabel: p.qualityLabel || 'CHƯA CÓ DỮ LIỆU', modelVersion: p.modelVersion || 'adaptive-18',
       updatedAt: f.lastLive ? nowVN() : 'Chưa có dữ liệu'
     };
   });
@@ -2924,27 +2960,14 @@ app.post('/api/data', requireIndexAuth, (req, res) => {
     rows,
     current: {
       prediction: p.side === 'T' ? 'TÀI' : p.side === 'X' ? 'XỈU' : 'ĐANG LẤY DỮ LIỆU',
-      confidence: p.conf || 0, reason: p.reason || '', qualityLabel: p.qualityLabel || 'CHƯA CÓ DỮ LIỆU', modelVersion: p.modelVersion || 'adaptive-18', regimeShift: p.regimeShift || 0,
-      dicePrediction: p.dicePrediction || null,
+      previousRound: getPreviousRoundSummary(feed.lastLive),
       session: feed.lastLive ? String(Number(feed.lastLive.session) + 1) : 'Chưa có',
-      updatedAt: nowVN(), sampleSize: feed.engine.history.length,
-      sicboStats: g.group === 'sicbo' ? {
-        tests: feed.engine.sicbo.tests,
-        exactRate: feed.engine.sicbo.tests ? Number((feed.engine.sicbo.exactHits / feed.engine.sicbo.tests * 100).toFixed(1)) : null,
-        top3Rate: feed.engine.sicbo.tests ? Number((feed.engine.sicbo.top3Hits / feed.engine.sicbo.tests * 100).toFixed(1)) : null,
-        sumTop3Rate: feed.engine.sicbo.sumTop3Tests ? Number((feed.engine.sicbo.sumTop3Hits / feed.engine.sicbo.sumTop3Tests * 100).toFixed(1)) : null,
-        sumTop3Tests: feed.engine.sicbo.sumTop3Tests,
-        sideRate: feed.engine.sicbo.sideTests ? Number((feed.engine.sicbo.sideHits / feed.engine.sicbo.sideTests * 100).toFixed(1)) : null,
-        brierScore: feed.engine.sicbo.sideTests ? Number((feed.engine.sicbo.brierTotal / feed.engine.sicbo.sideTests).toFixed(4)) : null,
-        sideTests: feed.engine.sicbo.sideTests,
-        faceRate: feed.engine.sicbo.faceSlots ? Number((feed.engine.sicbo.faceHits / feed.engine.sicbo.faceSlots * 100).toFixed(1)) : null,
-        sumRate: feed.engine.sicbo.tests ? Number((feed.engine.sicbo.sumHits / feed.engine.sicbo.tests * 100).toFixed(1)) : null
-      } : null
+      updatedAt: nowVN()
     }
   });
 });
 
-app.get('/health', (_, res) => res.json({ ok: true, bot: 'TOOL TX BY FEE v16.8.2 ALL-GAME ADMIN CONTROL', games: games.length, indexPasswordConfigured: Boolean(INDEX_PASSWORD), bankGroupId: String(settings.bankGroupId || '') }));
+app.get('/health', (_, res) => res.json({ ok: true, bot: 'TOOL TX BY FEE v16.8.4 COMPACT SICBO CARD UPDATES', games: games.length, indexPasswordConfigured: Boolean(INDEX_PASSWORD), bankGroupId: String(settings.bankGroupId || '') }));
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log('🔥 TOOL TX BY FEE running on port', PORT, '| data:', DATA, '| index password:', Boolean(INDEX_PASSWORD));
