@@ -1,693 +1,74 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-<meta name="theme-color" content="#4F46E5" />
-<meta name="description" content="TOOL TX BY FEE — TX, MD5 và Sicbo realtime" />
-<title>TOOL TX BY FEE — ADMIN</title>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=Inter:wght@500;600;700&family=JetBrains+Mono:wght@600;700&display=swap" rel="stylesheet">
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#080d1c"><title>TOOL TX BY FEE — BẢNG PHÂN TÍCH GAME</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@500;600;700&display=swap" rel="stylesheet">
 <style>
-  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; -webkit-font-smoothing: antialiased; -webkit-tap-highlight-color: transparent; }
-  :root {
-    --primary: #4F46E5;
-    --primary-dark: #3730A3;
-    --secondary: #06B6D4;
-    --text: #0F172A;
-    --muted: #64748B;
-    --border: #E2E8F0;
-    --bg: #EEF2FF;
-    --card: #FFFFFF;
-    --ok: #059669;
-    --ok-bg: #D1FAE5;
-    --err: #DC2626;
-    --err-bg: #FEE2E2;
-    --font-h: 'Plus Jakarta Sans', sans-serif;
-    --font-b: 'Inter', sans-serif;
-    --font-m: 'JetBrains Mono', monospace;
-    --radius: 16px;
-    --shadow: 0 8px 30px rgba(79, 70, 229, 0.12);
-  }
-  body {
-    font-family: var(--font-b);
-    background:
-      radial-gradient(1200px 600px at 10% -10%, #C7D2FE 0%, transparent 55%),
-      radial-gradient(900px 500px at 100% 0%, #A5F3FC 0%, transparent 50%),
-      var(--bg);
-    color: var(--text);
-    height: 100vh;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-  }
-  .wrap { display: flex; flex-direction: column; height: 100vh; }
-
-  /* Header */
-  .topbar {
-    background: rgba(255,255,255,0.92);
-    backdrop-filter: blur(16px);
-    padding: 13px 16px;
-    gap: 12px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    border-bottom: 1px solid rgba(226,232,240,0.8);
-    z-index: 20;
-  }
-  .brand { display: flex; align-items: center; gap: 10px; }
-  .logo {
-    width: 34px; height: 34px;
-    background: linear-gradient(135deg, var(--primary), var(--secondary));
-    border-radius: 10px;
-    display: flex; align-items: center; justify-content: center;
-    color: #fff; font-weight: 800; font-size: 13px; font-family: var(--font-h);
-  }
-  .brand-text { display: flex; flex-direction: column; }
-  .brand-name { font-family: var(--font-h); font-weight: 800; font-size: 16px; line-height: 1.1; letter-spacing: -0.2px; }
-  .brand-ver { font-size: 10px; color: var(--muted); font-weight: 500; }
-  .actions { display: flex; gap: 8px; }
-  .btn {
-    border: none; border-radius: 10px; padding: 9px 14px;
-    font-family: var(--font-h); font-size: 12px; font-weight: 700;
-    cursor: pointer; transition: 0.15s;
-  }
-  .btn:active { transform: scale(0.96); }
-  .btn-primary { background: var(--primary); color: #fff; }
-  .btn-danger { background: #EF4444; color: #fff; }
-  .btn-ghost { background: #F1F5F9; color: var(--text); border: 1px solid var(--border); }
-
-  /* Info bar */
-  .infobar {
-    background: linear-gradient(135deg, #4F46E5, #06B6D4);
-    color: #fff;
-    padding: 14px 16px;
-    display: none;
-    justify-content: space-between;
-    align-items: center;
-    box-shadow: 0 8px 24px rgba(79, 70, 229, 0.28);
-  }
-  .infobar.show { display: flex; }
-  .game-title { font-family: var(--font-h); font-weight: 800; font-size: 15px; }
-  .game-phien { font-family: var(--font-m); font-size: 11px; opacity: 0.9; margin-top: 2px; }
-  .stats { display: flex; gap: 8px; }
-  .stat {
-    background: rgba(255,255,255,0.18);
-    border-radius: 10px;
-    padding: 6px 11px;
-    text-align: center;
-    min-width: 54px;
-  }
-  .stat .num { font-family: var(--font-h); font-size: 16px; font-weight: 800; line-height: 1; }
-  .stat .lbl { font-size: 9px; font-weight: 700; margin-top: 2px; opacity: 0.9; letter-spacing: 0.3px; }
-
-  /* Table */
-  .content { flex: 1; overflow-y: auto; padding: 12px; -webkit-overflow-scrolling: touch; }
-  .table-card {
-    background: var(--card);
-    border-radius: var(--radius);
-    overflow-x: auto;
-    overflow-y: hidden;
-    box-shadow: var(--shadow);
-    border: 1px solid var(--border);
-  }
-  table { width: 100%; min-width: 640px; border-collapse: collapse; text-align: center; font-size: 12px; }
-  th {
-    background: #F8FAFC;
-    color: var(--primary);
-    font-family: var(--font-h);
-    font-weight: 800;
-    padding: 12px 4px;
-    font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: 0.4px;
-    border-bottom: 1px solid var(--border);
-  }
-  td {
-    padding: 11px 4px;
-    border-bottom: 1px solid #F1F5F9;
-    font-weight: 700;
-    color: #1E293B;
-    font-variant-numeric: tabular-nums;
-  }
-  tr:last-child td { border-bottom: none; }
-  th:nth-child(1) { width: 18%; }
-  th:nth-child(2) { width: 16%; }
-  th:nth-child(3) { width: 18%; }
-  th:nth-child(4) { width: 16%; }
-  th:nth-child(5) { width: 16%; }
-  th:nth-child(6) { width: 16%; }
-
-  .pill {
-    display: inline-block;
-    padding: 5px 9px;
-    border-radius: 8px;
-    font-family: var(--font-h);
-    font-size: 11px;
-    font-weight: 800;
-  }
-  .pill.tai { background: #DCFCE7; color: #166534; }
-  .pill.xiu { background: #FEE2E2; color: #991B1B; }
-
-  .badge {
-    display: inline-block;
-    padding: 5px 8px;
-    border-radius: 8px;
-    font-size: 11px;
-    font-weight: 800;
-  }
-  .badge.ok { background: var(--ok-bg); color: var(--ok); }
-  .badge.err { background: var(--err-bg); color: var(--err); }
-
-  .row-next { background: linear-gradient(90deg, #EFF6FF, #F0F9FF); }
-  .row-next td { font-weight: 800; }
-  .waiting { color: var(--primary); font-style: italic; font-weight: 700; }
-
-  /* Modal */
-  .overlay {
-    position: fixed; inset: 0;
-    background: rgba(15, 23, 42, 0.55);
-    backdrop-filter: blur(6px);
-    display: flex; justify-content: center; align-items: center;
-    z-index: 9999; padding: 18px;
-  }
-  .modal {
-    width: 100%; max-width: 420px; max-height: 82vh;
-    background: #fff; border-radius: 20px;
-    display: flex; flex-direction: column; overflow: hidden;
-    box-shadow: 0 25px 50px -12px rgba(0,0,0,0.25);
-  }
-  .modal-head {
-    padding: 20px 18px 16px;
-    text-align: center;
-    color: #fff;
-    background: linear-gradient(135deg, #3730A3, #4F46E5 56%, #0891B2);
-    border-bottom: 1px solid rgba(255,255,255,0.18);
-    position: relative;
-    overflow: hidden;
-  }
-  .modal-head::after {
-    content: "";
-    position: absolute;
-    width: 170px; height: 170px;
-    right: -72px; top: -112px;
-    border-radius: 50%;
-    background: rgba(255,255,255,0.12);
-    pointer-events: none;
-  }
-  .modal-kicker {
-    font-size: 9px; font-weight: 800; letter-spacing: 1.6px;
-    opacity: .78; margin-bottom: 7px;
-  }
-  .feature-chips {
-    display: flex; justify-content: center; flex-wrap: wrap;
-    gap: 6px; margin-top: 12px;
-  }
-  .feature-chips span {
-    border: 1px solid rgba(255,255,255,.24);
-    background: rgba(255,255,255,.13);
-    border-radius: 999px; padding: 5px 9px;
-    font-size: 9px; font-weight: 800; letter-spacing: .25px;
-  }
-  .modal-head h3 {
-    font-family: var(--font-h);
-    font-size: 20px;
-    font-weight: 800;
-    letter-spacing: -0.45px;
-  }
-  .modal-head p { font-size: 11px; color: rgba(255,255,255,.82); margin-top: 4px; }
-  .game-list {
-    padding: 12px;
-    overflow-y: auto;
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    gap: 9px;
-  }
-  .section {
-    font-family: var(--font-h);
-    font-size: 11px;
-    color: var(--primary);
-    font-weight: 800;
-    margin: 4px 0 2px 4px;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-  }
-  .game-item {
-    border: 1.5px solid var(--border);
-    padding: 13px 14px;
-    border-radius: 12px;
-    cursor: pointer;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    transition: 0.15s;
-    background: #fff;
-  }
-  .game-item:active {
-    transform: scale(0.985);
-    border-color: var(--primary);
-    background: #F8FAFC;
-  }
-  .game-item:hover { border-color: #A5B4FC; box-shadow: 0 5px 16px rgba(79,70,229,.08); }
-  .game-item .name { letter-spacing: -.15px; }
-  @media (max-width: 420px) {
-    .topbar { padding: 10px 11px; }
-    .brand-name { font-size: 14px; }
-    .actions { gap: 5px; }
-    .btn { padding: 8px 9px; font-size: 10px; }
-    .content { padding: 9px; }
-    .modal { max-height: 88vh; border-radius: 18px; }
-    .game-item { padding: 12px; }
-  }
-  .game-item .left { display: flex; flex-direction: column; gap: 4px; }
-  .game-item .name { font-family: var(--font-h); font-size: 14px; font-weight: 800; }
-  .game-item .pred {
-    font-size: 12px; font-weight: 600;
-    display: flex; gap: 7px; align-items: center;
-  }
-  .tag-tai { color: #166534; background: #DCFCE7; padding: 2px 7px; border-radius: 6px; font-weight: 700; font-size: 11px; }
-  .tag-xiu { color: #991B1B; background: #FEE2E2; padding: 2px 7px; border-radius: 6px; font-weight: 700; font-size: 11px; }
-  .acc {
-    font-family: var(--font-m);
-    font-size: 12px;
-    font-weight: 700;
-    color: var(--primary);
-    background: #EFF6FF;
-    padding: 5px 9px;
-    border-radius: 8px;
-  }
-  .empty { text-align: center; padding: 36px 16px; color: var(--muted); font-size: 14px; }
-
-  /* Private admin console + file vault */
-  .login-overlay { position:fixed; inset:0; z-index:20000; display:flex; align-items:center; justify-content:center; padding:22px; background:linear-gradient(135deg,#111827 0%,#312e81 55%,#0e7490 100%); }
-  .login-card { width:100%; max-width:390px; padding:26px; border-radius:24px; background:rgba(255,255,255,.97); box-shadow:0 28px 80px rgba(0,0,0,.3); }
-  .login-mark { width:48px;height:48px;display:grid;place-items:center;border-radius:15px;color:#fff;font-weight:900;background:linear-gradient(135deg,#4f46e5,#06b6d4);margin-bottom:16px; }
-  .login-card h2 {font:800 21px var(--font-h);color:#0f172a}.login-card p {font-size:12px;line-height:1.6;color:#64748b;margin:8px 0 18px}
-  .login-card input {width:100%;padding:14px 13px;border:1px solid #cbd5e1;border-radius:12px;font:600 14px var(--font-b);outline:none;margin-bottom:10px}
-  .login-card input:focus {border-color:#6366f1;box-shadow:0 0 0 3px rgba(99,102,241,.13)}
-  .login-error {min-height:18px;color:#dc2626;font-size:11px;margin:7px 0}
-  .login-submit {width:100%;border:0;border-radius:12px;padding:13px;background:linear-gradient(135deg,#4f46e5,#0891b2);color:#fff;font:800 13px var(--font-h)}
-  .admin-nav {display:flex;gap:8px;padding:10px 14px;background:rgba(255,255,255,.82);border-bottom:1px solid var(--border);overflow-x:auto}
-  .nav-tab {white-space:nowrap;border:1px solid var(--border);border-radius:10px;padding:9px 13px;background:#fff;color:#475569;font:800 11px var(--font-h)}
-  .nav-tab.active {background:#4f46e5;color:#fff;border-color:#4f46e5}
-  .admin-page {flex:1;overflow:auto;padding:14px;-webkit-overflow-scrolling:touch}
-  .admin-card {background:#fff;border:1px solid var(--border);border-radius:17px;padding:16px;box-shadow:var(--shadow);margin-bottom:13px}
-  .admin-card h3 {font:800 15px var(--font-h);margin-bottom:6px;color:#0f172a}
-  .admin-muted {font-size:11px;color:#64748b;line-height:1.55}
-  .upload-row {display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:14px}
-  .upload-row input[type=file] {width:100%;max-width:100%;padding:10px;border:1px dashed #a5b4fc;border-radius:12px;background:#f8fafc;font-size:11px}
-  .admin-action {border:0;border-radius:10px;padding:10px 13px;font:800 11px var(--font-h);color:#fff;background:#4f46e5}
-  .admin-action.green {background:#059669}.admin-action.red {background:#dc2626}.admin-action.gray {background:#64748b}
-  .data-list {display:flex;flex-direction:column;gap:9px;margin-top:13px}
-  .data-row {border:1px solid var(--border);border-radius:13px;padding:12px;display:flex;gap:10px;justify-content:space-between;align-items:center;background:#fff}
-  .data-row-main {min-width:0;flex:1}.data-row-title {font:800 12px var(--font-h);overflow-wrap:anywhere;color:#0f172a}.data-row-sub {font-size:10px;color:#64748b;margin-top:4px;line-height:1.5}
-  .row-actions {display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}.mini-action {border:0;border-radius:8px;padding:8px 9px;font:800 10px var(--font-h);background:#eef2ff;color:#4338ca}.mini-action.danger {background:#fee2e2;color:#b91c1c}.mini-action.good {background:#d1fae5;color:#047857}
-  .status-pill {display:inline-block;padding:4px 7px;border-radius:999px;font:800 9px var(--font-h);background:#fef3c7;color:#92400e}.status-pill.paid {background:#d1fae5;color:#047857}.status-pill.rejected,.status-pill.cancelled {background:#fee2e2;color:#b91c1c}
-  .admin-empty {padding:22px;text-align:center;color:#94a3b8;font-size:12px;background:#f8fafc;border-radius:12px}
-  .admin-toast {position:fixed;left:50%;bottom:22px;z-index:25000;transform:translateX(-50%);padding:11px 15px;border-radius:12px;background:#0f172a;color:#fff;font:700 11px var(--font-h);box-shadow:0 8px 30px #0003;display:none;max-width:90vw;text-align:center}
-  @media(max-width:420px){.topbar{gap:6px}.brand-name{font-size:13px}.admin-nav{padding:8px}.nav-tab{padding:8px 10px;font-size:10px}.admin-page{padding:10px}.admin-card{padding:13px}.data-row{align-items:flex-start;flex-direction:column}.row-actions{justify-content:flex-start}}
-
+:root{color-scheme:dark;--bg:#070b17;--panel:#10182b;--panel2:#151f36;--line:rgba(163,184,231,.13);--text:#f4f7ff;--muted:#8e9bb8;--purple:#a78bfa;--cyan:#54d9ef;--gold:#ffd887;--green:#43dfab;--red:#ff7895;--blue:#76a9ff;--shadow:0 24px 70px rgba(0,0,0,.35)}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}body{margin:0;min-height:100vh;background:radial-gradient(850px 540px at 10% -10%,rgba(109,78,219,.22),transparent 62%),radial-gradient(800px 500px at 100% 0,rgba(34,176,211,.13),transparent 58%),radial-gradient(600px 400px at 55% 70%,rgba(35,54,103,.12),transparent 70%),var(--bg);color:var(--text);font-family:'Be Vietnam Pro',sans-serif}button{font:inherit;cursor:pointer}.app{width:min(1240px,100%);margin:auto;padding:20px 18px 42px}.topbar{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:5px 2px 22px}.brand{display:flex;align-items:center;gap:13px;min-width:0}.brand-mark{width:48px;height:48px;display:grid;place-items:center;border-radius:16px;background:linear-gradient(145deg,#8c65fa,#3caed8);box-shadow:0 10px 32px rgba(107,89,245,.34),inset 0 1px 0 rgba(255,255,255,.35);font-size:17px;font-weight:900;letter-spacing:-1px}.brand h1{margin:0;font-size:17px;letter-spacing:.3px;font-weight:900}.brand p{margin:4px 0 0;color:var(--muted);font-size:10px;letter-spacing:1.2px;font-weight:700}.top-right{display:flex;align-items:center;gap:9px}.live{display:inline-flex;align-items:center;gap:8px;border:1px solid rgba(67,223,171,.24);background:rgba(18,68,59,.38);color:#a2f6d5;padding:9px 13px;border-radius:999px;font-size:10px;font-weight:900;letter-spacing:.65px;white-space:nowrap}.pulse{width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 0 4px rgba(67,223,171,.12),0 0 15px var(--green);animation:pulse 1.8s infinite}@keyframes pulse{50%{box-shadow:0 0 0 7px rgba(67,223,171,0),0 0 19px var(--green)}}.refresh{border:1px solid rgba(167,139,250,.25);background:linear-gradient(135deg,rgba(67,48,119,.65),rgba(26,49,83,.8));color:#eee8ff;border-radius:13px;padding:10px 14px;font-size:11px;font-weight:900;transition:.2s}.refresh:hover{transform:translateY(-1px);border-color:rgba(167,139,250,.6)}.intro{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin:2px 0 18px}.eyebrow{display:inline-flex;align-items:center;gap:8px;color:var(--gold);font-size:9px;font-weight:900;letter-spacing:1.7px;text-transform:uppercase;margin-bottom:8px}.eyebrow:before{content:'';display:block;width:20px;height:1px;background:linear-gradient(90deg,var(--gold),transparent)}.intro h2{margin:0;font-size:clamp(24px,4vw,34px);font-weight:900;letter-spacing:-1.1px}.intro p{margin:8px 0 0;color:var(--muted);font-size:11px;line-height:1.6}.game-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(175px,1fr));gap:11px;margin-bottom:17px}.game{position:relative;overflow:hidden;text-align:left;min-height:90px;padding:14px 15px;border:1px solid var(--line);border-radius:18px;background:linear-gradient(145deg,rgba(22,33,58,.94),rgba(11,18,34,.97));color:var(--text);box-shadow:0 9px 27px rgba(0,0,0,.14);transition:transform .2s,border-color .2s,box-shadow .2s}.game:before{content:'';position:absolute;width:90px;height:90px;right:-30px;top:-40px;border-radius:50%;background:rgba(122,101,241,.10);filter:blur(3px)}.game:hover{transform:translateY(-2px);border-color:rgba(167,139,250,.4)}.game:focus-visible,.refresh:focus-visible{outline:2px solid var(--gold);outline-offset:3px}.game.active{border-color:rgba(167,139,250,.82);background:linear-gradient(140deg,rgba(61,48,110,.74),rgba(16,34,58,.98));box-shadow:0 0 0 1px rgba(167,139,250,.12),0 15px 38px rgba(88,69,180,.18)}.game-head{display:flex;align-items:center;justify-content:space-between;gap:8px}.game-name{font-size:11px;font-weight:900;line-height:1.4}.game-tag{font-size:8px;color:var(--cyan);font-weight:900;letter-spacing:.8px}.game-pred{display:block;margin-top:11px;font-size:10px;color:#dce7ff;font-weight:800}.game-pred b{color:var(--gold)}.main-card{position:relative;isolation:isolate;overflow:hidden;border:1px solid rgba(255,216,135,.28);border-radius:25px;background:linear-gradient(125deg,rgba(27,30,63,.98),rgba(15,30,54,.97) 55%,rgba(11,33,48,.98));box-shadow:0 24px 70px rgba(0,0,0,.36),0 0 0 1px rgba(255,216,135,.035),0 18px 55px rgba(115,93,238,.12);padding:20px 21px 18px;margin:16px 0}.main-card:before{content:'';position:absolute;z-index:-1;width:390px;height:260px;right:-120px;top:-145px;background:radial-gradient(closest-side,rgba(115,93,238,.34),transparent);filter:blur(7px)}.main-card:after{content:'';position:absolute;z-index:-1;width:280px;height:220px;left:-120px;bottom:-150px;background:radial-gradient(closest-side,rgba(44,193,215,.16),transparent);filter:blur(9px)}.card-top{display:flex;align-items:center;justify-content:space-between;gap:10px;padding-bottom:14px;border-bottom:1px solid rgba(193,197,255,.10)}.card-kicker{font-size:9px;color:#b9a9ff;font-weight:900;letter-spacing:1.6px}.session-pill{font-family:'JetBrains Mono',monospace;font-size:9px;color:#c7d5f0;border:1px solid rgba(177,194,233,.15);background:rgba(4,10,24,.35);padding:7px 10px;border-radius:999px}.prediction-content{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(230px,.8fr);gap:22px;align-items:center;padding:20px 0 16px}.prediction-label{font-size:10px;color:var(--muted);font-weight:800;letter-spacing:1px}.side-result{font-size:clamp(38px,7vw,58px);font-weight:900;letter-spacing:-2px;line-height:1.08;margin:7px 0 9px;text-shadow:0 5px 25px rgba(0,0,0,.22)}.side-result.tai{color:#ffc77e}.side-result.xiu{color:#8fc4ff}.side-result.wait{color:#d8e1f5;font-size:28px;letter-spacing:-.5px}.prediction-reason{max-width:670px;color:#aab7d2;font-size:10px;line-height:1.7}.prediction-metrics{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}.metric-chip{padding:8px 10px;border-radius:11px;border:1px solid rgba(185,199,236,.12);background:rgba(5,12,27,.38);font-size:9px;color:#c3d0e9}.metric-chip strong{color:#fff;margin-left:4px}.confidence-panel{border:1px solid rgba(167,139,250,.22);border-radius:19px;background:linear-gradient(145deg,rgba(23,31,61,.82),rgba(12,25,45,.8));padding:16px}.confidence-head{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:9px;color:#aebbd5;font-weight:800}.confidence-value{font-family:'JetBrains Mono',monospace;font-size:28px;font-weight:800;color:var(--gold);margin:11px 0 8px}.meter{height:7px;border-radius:999px;background:rgba(255,255,255,.07);overflow:hidden}.meter-fill{height:100%;width:50%;border-radius:999px;background:linear-gradient(90deg,#7b68ed,#50d4df);box-shadow:0 0 16px rgba(114,120,244,.4);transition:width .35s}.confidence-note{margin-top:10px;color:#7f8eaa;font-size:9px;line-height:1.55}.dice-panel{border-top:1px solid rgba(193,197,255,.10);padding-top:15px}.dice-title{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:11px}.dice-title strong{font-size:10px;letter-spacing:.7px}.dice-title span{font-size:9px;color:var(--muted)}.dice-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.die{width:53px;height:53px;border-radius:15px;display:grid;place-items:center;background:linear-gradient(145deg,#fff8ec,#cad6ee);color:#15223d;font-size:35px;line-height:1;box-shadow:0 8px 22px rgba(0,0,0,.28),inset 0 1px 0 white}.sum-badge{padding:10px 13px;border:1px solid rgba(255,215,135,.22);background:rgba(97,66,27,.25);border-radius:13px;color:var(--gold);font-size:10px;font-weight:900}.sum-picks-wrap{margin-top:14px;padding:13px;border:1px solid rgba(255,216,135,.18);border-radius:16px;background:linear-gradient(135deg,rgba(57,46,91,.34),rgba(6,15,31,.58))}.sum-picks-head{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px}.sum-picks-head strong{font-size:9px;color:#e8dcff;letter-spacing:.75px}.sum-picks-head span{font-size:8px;font-weight:900;color:var(--gold);padding:5px 8px;border-radius:999px;border:1px solid rgba(255,216,135,.2);background:rgba(93,67,27,.25)}.sum-picks{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px}.sum-pick{min-width:0;text-align:center;padding:12px 8px 10px;border:1px solid rgba(255,216,135,.2);border-radius:13px;background:linear-gradient(145deg,rgba(67,53,92,.48),rgba(13,23,42,.92));box-shadow:inset 0 1px 0 rgba(255,255,255,.04)}.sum-pick b{display:block;color:#ffe2a4;font:900 23px 'JetBrains Mono',monospace;letter-spacing:-1px}.sum-pick span{display:block;color:#9eacc7;font-size:8px;margin-top:4px}.dice-options-head{margin-top:13px;color:#8f9fbd;font-size:8px;font-weight:900;letter-spacing:.8px}.dice-options{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;}.sicbo-audit{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:12px}.sicbo-audit-item{padding:10px 11px;border-radius:12px;border:1px solid rgba(255,216,135,.13);background:linear-gradient(145deg,rgba(72,55,35,.25),rgba(7,14,29,.42));min-width:0}.sicbo-audit-item span{display:block;color:#9aa9c3;font-size:8px;font-weight:800;letter-spacing:.65px;text-transform:uppercase}.sicbo-audit-item strong{display:block;color:#f4d796;font-family:JetBrains Mono,monospace;font-size:14px;margin-top:5px}.dice-option{display:flex;gap:8px;align-items:center;padding:8px 10px;border-radius:11px;background:rgba(5,12,27,.35);border:1px solid rgba(187,199,240,.10);font-family:'JetBrains Mono',monospace;font-size:10px;color:#dce7fb}.dice-option b{color:var(--cyan);font-size:9px}.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:15px 0}.stat{position:relative;overflow:hidden;min-height:84px;padding:13px 14px;border:1px solid var(--line);border-radius:17px;background:linear-gradient(145deg,rgba(17,28,50,.9),rgba(11,19,36,.94));box-shadow:0 10px 28px rgba(0,0,0,.15)}.stat:after{content:'';position:absolute;width:65px;height:65px;right:-23px;bottom:-30px;border-radius:50%;background:rgba(128,110,245,.10);filter:blur(2px)}.stat-label{color:var(--muted);font-size:9px;font-weight:800;letter-spacing:.75px;text-transform:uppercase}.stat-value{font-size:22px;font-weight:900;margin-top:8px}.stat.good .stat-value{color:var(--green)}.stat.bad .stat-value{color:var(--red)}.stat.rate .stat-value{color:var(--gold)}.table-panel{overflow:hidden;border:1px solid var(--line);border-radius:20px;background:rgba(12,21,39,.94);box-shadow:var(--shadow)}.panel-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:16px 17px;border-bottom:1px solid var(--line)}.panel-head h3{margin:0;font-size:11px;font-weight:900;letter-spacing:.5px}.panel-head span{font-size:9px;color:var(--muted)}.table-wrap{overflow:auto}table{width:100%;min-width:650px;border-collapse:collapse;text-align:center}th{padding:13px 9px;background:rgba(24,36,62,.85);color:#98a9cb;font-size:9px;letter-spacing:.7px}td{padding:13px 9px;border-top:1px solid rgba(165,185,224,.08);font-size:10px;font-weight:700;color:#dce6f9}tbody tr:hover{background:rgba(119,109,215,.06)}.mono{font-family:'JetBrains Mono',monospace;font-size:9px}.pill{display:inline-flex;align-items:center;justify-content:center;padding:5px 9px;border-radius:8px;font-size:9px;font-weight:900}.tai-pill{background:rgba(139,80,35,.32);color:#ffd09a}.xiu-pill{background:rgba(48,87,150,.38);color:#b5d1ff}.ok{background:rgba(26,105,79,.35);color:#8af0c6}.bad{background:rgba(132,45,67,.33);color:#ffadbd}.wait{background:rgba(114,88,33,.32);color:#ffdf9c}.empty{padding:34px 18px;text-align:center;color:var(--muted);font-size:11px}.footer{text-align:center;padding:17px 4px 0;color:#657594;font-size:9px}.error{color:#ff9eaa}.hide{display:none!important}.muted{color:var(--muted)}
+@media(max-width:760px){.sum-pick{padding:11px 5px}.sum-pick b{font-size:21px}.sicbo-audit{grid-template-columns:repeat(2,minmax(0,1fr))}.app{padding:14px 12px 30px}.topbar{padding-bottom:18px}.brand-mark{width:42px;height:42px;border-radius:14px}.brand h1{font-size:14px}.brand p{font-size:8px}.live{font-size:8px;padding:8px 10px}.refresh{font-size:10px;padding:9px 10px}.intro{align-items:center}.intro p{max-width:430px;font-size:10px}.game-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.game{min-height:82px;padding:11px 12px;border-radius:15px}.prediction-content{grid-template-columns:1fr;gap:14px;padding:17px 0 14px}.confidence-panel{padding:13px}.side-result{font-size:47px}.stats{grid-template-columns:repeat(2,1fr);gap:8px}.stat{min-height:73px;padding:11px 12px}.stat-value{font-size:19px}.main-card{padding:16px;border-radius:21px}.die{width:47px;height:47px;font-size:31px}.panel-head{padding:14px}.panel-head h3{font-size:10px}}
+@media(max-width:390px){.app{padding-left:9px;padding-right:9px}.live{display:none}.brand h1{font-size:13px}.intro h2{font-size:23px}.game-name{font-size:10px}.side-result{font-size:42px}.session-pill{font-size:8px}.main-card{padding:14px}.die{width:43px;height:43px;font-size:28px}}
 </style>
 </head>
 <body>
-<div class="login-overlay" id="login-overlay">
-  <div class="login-card">
-    <div class="login-mark">TX</div>
-    <h2>ADMIN CONTROL CENTER</h2>
-    <p>Trang quản trị riêng. Người mua chỉ sử dụng bot Telegram, không cần truy cập trang này.</p>
-    <input id="admin-password" type="password" autocomplete="current-password" placeholder="Nhập mật khẩu admin" onkeydown="if(event.key==='Enter')loginAdmin()" />
-    <div class="login-error" id="login-error"></div>
-    <button class="login-submit" onclick="loginAdmin()">ĐĂNG NHẬP QUẢN TRỊ</button>
-  </div>
-</div>
-<div class="admin-toast" id="admin-toast"></div>
-<div class="overlay" id="modal" style="display:none">
-  <div class="modal">
-    <div class="modal-head">
-      <div class="modal-kicker">LIVE CONTROL CENTER</div>
-      <h3>TOOL TX BY FEE</h3>
-      <p>Chọn sảnh để xem dữ liệu và lịch sử phiên</p>
-      <div class="feature-chips"><span>⚡ REALTIME</span><span>🧩 MD5</span><span>🎲 SICBO</span></div>
-    </div>
-    <div class="game-list" id="game-list">
-      <div class="empty">Đang tải danh sách...</div>
-    </div>
-  </div>
-</div>
+<div class="app">
+  <header class="topbar">
+    <div class="brand"><div class="brand-mark">TX</div><div><h1>TOOL TX BY FEE</h1><p>PHÂN TÍCH DỮ LIỆU • CẬP NHẬT TỰ ĐỘNG</p></div></div>
+    <div class="top-right"><div class="live"><i class="pulse"></i> ĐANG THEO DÕI</div><button class="refresh" id="refresh">↻ LÀM MỚI</button></div>
+  </header>
+  <section class="intro"><div><div class="eyebrow">TỔNG QUAN • ĐỐI CHIẾU PHIÊN</div><h2>Trung tâm theo dõi game</h2><p>Chọn game để xem tín hiệu tham khảo, phiên gần nhất và kết quả đã đối chiếu.</p></div></section>
+  <section id="game-grid" class="game-grid"><div class="empty">Đang kết nối nguồn dữ liệu game…</div></section>
 
-<div class="wrap">
-  <div class="topbar">
-    <div class="brand">
-      <div class="logo">TX</div>
-      <div class="brand-text">
-        <span class="brand-name">TOOL TX BY FEE</span>
-        <span class="brand-ver">ADMIN • PRIVATE CONSOLE</span>
-      </div>
+  <section class="main-card">
+    <div class="card-top"><div class="card-kicker">✦ THAM KHẢO CHO PHIÊN TIẾP THEO</div><div class="session-pill" id="session">PHIÊN —</div></div>
+    <div class="prediction-content">
+      <div><div class="prediction-label" id="selected-game">CHỌN MỘT GAME</div><div class="side-result wait" id="main-pred">ĐANG TẢI DỮ LIỆU</div><div class="prediction-reason" id="reason">Chỉ số sẽ hiển thị khi nguồn game gửi dữ liệu hợp lệ.</div><div class="prediction-metrics"><div class="metric-chip">📚 Mẫu dữ liệu <strong id="samples">0</strong></div><div class="metric-chip">🕒 Đồng bộ <strong id="update-time">—</strong></div><div class="metric-chip">🧠 Chất lượng mẫu <strong id="quality-label">Đang chờ</strong></div></div></div>
+      <div class="confidence-panel"><div class="confidence-head"><span>ĐỘ NGHIÊNG CỦA MÔ HÌNH</span><span>LIVE</span></div><div class="confidence-value" id="confidence">—</div><div class="meter"><div class="meter-fill" id="confidence-meter"></div></div><div class="confidence-note">Chỉ số thể hiện hướng nghiêng của mô hình, không phải xác suất thắng đã được xác thực.</div></div>
     </div>
-    <div class="actions">
-      <button class="btn btn-danger" id="reset-game-btn" onclick="resetLearn()">RESET</button>
-      <button class="btn btn-ghost" id="change-game-btn" onclick="backToList()">ĐỔI GAME</button>
-      <button class="btn btn-danger" onclick="logoutAdmin()">THOÁT</button>
-    </div>
-  </div>
-
-  <div class="admin-nav">
-    <button class="nav-tab active" id="tab-games" onclick="switchAdminTab('games')">📊 THEO DÕI GAME</button>
-    <button class="nav-tab" id="tab-files" onclick="switchAdminTab('files')">📦 KHO FILE</button>
-    <button class="nav-tab" id="tab-orders" onclick="switchAdminTab('orders')">🧾 ĐƠN HÀNG</button>
-  </div>
-
-  <div id="game-page" style="display:flex;flex-direction:column;flex:1;min-height:0">
-  <div class="infobar" id="infobar">
-    <div>
-      <div class="game-title" id="info-name">—</div>
-      <div class="game-phien" id="info-phien">Phiên: —</div>
-    </div>
-    <div class="stats">
-      <div class="stat"><div class="num" id="s-win">0</div><div class="lbl">THẮNG</div></div>
-      <div class="stat"><div class="num" id="s-lose">0</div><div class="lbl">THUA</div></div>
-      <div class="stat"><div class="num" id="s-rate">0%</div><div class="lbl">TỈ LỆ</div></div>
-    </div>
-  </div>
-
-  <div class="content">
-    <div class="table-card">
-      <table>
-        <thead>
-          <tr>
-            <th>GAME</th>
-            <th>PHIÊN</th>
-            <th>THỜI GIAN</th>
-            <th>DỰ ĐOÁN</th>
-            <th>KẾT QUẢ</th>
-            <th>XÁC MINH</th>
-          </tr>
-        </thead>
-        <tbody id="tbody">
-          <tr><td colspan="6" style="text-align:center;padding:48px;color:#94a3b8">Chọn game để bắt đầu...</td></tr>
-        </tbody>
-      </table>
-    </div>
-  </div>
-  </div>
-
-  <section class="admin-page" id="files-page" style="display:none">
-    <div class="admin-card">
-      <h3>📦 QUẢN LÝ KHO FILE BÁN TRÊN BOT</h3>
-      <p class="admin-muted">Tải file sản phẩm lên đây. File mới tải lên sẽ được đặt làm file đang bán cho gói FULL SCR AUTOCUOCLC79 — 10.000đ. Khi admin xác nhận đơn, bot sẽ gửi file trực tiếp cho người mua.</p>
-      <div class="upload-row">
-        <input id="store-file-input" type="file" />
-        <button class="admin-action green" onclick="uploadStoreFile()">⬆ TẢI FILE LÊN KHO</button>
-        <button class="admin-action gray" onclick="loadStoreFiles()">LÀM MỚI</button>
-      </div>
-      <p class="admin-muted" style="margin-top:9px">Giới hạn tệp: 45 MB. Hãy bật Railway Volume tại thư mục ứng dụng nếu muốn giữ file qua các lần deploy.</p>
-    </div>
-    <div class="admin-card">
-      <h3>FILE ĐANG LƯU</h3>
-      <div class="data-list" id="store-file-list"><div class="admin-empty">Đang tải danh sách file...</div></div>
-    </div>
+    <div class="dice-panel hide" id="dice-panel"><div class="dice-title"><strong>🎲 PHÂN TÍCH SICBO</strong><span id="sicbo-backtest">Đang tích lũy dữ liệu kiểm định</span></div><div class="dice-row" id="dice-main"></div><div class="sum-picks-wrap"><div class="sum-picks-head"><strong id="sum-picks-title">🎯 3 TỔNG ĐƯỢC XẾP HẠNG</strong><span id="sum-picks-side">—</span></div><div class="sum-picks" id="sum-picks"></div><div class="confidence-note">Tỷ trọng được tính trong nhóm Tài/Xỉu đang chọn; chỉ mang tính tham khảo.</div></div><div class="dice-options-head">BA BỘ XÚC XẮC NỔI BẬT</div><div class="dice-options" id="dice-options"></div><div class="sicbo-audit" id="sicbo-audit"><div class="sicbo-audit-item"><span>Top 3 tổng</span><strong>—</strong></div><div class="sicbo-audit-item"><span>Big / Small</span><strong>—</strong></div><div class="sicbo-audit-item"><span>Độ khớp mặt</span><strong>—</strong></div><div class="sicbo-audit-item"><span>Brier score</span><strong>—</strong></div></div></div>
   </section>
 
-  <section class="admin-page" id="orders-page" style="display:none">
-    <div class="admin-card">
-      <h3>🧾 ĐƠN MUA FULL SCR AUTOCUOCLC79</h3>
-      <p class="admin-muted">Giá 10.000đ • Nội dung chuyển khoản <b>lc79napvip123</b>. Khi người dùng bấm “Tôi đã chuyển”, đơn sẽ xuất hiện ở đây. Chỉ bấm xác nhận sau khi đã kiểm tra tiền vào tài khoản.</p>
-      <div class="upload-row"><button class="admin-action gray" onclick="loadStoreOrders()">LÀM MỚI ĐƠN HÀNG</button></div>
-      <div class="data-list" id="store-order-list"><div class="admin-empty">Đang tải đơn hàng...</div></div>
-    </div>
+  <section class="stats">
+    <div class="stat"><div class="stat-label">GAME ĐANG XEM</div><div class="stat-value" id="active-game">—</div></div>
+    <div class="stat good"><div class="stat-label">SỐ LẦN ĐÚNG</div><div class="stat-value" id="wins">0</div></div>
+    <div class="stat bad"><div class="stat-label">SỐ LẦN SAI</div><div class="stat-value" id="losses">0</div></div>
+    <div class="stat rate"><div class="stat-label">TỶ LỆ ĐÚNG</div><div class="stat-value" id="rate">0%</div></div>
   </section>
-</div>
 
+  <section class="table-panel"><div class="panel-head"><h3>◈ LỊCH SỬ PHIÊN & KẾT QUẢ</h3><span id="updated">Đang đồng bộ</span></div><div class="table-wrap"><table><thead><tr><th>GAME</th><th>MÃ PHIÊN</th><th>THỜI GIAN</th><th>NHẬN ĐỊNH</th><th>KẾT QUẢ</th><th>ĐÁNH GIÁ</th></tr></thead><tbody id="rows"><tr><td colspan="6" class="empty">Chọn game để xem lịch sử.</td></tr></tbody></table></div></section>
+  <div class="footer">Thời gian Việt Nam (UTC+7) • Chỉ tính đối chiếu khi đã nhận được kết quả thực tế.</div>
+</div>
 <script>
-let currentId = null;
-let timer = null;
-let lastHash = '';
-let adminToken = localStorage.getItem('tooltx_admin_token') || '';
-
-function toast(message) {
-  const el = document.getElementById('admin-toast');
-  el.textContent = message; el.style.display = 'block';
-  clearTimeout(toast._timer); toast._timer = setTimeout(() => el.style.display = 'none', 2600);
+let games=[],activeId='',busy=false;
+const $=id=>document.getElementById(id);
+const diceGlyphs=['','⚀','⚁','⚂','⚃','⚄','⚅'];
+function safe(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function groupLabel(g){return g==='sicbo'?'SICBO':g==='md5'?'MD5':'TX';}
+function renderGames(){const host=$('game-grid');if(!games.length){host.innerHTML='<div class="empty">Chưa có game khả dụng.</div>';return;}host.innerHTML=games.map(g=>`<button class="game ${g.id===activeId?'active':''}" data-game="${safe(g.id)}"><div class="game-head"><span class="game-name">${safe(g.name)}</span><span class="game-tag">${groupLabel(g.group)}</span></div><span class="game-pred">Tín hiệu: <b>${safe(g.pred||'Đang chờ dữ liệu…')}</b></span></button>`).join('');}
+function renderDice(dp,stats){
+  const box=$('dice-panel');
+  if(!dp){box.classList.add('hide');return;}
+  box.classList.remove('hide');
+  $('dice-main').innerHTML=(dp.dice||[]).map(n=>`<div class="die" title="Mặt ${Number(n)}">${diceGlyphs[Number(n)]||safe(n)}</div>`).join('')+`<div class="sum-badge">TỔNG ${Number(dp.sum||0)}</div>`;
+  const exact=stats&&stats.exactRate!=null?`Backtest: ${Number(stats.tests||0)} phiên • Trúng bộ: ${Number(stats.exactRate).toFixed(1)}%`:`Đang tích lũy dữ liệu kiểm định`;
+  $('sicbo-backtest').textContent=exact;
+  const side=dp.selectedSide==='T'?'TÀI':dp.selectedSide==='X'?'XỈU':'—';
+  $('sum-picks-side').textContent=side;
+  $('sum-picks-title').textContent=`🎯 3 TỔNG ĐƯỢC XẾP HẠNG THEO ${side}`;
+  const sums=Array.isArray(dp.selectedTopSums)?dp.selectedTopSums:(dp.topSums||[]).map(sum=>({sum}));
+  $('sum-picks').innerHTML=sums.slice(0,3).map((item,i)=>`<div class="sum-pick"><b>${Number(item.sum)}</b><span>#${i+1}${Number.isFinite(Number(item.percent))?` · ${Number(item.percent).toFixed(1)}%`:''}</span></div>`).join('')||'<div class="sum-pick"><b>—</b><span>Chưa đủ dữ liệu</span></div>';
+  $('dice-options').innerHTML=(dp.top||[]).slice(0,3).map((x,i)=>`<div class="dice-option">#${i+1} ${x.dice.map(n=>diceGlyphs[Number(n)]||n).join(' ')} <b>${Number(x.percent||0).toFixed(3)}%</b></div>`).join('');
+  const audit=[['Top 3 tổng',stats&&stats.sumTop3Rate!=null?Number(stats.sumTop3Rate).toFixed(1)+'%':'—'],['Big / Small',stats&&stats.sideRate!=null?Number(stats.sideRate).toFixed(1)+'%':'—'],['Độ khớp mặt',stats&&stats.faceRate!=null?Number(stats.faceRate).toFixed(1)+'%':'—'],['Brier score',stats&&stats.brierScore!=null?Number(stats.brierScore).toFixed(3):'—']];
+  $('sicbo-audit').innerHTML=audit.map(([label,value])=>`<div class="sicbo-audit-item"><span>${label}</span><strong>${value}</strong></div>`).join('');
 }
-function htmlEscape(value) {
-  return String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-}
-async function adminFetch(url, options = {}) {
-  const headers = new Headers(options.headers || {});
-  if (adminToken) headers.set('Authorization', 'Bearer ' + adminToken);
-  const res = await fetch(url, { ...options, headers });
-  if (res.status === 401) {
-    adminToken = ''; localStorage.removeItem('tooltx_admin_token');
-    document.getElementById('login-overlay').style.display = 'flex';
-  }
-  return res;
-}
-async function loginAdmin() {
-  const pass = document.getElementById('admin-password').value;
-  const error = document.getElementById('login-error'); error.textContent = '';
-  try {
-    const res = await fetch('/api/admin/login', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({password:pass}) });
-    const data = await res.json();
-    if (!res.ok || !data.ok) { error.textContent = data.error || 'Đăng nhập thất bại.'; return; }
-    adminToken = data.token; localStorage.setItem('tooltx_admin_token', adminToken);
-    document.getElementById('admin-password').value = '';
-    document.getElementById('login-overlay').style.display = 'none';
-    await initializeAdmin();
-  } catch (e) { error.textContent = 'Không kết nối được máy chủ.'; }
-}
-function logoutAdmin() {
-  adminToken = ''; localStorage.removeItem('tooltx_admin_token');
-  document.getElementById('login-overlay').style.display = 'flex';
-  document.getElementById('admin-password').focus();
-}
-async function initializeAdmin() {
-  const res = await adminFetch('/api/admin/session');
-  if (!res.ok) return;
-  document.getElementById('login-overlay').style.display = 'none';
-  loadGames(); loadStoreFiles(); loadStoreOrders();
-}
-function switchAdminTab(tab) {
-  for (const name of ['games','files','orders']) {
-    document.getElementById(name + '-page').style.display = name === tab ? (name === 'games' ? 'flex' : 'block') : 'none';
-    const nav = document.getElementById('tab-' + name); if (nav) nav.classList.toggle('active', name === tab);
-  }
-  document.getElementById('modal').style.display = tab === 'games' && !currentId ? 'flex' : 'none';
-  document.getElementById('reset-game-btn').style.display = tab === 'games' ? '' : 'none';
-  document.getElementById('change-game-btn').style.display = tab === 'games' ? '' : 'none';
-  if (tab === 'games') loadGames();
-  if (tab === 'files') loadStoreFiles();
-  if (tab === 'orders') loadStoreOrders();
-}
-function fmtDate(ms) { return ms ? new Date(ms).toLocaleString('vi-VN') : '—'; }
-function fmtSize(bytes) { return (Number(bytes || 0) / (1024*1024)).toFixed(2) + ' MB'; }
-async function loadStoreFiles() {
-  const host = document.getElementById('store-file-list'); if (!host || !adminToken) return;
-  try {
-    const res = await adminFetch('/api/admin/files'); const data = await res.json();
-    if (!res.ok || !data.ok) throw new Error(data.error || 'Không tải được kho file');
-    if (!data.files.length) { host.innerHTML = '<div class="admin-empty">Kho đang trống. Hãy tải file sản phẩm lên.</div>'; return; }
-    host.innerHTML = data.files.map(f => `<div class="data-row"><div class="data-row-main"><div class="data-row-title">${htmlEscape(f.originalName)} ${f.active ? '<span class="status-pill paid">ĐANG BÁN</span>' : ''}</div><div class="data-row-sub">${fmtSize(f.size)} • ${fmtDate(f.uploadedAt)} • ${f.exists ? 'Có trên máy chủ' : 'Thiếu dữ liệu file'}</div></div><div class="row-actions">${f.active ? '' : `<button class="mini-action good" onclick="activateStoreFile('${f.id}')">Đặt bán</button>`}<button class="mini-action danger" onclick="deleteStoreFile('${f.id}')">Xoá</button></div></div>`).join('');
-  } catch (e) { host.innerHTML = `<div class="admin-empty">${htmlEscape(e.message)}</div>`; }
-}
-async function uploadStoreFile() {
-  const input = document.getElementById('store-file-input');
-  if (!input.files || !input.files[0]) return toast('Chọn file trước khi tải lên.');
-  if (input.files[0].size > 45 * 1024 * 1024) return toast('File vượt quá 45 MB.');
-  const form = new FormData(); form.append('file', input.files[0]);
-  const btn = document.querySelector('#files-page .admin-action.green'); btn.disabled = true; btn.textContent = 'ĐANG TẢI...';
-  try {
-    const res = await adminFetch('/api/admin/files', { method:'POST', body:form }); const data = await res.json();
-    if (!res.ok || !data.ok) throw new Error(data.error || 'Tải file thất bại.');
-    input.value = ''; toast('Đã thêm file và đặt làm sản phẩm đang bán.'); await loadStoreFiles();
-  } catch (e) { toast(e.message); }
-  finally { btn.disabled = false; btn.textContent = '⬆ TẢI FILE LÊN KHO'; }
-}
-async function activateStoreFile(id) {
-  try { const res = await adminFetch('/api/admin/files/' + encodeURIComponent(id) + '/activate', {method:'POST'}); const data=await res.json(); if(!res.ok||!data.ok) throw new Error(data.error||'Không thể chọn file'); toast('Đã đổi file đang bán.'); await loadStoreFiles(); }
-  catch(e){toast(e.message)}
-}
-async function deleteStoreFile(id) {
-  if (!confirm('Xoá file này khỏi kho?')) return;
-  try { const res=await adminFetch('/api/admin/files/'+encodeURIComponent(id),{method:'DELETE'}); const data=await res.json(); if(!res.ok||!data.ok) throw new Error(data.error||'Không thể xoá'); toast('Đã xoá file.'); await loadStoreFiles(); }
-  catch(e){toast(e.message)}
-}
-async function loadStoreOrders() {
-  const host=document.getElementById('store-order-list'); if(!host||!adminToken)return;
-  try {
-    const res=await adminFetch('/api/admin/orders'); const data=await res.json(); if(!res.ok||!data.ok)throw new Error(data.error||'Không tải được đơn hàng');
-    if(!data.orders.length){host.innerHTML='<div class="admin-empty">Chưa có đơn mua kho file.</div>';return;}
-    host.innerHTML=data.orders.map(o=>{
-      const status = ({pending:'Chờ thanh toán',checking:'Chờ admin duyệt',delivering:'Đang gửi file',paid:'Đã gửi file',rejected:'Từ chối',cancelled:'Đã huỷ'}[o.status]||o.status);
-      const cls=o.status==='paid'?'paid':(['rejected','cancelled'].includes(o.status)?'rejected':'');
-      const actions=['pending','checking'].includes(o.status)?`<button class="mini-action good" onclick="approveStoreOrder('${o.id}')">Xác nhận + gửi file</button><button class="mini-action danger" onclick="rejectStoreOrder('${o.id}')">Từ chối</button>`:'';
-      return `<div class="data-row"><div class="data-row-main"><div class="data-row-title">${htmlEscape(o.id)} <span class="status-pill ${cls}">${htmlEscape(status)}</span></div><div class="data-row-sub">User: ${htmlEscape(o.uid)} • ${Number(o.amount||0).toLocaleString('vi-VN')}đ<br>Nội dung: ${htmlEscape(o.addInfo)} • ${fmtDate(o.created)}${o.deliveryError?'<br>Lỗi gửi: '+htmlEscape(o.deliveryError):''}</div></div><div class="row-actions">${actions}</div></div>`;
-    }).join('');
-  } catch(e){host.innerHTML=`<div class="admin-empty">${htmlEscape(e.message)}</div>`;}
-}
-async function approveStoreOrder(id) {
-  if(!confirm('Đã kiểm tra tiền vào tài khoản và muốn gửi file cho khách?'))return;
-  try{const res=await adminFetch('/api/admin/orders/'+encodeURIComponent(id)+'/approve',{method:'POST'});const data=await res.json();if(!res.ok||!data.ok)throw new Error(data.message||'Không gửi được file');toast(data.message||'Đã duyệt đơn.');await loadStoreOrders();}
-  catch(e){toast(e.message);await loadStoreOrders();}
-}
-async function rejectStoreOrder(id) {
-  if(!confirm('Từ chối đơn này?'))return;
-  try{const res=await adminFetch('/api/admin/orders/'+encodeURIComponent(id)+'/reject',{method:'POST'});const data=await res.json();if(!res.ok||!data.ok)throw new Error(data.message||'Không thể từ chối');toast(data.message||'Đã từ chối đơn.');await loadStoreOrders();}
-  catch(e){toast(e.message);}
-}
-
-
-async function loadGames() {
-  try {
-    const res = await adminFetch('/api/games');
-    const json = await res.json();
-    const list = json.games || [];
-    const groups = { tx: [], md5: [], sicbo: [] };
-    for (const g of list) {
-      if (g.group === 'sicbo') groups.sicbo.push(g);
-      else if (g.group === 'md5') groups.md5.push(g);
-      else groups.tx.push(g);
-    }
-
-    let html = '';
-    const render = (title, arr) => {
-      if (!arr.length) return;
-      html += `<div class="section">${title}</div>`;
-      for (const g of arr) {
-        const cls = (g.pred || '').includes('TÀI') || (g.pred || '').includes('Tài') ? 'tag-tai' : 'tag-xiu';
-        html += `
-          <div class="game-item" onclick="selectGame('${g.id}','${g.name.replace(/'/g,"\\'")}')">
-            <div class="left">
-              <span class="name">${g.name}</span>
-              <span class="pred">Dự đoán: <span class="${cls}">${g.pred || '—'}</span>
-                <span style="color:#94a3b8;font-size:11px">(${g.conf || 0}%)</span>
-              </span>
-            </div>
-            <div class="acc">${g.acc || 0}%</div>
-          </div>`;
-      }
-    };
-
-    render('TÀI XỈU', groups.tx);
-    render('MD5', groups.md5);
-    render('SICBO', groups.sicbo);
-
-    if (!html) html = '<div class="empty">Không có game</div>';
-    document.getElementById('game-list').innerHTML = html;
-  } catch (e) {
-    document.getElementById('game-list').innerHTML = '<div class="empty">Lỗi tải danh sách</div>';
-  }
-}
-
-function selectGame(id, name) {
-  currentId = id;
-  document.getElementById('modal').style.display = 'none';
-  document.getElementById('infobar').classList.add('show');
-  document.getElementById('info-name').innerText = name;
-  document.getElementById('tbody').innerHTML = '<tr><td colspan="6" style="text-align:center;padding:40px;color:#94a3b8">Đang tải dữ liệu...</td></tr>';
-  lastHash = '';
-  if (timer) clearInterval(timer);
-  fetchData();
-  timer = setInterval(fetchData, 3000);
-}
-
-function backToList() {
-  switchAdminTab('games');
-  if (timer) { clearInterval(timer); timer = null; }
-  document.getElementById('modal').style.display = 'flex';
-  document.getElementById('infobar').classList.remove('show');
-  document.getElementById('tbody').innerHTML = '<tr><td colspan="6" style="text-align:center;padding:48px;color:#94a3b8">Chọn game để bắt đầu...</td></tr>';
-  loadGames();
-}
-
-function cleanText(t) {
-  if (!t) return t;
-  // Bỏ số vị (3-4-5) và icon cảnh báo
-  return String(t)
-    .replace(/\s*\(\d+-\d+-\d+\)/g, '')
-    .replace(/[⚠️🎯⏳]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-async function fetchData() {
-  if (!currentId) return;
-  try {
-    const res = await adminFetch('/api/data', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ apiId: currentId })
-    });
-    const json = await res.json();
-    if (!json.rows || !json.rows.length) return;
-
-    const hash = json.rows.map(r => r.phien + r.result + r.verify).join('|');
-    if (hash === lastHash) return;
-    lastHash = hash;
-
-    let html = '';
-    let win = 0, lose = 0;
-
-    for (const r of json.rows) {
-      const pred = cleanText(r.prediction);
-      const result = cleanText(r.result);
-      const verify = cleanText(r.verify);
-
-      if (r.isNext) {
-        document.getElementById('info-phien').innerText = 'Phiên: #' + r.phien;
-        const cls = pred.includes('Tài') || pred.includes('TÀI') ? 'tai' : 'xiu';
-        html += `<tr class="row-next">
-          <td><span style="color:var(--primary);font-weight:800">${r.game}</span></td>
-          <td style="font-family:var(--font-m)">#${r.phien}</td>
-          <td style="font-size:11px;color:#94a3b8">${r.time}</td>
-          <td><span class="pill ${cls}">${pred}</span></td>
-          <td class="waiting">Chờ...</td>
-          <td class="waiting">...</td>
-        </tr>`;
-      } else {
-        if (r.isCorrect === true) win++;
-        else if (r.isCorrect === false) lose++;
-        const pCls = pred.includes('Tài') || pred.includes('TÀI') ? 'tai' : 'xiu';
-        const rCls = result.includes('Tài') || result.includes('TÀI') ? 'tai' : 'xiu';
-        const vCls = r.isCorrect ? 'ok' : 'err';
-        const vText = r.isCorrect ? 'ĐÚNG' : 'SAI';
-        html += `<tr>
-          <td><span style="color:var(--primary);font-weight:800">${r.game}</span></td>
-          <td style="font-family:var(--font-m)">#${r.phien}</td>
-          <td style="font-size:11px;color:#94a3b8">${r.time}</td>
-          <td><span class="pill ${pCls}">${pred}</span></td>
-          <td><span class="pill ${rCls}">${result}</span></td>
-          <td><span class="badge ${vCls}">${vText}</span></td>
-        </tr>`;
-      }
-    }
-
-    document.getElementById('tbody').innerHTML = html;
-    const total = win + lose;
-    document.getElementById('s-win').innerText = win;
-    document.getElementById('s-lose').innerText = lose;
-    document.getElementById('s-rate').innerText = total ? Math.round((win / total) * 100) + '%' : '0%';
-  } catch (e) { console.error(e); }
-}
-
-async function resetLearn() {
-  if (!currentId) return alert('Vui lòng chọn game trước!');
-  if (!confirm('Reset dữ liệu học máy của game này?')) return;
-  await adminFetch('/reset-learn', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ apiId: currentId })
-  });
-  lastHash = '';
-  fetchData();
-}
-
-// Restore admin session when a valid token is already saved on this device.
-if (adminToken) initializeAdmin();
-setInterval(() => {
-  if (adminToken && document.getElementById('game-page').style.display !== 'none' && document.getElementById('modal').style.display !== 'none') loadGames();
-  if (adminToken && document.getElementById('files-page').style.display !== 'none') loadStoreFiles();
-  if (adminToken && document.getElementById('orders-page').style.display !== 'none') loadStoreOrders();
-}, 15000);
+function renderCurrent(g,current){const isSicbo=g&&g.group==='sicbo';const prediction=String(current.prediction||g?.pred||'ĐANG TẢI DỮ LIỆU');$('selected-game').textContent=g?g.name:'ĐANG CHỌN GAME';$('session').textContent='PHIÊN '+String(current.session||'—');$('main-pred').textContent=prediction;$('main-pred').className='side-result '+(prediction.includes('TÀI')?'tai':prediction.includes('XỈU')?'xiu':'wait');$('reason').textContent=current.reason||g?.reason||'Đang chờ phiên mới từ nguồn game.';$('quality-label').textContent=current.qualityLabel||g?.qualityLabel||'Đang tích lũy mẫu';$('confidence').textContent=Number(current.confidence??g?.conf??50).toFixed(0)+'%';$('confidence-meter').style.width=Math.max(0,Math.min(100,Number(current.confidence??g?.conf??50)))+'%';$('samples').textContent=Number(current.sampleSize||g?.total||0).toLocaleString('vi-VN');$('update-time').textContent=current.updatedAt||g?.updatedAt||'—';renderDice(isSicbo?(current.dicePrediction||g?.dicePrediction):null,current.sicboStats);}
+function renderRows(rows,g){$('rows').innerHTML=rows.length?rows.map(x=>{const pred=String(x.prediction||'—').toUpperCase(),result=String(x.result||'—').toUpperCase();const predClass=pred.includes('TÀI')?'tai-pill':pred.includes('XỈU')?'xiu-pill':'';const status=x.isNext?'<span class="pill wait">ĐANG CHỜ</span>':x.verify==='ĐÚNG'?'<span class="pill ok">ĐÚNG</span>':x.verify==='SAI'?'<span class="pill bad">SAI</span>':'—';return `<tr><td>${safe(x.game||(g&&g.name)||'—')}</td><td class="mono">${safe(x.phien||'—')}</td><td>${safe(x.time||'—')}</td><td><span class="pill ${predClass}">${safe(pred)}</span></td><td>${safe(result)}</td><td>${status}</td></tr>`;}).join(''):'<tr><td colspan="6" class="empty">Chưa có lịch sử dự đoán cho game này.</td></tr>';}
+async function loadGames(){try{const r=await fetch('/api/games',{cache:'no-store'});if(!r.ok)throw new Error('HTTP '+r.status);const j=await r.json();games=Array.isArray(j.games)?j.games:[];if(!activeId&&games.length)activeId=games[0].id;renderGames();if(activeId)await loadData();}catch(e){$('game-grid').innerHTML=`<div class="empty error">Không tải được game: ${safe(e.message)}</div>`;}}
+async function selectGame(id){activeId=id;renderGames();await loadData();}
+async function loadData(){if(!activeId||busy)return;busy=true;try{const r=await fetch('/api/data',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({apiId:activeId}),cache:'no-store'});if(!r.ok)throw new Error('HTTP '+r.status);const j=await r.json();const rows=Array.isArray(j.rows)?j.rows:[];const g=games.find(x=>x.id===activeId);const current=j.current||{};renderCurrent(g,current);const done=rows.filter(x=>!x.isNext&&(x.isCorrect===true||x.isCorrect===false));const wins=done.filter(x=>x.isCorrect).length,losses=done.length-wins;$('active-game').textContent=g?g.name:'—';$('wins').textContent=wins;$('losses').textContent=losses;$('rate').textContent=(done.length?wins/done.length*100:0).toFixed(1)+'%';renderRows(rows,g);$('updated').textContent='Cập nhật lúc '+new Date().toLocaleTimeString('vi-VN');}catch(e){$('rows').innerHTML=`<tr><td colspan="6" class="empty error">Không tải được dữ liệu: ${safe(e.message)}</td></tr>`;}finally{busy=false;}}
+$('game-grid').addEventListener('click',e=>{const b=e.target.closest('[data-game]');if(b)selectGame(b.dataset.game);});$('refresh').addEventListener('click',loadGames);loadGames();setInterval(loadGames,9000);
 </script>
 </body>
 </html>
