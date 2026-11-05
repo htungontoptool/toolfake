@@ -2,7 +2,7 @@
 <html lang="vi">
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#080d1c"><title>TOOL TX BY FEE | Bảng theo dõi game</title>
+<meta name="theme-color" content="#080d1c"><title>HTUNGBOT | Bảng theo dõi game</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@500;600;700&display=swap" rel="stylesheet">
 <style>
@@ -19,6 +19,19 @@
 .sum-inline.hide{display:none}
 @media(max-width:540px){.sum-inline{padding:10px 11px}.sum-inline strong{font-size:15px}.round-grid{grid-template-columns:1fr 1fr}.round-dice{grid-column:1/-1}}
 
+
+/* HTUNGBOT premium dashboard refresh */
+:root{--line:rgba(105,211,255,.24);--purple:#8b7cff;--cyan:#55d9e8;--gold:#ffd98a;--green:#4ce0b0;--blue:#78baff}
+.brand-mark{background:linear-gradient(145deg,#39c6d7,#625de8 58%,#a66bff);box-shadow:0 12px 34px rgba(73,153,230,.30),inset 0 1px 0 rgba(255,255,255,.42)}
+.game{border-color:rgba(102,197,235,.22);background:linear-gradient(145deg,rgba(22,39,67,.97),rgba(11,19,39,.99));}
+.game.active{border-color:rgba(87,221,224,.9);background:linear-gradient(140deg,rgba(25,91,111,.62),rgba(28,34,77,.98));box-shadow:0 0 0 1px rgba(87,221,224,.18),0 16px 38px rgba(35,174,198,.16)}
+.main-card{border-color:rgba(92,218,224,.24);background:linear-gradient(125deg,rgba(20,37,65,.99),rgba(15,29,53,.98) 55%,rgba(15,43,57,.98));}
+.main-card:before{background:radial-gradient(closest-side,rgba(65,176,224,.28),transparent)}
+.refresh,.login-card button{background:linear-gradient(135deg,#137f9c,#4658b7 58%,#7255bb);}
+.round-item,.stat,.table-panel{backdrop-filter:blur(12px)}
+.game:focus-visible,.refresh:focus-visible,.logout:focus-visible{outline:2px solid #55d9e8;outline-offset:3px}
+@media(max-width:600px){.game-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.topbar{align-items:flex-start}.top-right{gap:6px;flex-wrap:wrap;justify-content:flex-end}.brand p{letter-spacing:.55px}}
+
 </style>
 </head>
 <body>
@@ -34,7 +47,7 @@
 </div>
 <div class="app hide" id="dashboard">
   <header class="topbar">
-    <div class="brand"><div class="brand-mark">TX</div><div><h1>TOOL TX BY FEE</h1><p>PHÂN TÍCH DỮ LIỆU • CẬP NHẬT TỰ ĐỘNG</p></div></div>
+    <div class="brand"><div class="brand-mark">HT</div><div><h1>HTUNGBOT</h1><p>GAME INTELLIGENCE • LIVE SESSION TRACKING</p></div></div>
     <div class="top-right"><div class="live"><i class="pulse"></i> ĐANG THEO DÕI</div><button class="refresh" id="refresh">↻ LÀM MỚI</button><button class="logout" id="logout">ĐĂNG XUẤT</button></div>
   </header>
   <section class="intro"><div><div class="eyebrow">TỔNG QUAN • ĐỐI CHIẾU PHIÊN</div><h2>Trung tâm theo dõi game</h2><p>Chọn game để xem tín hiệu tham khảo, phiên gần nhất và kết quả đã đối chiếu.</p></div></section>
@@ -66,8 +79,8 @@ let games=[],activeId='',busy=false;
 const $=id=>document.getElementById(id);
 const diceGlyphs=['','⚀','⚁','⚂','⚃','⚄','⚅'];
 function safe(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
-function groupLabel(g){return g==='sicbo'?'SICBO':g==='md5'?'MD5':'TX';}
-function renderGames(){const host=$('game-grid');if(!games.length){host.innerHTML='<div class="empty">Chưa có game khả dụng.</div>';return;}host.innerHTML=games.map(g=>`<button class="game ${g.id===activeId?'active':''}" data-game="${safe(g.id)}"><div class="game-head"><span class="game-name">${safe(g.name)}</span><span class="game-tag">${groupLabel(g.group)}</span></div><span class="game-pred">Tín hiệu: <b>${safe(g.pred||'Đang chờ dữ liệu…')}</b></span></button>`).join('');}
+function groupLabel(g){return g==='sicbo'?'🎲 SICBO':g==='md5'?'🧩 MD5':'🎯 TX';}
+function renderGames(){const host=$('game-grid');if(!games.length){host.innerHTML='<div class="empty">Chưa có game khả dụng.</div>';return;}host.innerHTML=games.map(g=>`<button class="game ${g.id===activeId?'active':''}" data-game="${safe(g.id)}"><div class="game-head"><span class="game-name">✦ ${safe(g.name)}</span><span class="game-tag">${groupLabel(g.group)}</span></div><span class="game-pred">Tín hiệu: <b>${safe(g.pred||'Đang chờ dữ liệu…')}</b></span></button>`).join('');}
 function renderCurrent(g,current){
   const prediction=String(current.prediction||g?.pred||'ĐANG TẢI DỮ LIỆU');
   const previous=current.previousRound||{};
