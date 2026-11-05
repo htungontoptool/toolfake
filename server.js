@@ -1,5 +1,6 @@
 /**
- * TOOL TX BY FEE • v16.8.6 ALL-GAME ADAPTIVE ENGINE
+ * TOOL TX BY FEE • v16.9.1 PROFESSIONAL DICE CARDS + ACTIVE GAME AUTO
+ * Empirical dice formulas applied to ALL games (strong weight) + Sunwin API
  * Dynamic VietQR memos • Sicbo dice ensemble • Calibrated hash feedback
  */
 'use strict';
@@ -44,7 +45,7 @@ let BANK = {
 const TG = `https://api.telegram.org/bot${BOT_TOKEN}`;
 // Telegram Bot API accepts one ordinary emoji reaction per message for a standard bot.
 // Keep the random pool to supported standard emoji; a failed reaction never blocks the bot.
-const REACTION_POOL = ['👍','👎','❤','🔥','🥰','👏','😁','🤔','🤯','😱','🤬','😢','🎉','🤩','🤮','💩','🙏','👌','🕊','🤡','🥱','🥴','😍','🐳','❤‍🔥','🌚','🌭','💯','🤣','⚡','🍌','🏆','💔','🤨','😐','🍓','🍾','💋','🖕','😈','😴','😭','🤓','👻','👨‍💻','👀','🎃','🙈','😇','😨','🤝','✍','🤗','🫡','🎅','🎄','☃','💅','🤪','🗿','🆒','💘','🙉','🦄','😘','💊','🙊','😎','👾','🤷‍♂','🤷','🤷‍♀','😡','🫶','🫠','🧠','💥','🌈'];
+const REACTION_POOL = ['👍','👎','❤','🔥','🥰','👏','😁','🤔','🤯','😱','🤬','😢','🎉','🤩','🤮','💩','🙏','👌','🕊','🤡','🥱','🥴','😍','🐳','❤‍🔥','🌚','🌭','💯','🤣','⚡','🍌','🏆','💔','🤨','😐','🍓','🍾','💋','🖕','😈','😴','😭','🤓','👻','👨‍💻','👀','🎃','🙈','😇','😨','🤝','✍','🤗','🫡','🎅','🎄','☃','💅','🤪','🗿','🆒','💘','🙉','🦄','😘','💊','🙊','😎','👾','🤷‍♂','🤷','🤷‍♀','😡','🫶','🫠','🧠','💥','🌈','✨','🌟','⭐','💫','☀️','🌙','⚡','❄️','🔥','🍀','🌸','🌺','🌻','🌼','🍁','🍄','🌵','🌴','🌊','🐬','🐼','🐱','🐶','🦊','🐻','🐸','🐙','🦋','🐝','🦉','🦁','🐯','🐨','🐰','🐹','🐧','🦆','🦚','🦜','🦩','🦖','🐢','🦕','🐳','🐟','🦈','🦀','🦞','🦐','🍉','🍇','🍓','🍒','🍍','🥝','🥑','🍕','🍔','🍟','🍩','🍪','🍫','☕','🧋','🎯','🎮','🎲','🎰','🎁','🎈','🎊','🎵','🎧','📌','📣','💎','💰','🔔','🔑','🛡️','🚀','🧩','🪄'];
 function randomReaction() { return REACTION_POOL[crypto.randomInt(0, REACTION_POOL.length)]; }
 function queueReaction(chatId, messageId) {
   if (!BOT_TOKEN || chatId == null || !messageId || (typeof settings !== 'undefined' && settings.reactionsEnabled === false)) return;
@@ -483,7 +484,7 @@ async function checkUserInGroups(uid) {
 /* ═══════════════ GAMES ═══════════════ */
 const DEFAULT_GAMES = [
   // ===== TÀI XỈU =====
-  { id: 'sunwin_tx', brand: 'sunwin', brandLabel: 'SUNWIN', variant: 'Tài Xỉu', url: 'https://well-summary-oclc-invisible.trycloudflare.com/api/tx', group: 'tx', enabled: true },
+  { id: 'sunwin_tx', brand: 'sunwin', brandLabel: 'SUNWIN', variant: 'Tài Xỉu', url: 'https://api-sunwin-1-8ohm.onrender.com/', group: 'tx', enabled: true },
   { id: 'hitclub_tx', brand: 'hitclub', brandLabel: 'HITCLUB', variant: 'Tài Xỉu', url: 'https://apihitclubhihi.onrender.com/api/hitclub/hu', group: 'tx', enabled: true },
   { id: 'b52_tx', brand: 'b52', brandLabel: 'B52', variant: 'Tài Xỉu', url: 'https://apitaixiu-6jjn.onrender.com/api/ditmemayb52', group: 'tx', enabled: true },
   { id: 'max789_tx', brand: 'max789', brandLabel: 'MAX789', variant: 'Tài Xỉu', url: 'https://apitaixiu-6jjn.onrender.com/max789/tx', group: 'tx', enabled: true },
@@ -727,7 +728,7 @@ class Engine {
     this.recentPreds = [];
     this.transition = { TT: 0, TX: 0, XT: 0, XX: 0 };
     // Per-model rolling Brier scores. These are updated only after the next real result arrives.
-    this.modelLosses = { base: [], short: [], mid: [], ewma: [], markov1: [], markov2: [], transition: [], pattern: [], streak: [], reversal: [], sicbo: [] };
+    this.modelLosses = { base: [], short: [], mid: [], ewma: [], markov1: [], markov2: [], transition: [], pattern: [], streak: [], reversal: [], diceFaces: [], sicbo: [], sunwinFormula: [] };
   }
 
   push(side, sum, dice, session) {
@@ -735,14 +736,13 @@ class Engine {
     const validDice = Array.isArray(dice) && dice.length >= 3 && dice.slice(0, 3).every(v => Number.isInteger(Number(v)) && Number(v) >= 1 && Number(v) <= 6);
     const normalizedDice = validDice ? dice.slice(0, 3).map(Number) : null;
 
-    // Score the dice prediction on every valid Sicbo result, including triples.
-    if (isSicbo) {
-      if (validDice) {
-        this.sicbo.push(normalizedDice);
-        this.diceHist.push(normalizedDice);
-      } else {
-        this.sicbo.pending = null;
-      }
+    // Keep observed dice for every game that exposes them. The face model is
+    // per-game and only enters the ensemble after enough real samples exist.
+    if (validDice) {
+      this.diceHist.push(normalizedDice);
+      if (isSicbo) this.sicbo.push(normalizedDice);
+    } else if (isSicbo) {
+      this.sicbo.pending = null;
     }
 
     // Triples are a separate outcome in common Sicbo rules, not Big or Small.
@@ -830,6 +830,180 @@ class Engine {
     return count / (count + priorStrength);
   }
 
+  _diceFaceSignal() {
+    const rows = this.diceHist.slice(-360);
+    if (rows.length < 18) {
+      return { p: 0.5, count: rows.length, reliability: this._supportReliability(rows.length, 90), faces: null };
+    }
+    const counts = Array.from({ length: 3 }, () => new Array(6).fill(0));
+    rows.forEach((row, index) => {
+      const weight = Math.pow(0.996, rows.length - 1 - index);
+      for (let slot = 0; slot < 3; slot++) {
+        const face = Number(row[slot]);
+        if (Number.isInteger(face) && face >= 1 && face <= 6) counts[slot][face - 1] += weight;
+      }
+    });
+    // Dirichlet prior: four observations per face and per die position.
+    const priorPerFace = 4;
+    const faceProbabilities = counts.map(slot => {
+      const total = slot.reduce((a, b) => a + b, 0) + priorPerFace * 6;
+      return slot.map(value => (value + priorPerFace) / total);
+    });
+    let bigMass = 0, totalMass = 0;
+    for (let a = 1; a <= 6; a++) for (let b = 1; b <= 6; b++) for (let c = 1; c <= 6; c++) {
+      const mass = faceProbabilities[0][a - 1] * faceProbabilities[1][b - 1] * faceProbabilities[2][c - 1];
+      totalMass += mass;
+      if (a + b + c >= 11) bigMass += mass;
+    }
+    const raw = totalMass ? bigMass / totalMass : 0.5;
+    // A small sample may reflect noise. Shrink toward the 50/50 baseline.
+    // Slightly stronger influence when dice history is rich (new Sunwin API always returns faces).
+    const shrink = Math.min(0.48, rows.length / (rows.length + 130) * 0.48);
+    const p = 0.5 + (raw - 0.5) * shrink;
+    return {
+      p: Math.max(0.40, Math.min(0.60, p)), count: rows.length,
+      reliability: this._supportReliability(rows.length, 60),
+      faces: faceProbabilities.map(slot => slot.map(x => Number(x.toFixed(4))))
+    };
+  }
+
+  /* ── Sunwin empirical dice formulas (from real session data) ── */
+  _sunwinFormulaSignal() {
+    // Night window 00:00–05:00 VN: formulas disabled (return neutral)
+    const vnHour = Number(new Date().toLocaleString('en-US', { timeZone: 'Asia/Ho_Chi_Minh', hour: 'numeric', hour12: false }));
+    if (vnHour >= 0 && vnHour < 5) {
+      return { p: 0.5, count: 0, reliability: 0, reason: 'Khung giờ 0h–5h không áp dụng công thức' };
+    }
+
+    const sums = this.sums;
+    const diceHist = this.diceHist;
+    const sides = this.history;
+    const n = sums.length;
+    if (n < 1 || diceHist.length < 1) {
+      return { p: 0.5, count: 0, reliability: 0, reason: 'Chưa đủ dữ liệu công thức' };
+    }
+
+    const lastSum = Number(sums[n - 1]);
+    const lastDice = (diceHist[diceHist.length - 1] || []).slice(0, 3).map(Number).sort((a, b) => a - b);
+    const key = lastDice.join('');
+    let pT = 0.5;
+    let strength = 0.55; // base confidence of the formula match
+    let matched = false;
+    let reason = '';
+
+    // Helper: set prediction for Tài (pT high) or Xỉu (pT low) — strong deviation
+    const set = (side, conf, note) => {
+      matched = true;
+      strength = conf;
+      pT = side === 'T' ? 0.5 + conf * 0.48 : 0.5 - conf * 0.48;
+      reason = note || '';
+    };
+
+    // ── Lookup by last sum + dice combination ──
+    if (lastSum === 3) { // 1-1-1
+      set('X', 0.80, 'Xỉu 3 (111) → 80% Xỉu');
+    } else if (lastSum === 4) {
+      set('X', 0.70, 'Xỉu 4 → 70% Xỉu');
+    } else if (lastSum === 5) {
+      set('X', 0.70, 'Xỉu 5 → 70% Xỉu');
+    } else if (lastSum === 6) {
+      if (['123', '114', '132', '213'].includes(key) || key === '123' || key === '114') set('T', 0.72, 'Xỉu 6 special → Tài');
+      else if (['222', '114', '411'].includes(key) || key === '222') set('X', 0.72, 'Xỉu 6 (222/411) → Xỉu');
+      else set('X', 0.58, 'Xỉu 6 default → Xỉu nhẹ');
+    } else if (lastSum === 7) {
+      if (['124', '133', '331'].includes(key)) set('T', 0.89, 'Xỉu 7 (124/133) → 89% Tài');
+      else if (['223', '232', '115', '151', '511', '241'].includes(key)) set('X', 0.78, 'Xỉu 7 special → Xỉu');
+      else set('T', 0.62, 'Xỉu 7 default → Tài');
+    } else if (lastSum === 8) {
+      if (['134', '224', '323'].includes(key)) set('T', 0.78, 'Xỉu 8 special → Tài');
+      else set('X', 0.72, 'Xỉu 8 còn lại → Xỉu');
+    } else if (lastSum === 9) {
+      if (['126', '135', '144', '333'].includes(key)) set('T', 0.78, 'Xỉu 9 special → Tài');
+      else set('X', 0.72, 'Xỉu 9 còn lại → Xỉu');
+    } else if (lastSum === 10) {
+      if (['136', '145', '244', '343'].includes(key)) set('T', 0.78, 'Xỉu 10 special → Tài');
+      else set('X', 0.72, 'Xỉu 10 còn lại → Xỉu');
+    } else if (lastSum === 11) {
+      if (['236', '344', '434'].includes(key)) set('T', 0.75, 'Tài 11 special → Tài');
+      else set('X', 0.72, 'Tài 11 còn lại → Xỉu');
+    } else if (lastSum === 12) {
+      if (['156', '255', '336', '345'].includes(key)) set('T', 0.75, 'Tài 12 special → Tài');
+      else if (['246', '444'].includes(key)) set('X', 0.85, 'Tài 12 (246/444) → Xỉu mạnh');
+      else set('T', 0.68, 'Tài 12 còn lại → Tài');
+    } else if (lastSum === 13) {
+      if (['346', '355', '445'].includes(key)) set('T', 0.75, 'Tài 13 special → Tài');
+      else if (['166', '256'].includes(key)) set('X', 0.78, 'Tài 13 (166/256) → Xỉu');
+      else set('T', 0.60, 'Tài 13 default → Tài nhẹ');
+    } else if (lastSum === 14) {
+      if (['356', '455'].includes(key)) set('T', 0.75, 'Tài 14 special → Tài');
+      else if (['266', '446', '554'].includes(key)) set('X', 0.78, 'Tài 14 special → Xỉu');
+      else set('T', 0.58, 'Tài 14 default');
+    } else if (lastSum === 15) {
+      if (['456', '555'].includes(key)) set('T', 0.75, 'Tài 15 special → Tài');
+      else if (['366', '465'].includes(key)) set('X', 0.78, 'Tài 15 special → Xỉu');
+      else set('T', 0.58, 'Tài 15 default');
+    } else if (lastSum === 16) {
+      if (['556', '466'].includes(key)) set('X', 0.75, 'Tài 16 special → Xỉu');
+      else if (['466', '646', '664'].includes(key)) set('T', 0.72, 'Tài 16 (664) → Tài');
+      else set('X', 0.60, 'Tài 16 default');
+    } else if (lastSum === 17) {
+      set('T', 0.70, 'Tài 17 (566) → Tài');
+    } else if (lastSum === 18) {
+      // Triple 6 – bỏ qua / neutral
+      return { p: 0.5, count: 1, reliability: 0.3, reason: 'Tài 18 (666) → bỏ' };
+    }
+
+    // ── Pattern overlays (override or reinforce when strong) ──
+    if (n >= 3) {
+      const s1 = sides[n - 1], s2 = sides[n - 2], s3 = sides[n - 3];
+      const sum1 = sums[n - 1], sum2 = sums[n - 2], sum3 = sums[n - 3];
+
+      // 3 phiên so le (T-X-T hoặc X-T-X) có 9/10/7 → bẻ
+      if (((s1 === 'T' && s2 === 'X' && s3 === 'T') || (s1 === 'X' && s2 === 'T' && s3 === 'X')) &&
+          ([7, 9, 10].includes(sum1) || [7, 9, 10].includes(sum2) || [7, 9, 10].includes(sum3))) {
+        const rev = s1 === 'T' ? 'X' : 'T';
+        set(rev, Math.max(strength, 0.78), 'Cầu 3 so le + 7/9/10 → AUTO BẺ');
+      }
+
+      // Cầu lặp 10-11 hoặc 8-9
+      if (n >= 4) {
+        const recentSums = sums.slice(-4);
+        if ((recentSums[0] === 10 && recentSums[1] === 11 && recentSums[2] === 10 && recentSums[3] === 11) ||
+            (recentSums[0] === 11 && recentSums[1] === 10 && recentSums[2] === 11 && recentSums[3] === 10)) {
+          const rev = s1 === 'T' ? 'X' : 'T';
+          set(rev, 0.80, 'Cầu 10-11 lặp → AUTO BẺ 80%');
+        }
+        if ((recentSums[2] === 8 && recentSums[3] === 9) || (recentSums[2] === 9 && recentSums[3] === 8)) {
+          const rev = s1 === 'T' ? 'X' : 'T';
+          set(rev, Math.max(strength, 0.75), 'Cầu 8-9 → AUTO BẺ');
+        }
+      }
+
+      // Cầu 1-1 với con trùng gần nhau (vd 12-8-12)
+      if (n >= 3 && sum1 === sum3 && Math.abs(sum1 - sum2) >= 3) {
+        const rev = s1 === 'T' ? 'X' : 'T';
+        set(rev, Math.max(strength, 0.82), `Cầu 1-1 trùng ${sum1} → AUTO BẺ mạnh`);
+      }
+
+      // 3 con cùng phía liên tiếp → bẻ nhẹ
+      if (s1 === s2 && s2 === s3) {
+        const rev = s1 === 'T' ? 'X' : 'T';
+        set(rev, Math.max(strength * 0.85, 0.62), '3 con cùng phía → bẻ nhẹ');
+      }
+    }
+
+    // Clamp — allow stronger signals (all-game strong mode)
+    pT = Math.max(0.22, Math.min(0.78, pT));
+    const reliability = matched ? Math.min(0.97, 0.58 + strength * 0.42) : 0.22;
+    return {
+      p: pT,
+      count: matched ? n : 0,
+      reliability,
+      reason: reason || (matched ? 'Công thức Sunwin' : 'Không khớp công thức'),
+      strength
+    };
+  }
+
   _skill(name) {
     const losses = this.modelLosses[name] || [];
     if (losses.length < 12) return 1;
@@ -845,37 +1019,43 @@ class Engine {
   _contextProbability(context, priorP, priorStrength) {
     const h = this.history;
     const k = context.length;
-    let count = 0, t = 0;
-    for (let i = 0; i + k < h.length; i++) {
+    const start = Math.max(0, h.length - 600);
+    let count = 0, weightedT = 0, weightedCount = 0;
+    for (let i = start; i + k < h.length; i++) {
       let match = true;
       for (let j = 0; j < k; j++) {
         if (h[i + j] !== context[j]) { match = false; break; }
       }
       if (match) {
+        const age = (h.length - k - 1) - i;
+        const weight = Math.pow(0.994, Math.max(0, age));
         count++;
-        if (h[i + k] === 'T') t++;
+        weightedCount += weight;
+        if (h[i + k] === 'T') weightedT += weight;
       }
     }
-    return { p: (t + priorP * priorStrength) / (count + priorStrength), count };
+    return { p: (weightedT + priorP * priorStrength) / (weightedCount + priorStrength), count, effectiveCount: weightedCount };
   }
 
   _streakProbability(last, streak, priorP) {
     const h = this.history;
-    let count = 0, t = 0, run = 0;
+    let count = 0, weightedT = 0, weightedCount = 0, run = 0;
     const targetBucket = Math.min(streak, 6);
     for (let i = 0; i < h.length - 1; i++) {
       run = i > 0 && h[i - 1] === h[i] ? run + 1 : 1;
       if (h[i] !== last || Math.min(run, 6) !== targetBucket) continue;
+      const weight = Math.pow(0.995, h.length - 2 - i);
       count++;
-      if (h[i + 1] === 'T') t++;
+      weightedCount += weight;
+      if (h[i + 1] === 'T') weightedT += weight;
     }
-    return { p: (t + priorP * 12) / (count + 12), count };
+    return { p: (weightedT + priorP * 12) / (weightedCount + 12), count, effectiveCount: weightedCount };
   }
 
   _reversalProbability(last, streak, priorP) {
     const h = this.history;
     const targetBucket = Math.min(Math.max(1, streak), 6);
-    let count = 0, t = 0, opposite = 0;
+    let count = 0, weightedT = 0, weightedCount = 0, opposite = 0;
     // Inspect the final item of every historical run of the same current side.
     // The old implementation skipped all non-singleton run tails, so its run length
     // was always 1 and the anti-streak model never learned real reversals.
@@ -884,12 +1064,14 @@ class Engine {
       let run = 1;
       for (let j = i - 1; j >= 0 && h[j] === last; j--) run++;
       if (Math.min(run, 6) !== targetBucket) continue;
+      const weight = Math.pow(0.995, h.length - 2 - i);
       count++;
-      if (h[i + 1] === 'T') t++;
+      weightedCount += weight;
+      if (h[i + 1] === 'T') weightedT += weight;
       if (h[i + 1] !== last) opposite++;
     }
     return {
-      p: (t + priorP * 16) / (count + 16),
+      p: (weightedT + priorP * 16) / (weightedCount + 16),
       count, oppositeCount: opposite,
       observedOppositeRate: count ? opposite / count : null
     };
@@ -942,6 +1124,11 @@ class Engine {
     const streakSignal = this._streakProbability(last, streak, base);
     const reversalSignal = this._reversalProbability(last, streak, base);
     const transitionSignal = this._transitionProbability(last, base);
+    const diceSignal = String(this.id).startsWith('sicbo_')
+      ? { p: base, count: 0, reliability: 0, faces: null }
+      : this._diceFaceSignal();
+    // Apply empirical dice formulas to ALL games that expose dice (strong weight)
+    const sunwinSignal = this._sunwinFormulaSignal();
     const regimeShift = Math.min(1, Math.abs(shortRate - longRate) / 0.18);
     return {
       base: { p: base, count: longWindow.length, reliability: 1 },
@@ -954,6 +1141,8 @@ class Engine {
       pattern: { p: pattern.p, count: pattern.count, reliability: this._supportReliability(pattern.count, 12), length: pattern.length },
       streak: { p: streakSignal.p, count: streakSignal.count, reliability: this._supportReliability(streakSignal.count, 12), run: streak },
       reversal: { p: reversalSignal.p, count: reversalSignal.count, reliability: this._supportReliability(reversalSignal.count, 18), run: streak },
+      diceFaces: { p: diceSignal.p, count: diceSignal.count, reliability: diceSignal.reliability, faces: diceSignal.faces },
+      sunwinFormula: { p: sunwinSignal.p, count: sunwinSignal.count, reliability: sunwinSignal.reliability, reason: sunwinSignal.reason },
       regimeShift
     };
   }
@@ -971,18 +1160,26 @@ class Engine {
     const signals = this._modelSignals();
     const shift = signals.regimeShift;
     const currentRun = Math.min(6, Math.max(1, Number(signals.streak.run) || 1));
+    const isSicbo = String(this.id).startsWith('sicbo_');
     const priors = {
-      base: 0.22 - 0.03 * shift,
-      short: 0.13 + 0.045 * shift,
-      mid: 0.12,
-      ewma: 0.12 + 0.015 * shift,
-      markov1: 0.11,
-      markov2: 0.08,
-      transition: 0.09,
-      pattern: 0.065,
-      streak: 0.045 + 0.008 * currentRun,
-      reversal: 0.05 + 0.015 * currentRun
+      base: 0.23 - 0.02 * shift,
+      // Lower short-window weight reduces chasing a single fresh outcome.
+      short: 0.09 + 0.02 * shift,
+      mid: 0.14,
+      ewma: 0.10,
+      markov1: 0.10,
+      markov2: 0.10,
+      transition: 0.11,
+      pattern: 0.08,
+      streak: 0.045 + 0.006 * currentRun,
+      reversal: 0.055 + 0.02 * currentRun
     };
+    if (!isSicbo && signals.diceFaces && signals.diceFaces.count >= 18) priors.diceFaces = 0.065;
+    // Empirical dice formulas applied to ALL games — strong weight when matched
+    if (signals.sunwinFormula && signals.sunwinFormula.reliability > 0.35) {
+      // Strong influence: 0.28 ~ 0.42 depending on match strength
+      priors.sunwinFormula = 0.28 + 0.14 * (signals.sunwinFormula.reliability || 0);
+    }
     let weighted = 0, totalWeight = 0;
     const modelProbabilities = {};
     for (const name of Object.keys(priors)) {
@@ -1007,15 +1204,21 @@ class Engine {
     // Confidence only grows from repeated real observations and agreement; no forced alternation.
     const evidenceFactor = (0.40 + 0.38 * (n / (n + 90))) * agreementFactor;
     let pT = 0.5 + (blended - 0.5) * evidenceFactor;
-    const isSicbo = String(this.id).startsWith('sicbo_');
     const sicboPrediction = isSicbo ? this.sicbo.predict() : null;
     if (sicboPrediction && sicboPrediction.sampleSize >= 30) {
       pT = 0.88 * pT + 0.12 * sicboPrediction.pBig;
       modelProbabilities.sicbo = sicboPrediction.pBig;
     }
-    pT = Math.max(0.38, Math.min(0.62, pT));
+    // When empirical formula is strongly matched, allow wider confidence band
+    const formulaStrong = signals.sunwinFormula && signals.sunwinFormula.reliability > 0.7;
+    if (formulaStrong) {
+      pT = Math.max(0.30, Math.min(0.70, pT));
+    } else {
+      pT = Math.max(0.38, Math.min(0.62, pT));
+    }
     const side = pT >= 0.5 ? 'T' : 'X';
-    const confidence = Math.min(62, Math.round(Math.max(pT, 1 - pT) * 100));
+    const confCap = formulaStrong ? 72 : 62;
+    const confidence = Math.min(confCap, Math.round(Math.max(pT, 1 - pT) * 100));
     const streak = signals.streak.run || 1;
 
     if (sicboPrediction) {
@@ -1047,12 +1250,15 @@ class Engine {
     const midPct = (signals.mid.p * 100).toFixed(1);
     const qualityLabel = n < 12 ? 'CẦN THÊM DỮ LIỆU' : n < 50 ? 'ĐANG TÍCH LŨY' : 'ĐỦ LỊCH SỬ ĐÁNH GIÁ';
     const reversePct = (signals.reversal.p * 100).toFixed(1);
-    const reason = `Tài ${longPct}% dài hạn • ${shortPct}% trong 24 phiên • ${midPct}% trong 72 phiên • tín hiệu đảo sau chuỗi hiện tại nghiêng Tài ${reversePct}%. Markov, mẫu chuỗi, chuyển trạng thái và đảo chiều được cân theo kiểm định riêng của game; không ép luân phiên Tài/Xỉu.`;
+    let reason = `Tài ${longPct}% dài hạn • ${shortPct}% trong 24 phiên • ${midPct}% trong 72 phiên • tín hiệu đảo sau chuỗi hiện tại nghiêng Tài ${reversePct}%. Markov, mẫu chuỗi, chuyển trạng thái và đảo chiều được cân theo kiểm định riêng của game; không ép luân phiên Tài/Xỉu.`;
+    if (signals.sunwinFormula && signals.sunwinFormula.reason && signals.sunwinFormula.reliability > 0.4) {
+      reason = `📐 ${signals.sunwinFormula.reason} • ${reason}`;
+    }
     const out = {
       side, conf: confidence, probability: pT, vi, streak, reason,
       modelProbabilities, qualityLabel, sampleSize: n,
       regimeShift: Number(shift.toFixed(3)),
-      modelVersion: 'adaptive-19-online-brier'
+      modelVersion: 'adaptive-23-allgame-formula-strong'
     };
     if (sicboPrediction) out.dicePrediction = sicboPrediction;
     this.pending = side;
@@ -1082,7 +1288,7 @@ class Engine {
 
 /* ═══════════════ FEEDS & POLLING ═══════════════ */
 const FEEDS = {};
-for (const g of games) FEEDS[g.id] = { id: g.id, engine: new Engine(g.id), lastSession: null, seenSessions: new Set(), lastLive: null, lastError: null, lastPred: null };
+for (const g of games) FEEDS[g.id] = { id: g.id, engine: new Engine(g.id), lastSession: null, seenSessions: new Set(), lastLive: null, lastError: null, lastPred: null, polling: false };
 
 function parseHistoryArray(json) {
   if (!json) return [];
@@ -1141,7 +1347,7 @@ function compareSessionIds(a, b) {
   return String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: 'base' });
 }
 
-function getPreviousRoundSummary(live) {
+function getPreviousRoundSummary(live, isSicbo = false) {
   if (!live) return { session: 'Chưa có', result: 'Chưa có', dice: 'Chưa có dữ liệu', sum: null, diceValues: [] };
   const diceValues = Array.isArray(live.dice) && live.dice.length >= 3
     ? live.dice.slice(0, 3).map(Number)
@@ -1150,12 +1356,13 @@ function getPreviousRoundSummary(live) {
   const sum = Number(live.sum) > 0 ? Number(live.sum) : (validDice ? diceValues.reduce((a, b) => a + b, 0) : null);
   const triple = validDice && diceValues[0] === diceValues[1] && diceValues[1] === diceValues[2];
   let result = 'Chưa có';
-  if (triple) result = 'BỘ BA';
+  if (isSicbo && triple) result = 'BỘ BA';
   else if (live.side === 'T') result = 'TÀI';
   else if (live.side === 'X') result = 'XỈU';
   else if (sum != null && sum >= 4 && sum <= 17) result = sum >= 11 ? 'TÀI' : 'XỈU';
-  const faces = ['', '⚀', '⚁', '⚂', '⚃', '⚄', '⚅'];
-  const dice = validDice ? `${diceValues.map(n => faces[n]).join(' ')}${sum != null ? ` · Tổng ${sum}` : ''}` : 'Chưa có dữ liệu';
+  // Use the native colorful 🎲 emoji with explicit face values. The old
+  // monochrome Unicode die-face glyphs varied badly between Telegram clients.
+  const dice = validDice ? `${diceValues.map(n => `🎲 ${n}`).join('   ')}${sum != null ? `   <b>Tổng ${sum}</b>` : ''}` : 'Chưa có dữ liệu';
   return { session: String(live.session || 'Chưa có'), result, dice, sum, diceValues: validDice ? diceValues : [] };
 }
 
@@ -1187,7 +1394,8 @@ async function fetchJson(url) {
 
 async function pollGame(g) {
   const f = FEEDS[g.id];
-  if (!f || !g.enabled || !g.url) return;
+  if (!f || !g.enabled || !g.url || f.polling) return;
+  f.polling = true;
   try {
     const raw = await fetchJson(g.url);
     const historyArr = parseHistoryArray(raw);
@@ -1199,17 +1407,52 @@ async function pollGame(g) {
     }
     f.lastError = null;
   } catch (e) { f.lastError = e.message; }
+  finally { f.polling = false; }
 }
 
 let gamePollTimer = null;
+let activeGamePollBusy = false;
+async function pollActiveGameWatchers() {
+  if (activeGamePollBusy) return;
+  const activeIds = [...new Set(Object.values(autoWatch).map(w => w && w.gameId).filter(Boolean))];
+  if (!activeIds.length) return;
+  activeGamePollBusy = true;
+  try {
+    for (const gameId of activeIds) {
+      const g = games.find(x => x.id === gameId && x.enabled !== false);
+      const feed = FEEDS[gameId];
+      if (!g || !feed) continue;
+      await pollGame(g);
+      const after = feed.lastSession;
+      if (!after) continue;
+      const watchers = Object.entries(autoWatch).filter(([, w]) => w && w.gameId === gameId && String(w.lastSession || '') !== String(after) && !w.busy);
+      for (const [uid, state] of watchers) {
+        state.busy = true;
+        try {
+          const fresh = await pushPredCard(state.chatId, gameId, uid, true, state.messageId);
+          if (fresh && fresh.ok && fresh.result && fresh.result.message_id) {
+            state.messageId = fresh.result.message_id;
+            state.lastSession = after;
+          }
+        } catch (e) {
+          console.error('[AUTO CARD]', gameId, e.message);
+        } finally {
+          state.busy = false;
+        }
+      }
+    }
+  } finally {
+    activeGamePollBusy = false;
+  }
+}
 function scheduleGamePolling() {
   if (gamePollTimer) clearInterval(gamePollTimer);
   const interval = Math.max(5000, Math.min(120000, Number(settings.pollMs) || POLL_MS));
-  gamePollTimer = setInterval(() => Promise.all(games.map(pollGame)), interval);
+  gamePollTimer = setInterval(() => { pollActiveGameWatchers().catch(e => console.error('[ACTIVE GAME POLL]', e.message)); }, interval);
+  gamePollTimer.unref?.();
   return interval;
 }
 scheduleGamePolling();
-setTimeout(() => Promise.all(games.map(pollGame)), 1500);
 
 /* ═══════════════ LC79 AUTO-BET ═══════════════ */
 const LC79 = { sessions: {}, MIN_CONF: 55, MAX_MARTINGALE: 6, MARTINGALE_MULT: 2 };
@@ -1440,6 +1683,13 @@ function fitHashLogistic(type, samples) {
   return { ready: true, samples: rows.length, validationAccuracy: balancedAccuracy, validationBrier, baselineAccuracy, holdoutSamples: testRows.length, model, predictP };
 }
 
+function getHashFeedbackStats(type) {
+  const rows = (Array.isArray(hashFeedbacks) ? hashFeedbacks : []).filter(row => row && row.type === type && !row.conflicted && ['T','X'].includes(row.actual));
+  const comparable = rows.filter(row => ['T','X'].includes(row.prediction));
+  const correct = comparable.filter(row => row.prediction === row.actual).length;
+  return { samples: rows.length, scored: comparable.length, accuracy: comparable.length ? 100 * correct / comparable.length : null };
+}
+
 function predictHash(hashStr) {
   const type = String(hashStr).length === 32 ? 'MD5' : 'SHA256';
   let cached = hashModelCache[type];
@@ -1512,32 +1762,46 @@ function nextSessionLabel(lastSession) {
   return 'Chờ phiên mới';
 }
 
+function getPreviousPredictionReview(engine, previous, isSicbo = false) {
+  if (!previous || !previous.session || previous.result === 'Chưa có') return '⏳ Chưa có phiên để đối chiếu';
+  if (isSicbo && previous.result === 'BỘ BA') return '⚪ BỘ BA • KHÔNG TÍNH CỬA';
+  const row = engine && Array.isArray(engine.log)
+    ? [...engine.log].reverse().find(item => String(item.session) === String(previous.session))
+    : null;
+  if (!row) return '⏳ Chưa có dự đoán phiên trước';
+  return row.ok ? '✅ ĐÚNG CỬA' : '❌ SAI CỬA';
+}
+
 function renderPredictionCardText(g, feed) {
   const p = feed.lastPred || feed.engine.predict();
   const side = p.side === 'T' ? 'TÀI' : 'XỈU';
   const icon = p.side === 'T' ? '🔴' : '🔵';
   const nextSession = feed.lastLive ? nextSessionLabel(feed.lastLive.session) : 'Đang chờ';
-  const previous = getPreviousRoundSummary(feed.lastLive);
   const isSicbo = String(g.id).startsWith('sicbo_');
+  const previous = getPreviousRoundSummary(feed.lastLive, isSicbo);
+  const review = getPreviousPredictionReview(feed.engine, previous, isSicbo);
   const sums = isSicbo && p.dicePrediction && Array.isArray(p.dicePrediction.topSums)
     ? [...new Set(p.dicePrediction.topSums.map(Number).filter(n => Number.isInteger(n) && n >= 3 && n <= 18))].slice(0, 3)
     : [];
   const dicePredictionLine = isSicbo
     ? `\n🎲 <b>BA TỔNG DỄ XUẤT HIỆN</b>  <b>${sums.length ? sums.join('  •  ') : 'Đang tính'}</b>`
     : '';
-  const text = `╭━━━━━━━━━━━━━━━━━━━━╮
-   ✦ <b>${esc(g.brandLabel)}  /  ${esc(g.variant)}</b>
-╰━━━━━━━━━━━━━━━━━━━━╯
+  const text = `┏━━━━━━━━━━━━━━━━━━━━┓
+🎮 <b>${esc(g.brandLabel)}  •  ${esc(g.variant)}</b>
+┗━━━━━━━━━━━━━━━━━━━━┛
 
 🕘 <b>PHIÊN TRƯỚC</b>  <code>${esc(previous.session)}</code>
 🏁 <b>KẾT QUẢ</b>  <b>${esc(previous.result)}</b>
-🎲 <b>XÚC XẮC</b>  ${esc(previous.dice)}
+🎲 <b>XÚC XẮC</b>
+${previous.dice}
+📋 <b>ĐỐI CHIẾU</b>  <b>${review}</b>
 
-⏭ <b>PHIÊN TIẾP</b>  <code>${esc(nextSession)}</code>
+━━━━━━━━━━━━━━━━━━━━
+⏭ <b>PHIÊN TIẾP THEO</b>  <code>${esc(nextSession)}</code>
 🎯 <b>DỰ ĐOÁN</b>  ${icon} <b>${side}</b>${dicePredictionLine}
 
-<i>Cập nhật khi có phiên mới</i>`;
-  return { text, previous, nextSession, side, isSicbo, sums };
+<i>Tự cập nhật khi có kết quả phiên mới</i>`;
+  return { text, previous, nextSession, side, isSicbo, sums, review };
 }
 
 async function pushPredCard(chatId, gameId, uid, force = false, replaceMessageId = null) {
@@ -1547,8 +1811,7 @@ async function pushPredCard(chatId, gameId, uid, force = false, replaceMessageId
   if (!feed.lastPred) await pollGame(g);
   const card = renderPredictionCardText(g, feed);
   const markup = kb([
-    [btn('◀️ QUAY LẠI', 'pred:back:' + g.brand, 'primary'), btn('🔄 LÀM MỚI', 'pred:refresh:' + gameId, 'success')],
-    [btn('🏠 VỀ MENU', 'menu', 'danger')]
+    [btn('🔄 LÀM MỚI', 'pred:refresh:' + gameId, 'success'), btn('◀️ QUAY LẠI', 'pred:back:' + g.brand, 'primary'), btn('🏠 VỀ MENU', 'menu', 'danger')]
   ]);
   // New session => send a fresh card, then delete the previous card. Never edit in place.
   const sent = await send(chatId, card.text, { reply_markup: markup });
@@ -1561,26 +1824,16 @@ async function pushPredCard(chatId, gameId, uid, force = false, replaceMessageId
 
 function startAuto(uid, chatId, gameId) {
   stopAuto(uid);
-  const key = String(uid), state = { chatId, gameId, lastSession: FEEDS[gameId] && FEEDS[gameId].lastSession, timer: null, busy: false, messageId: null };
-  state.timer = setInterval(async () => {
-    if (state.busy) return;
-    state.busy = true;
-    try {
-      const g = games.find(x => x.id === gameId && x.enabled !== false);
-      const f = FEEDS[gameId];
-      if (!g || !f) { stopAuto(key); return; }
-      await pollGame(g);
-      if (f.lastSession && f.lastSession !== state.lastSession) {
-        state.lastSession = f.lastSession;
-        const oldId = state.messageId;
-        const updatedCard = await pushPredCard(chatId, gameId, key, true, oldId);
-        if (updatedCard && updatedCard.ok && updatedCard.result && updatedCard.result.message_id) state.messageId = updatedCard.result.message_id;
-      }
-    } catch (e) { console.error('[AUTO PREDICTION]', e.message); }
-    finally { state.busy = false; }
-  }, Math.max(15000, (Number(settings.pollMs) || POLL_MS) * 3));
-  state.timer.unref?.();
-  autoWatch[key] = state;
+  const key = String(uid);
+  // A watcher exists only while this user is inside this game. The shared
+  // scheduler polls only game IDs with at least one active watcher.
+  autoWatch[key] = {
+    chatId, gameId,
+    lastSession: FEEDS[gameId] && FEEDS[gameId].lastSession,
+    messageId: null,
+    busy: false
+  };
+  return autoWatch[key];
 }
 
 /* ═══════════════ EXPORT HISTORY (TELEGRAM) ═══════════════ */
@@ -2469,6 +2722,7 @@ async function handleCallbackAction(cq) {
     const gameId = data.slice('pred:refresh:'.length);
     const g = games.find(x => x.id === gameId && x.enabled !== false);
     if (!g) return showBrandMenu(chatId);
+    stopAuto(uid);
     await pollGame(g);
     startAuto(uid, chatId, gameId);
     const card = await pushPredCard(chatId, gameId, uid, true);
@@ -2702,6 +2956,7 @@ async function onMessage(msg) {
 
 
   if (text === '/start' || text === '/menu') {
+    stopAuto(uid);
     saveUsers(); delete sessions[uid];
     return showUserMenu(chatId, from);
   }
@@ -3055,11 +3310,15 @@ async function onMessage(msg) {
       const pred = predictHash(hashStr);
       const sideTxt = pred.side === 'T' ? 'TÀI' : 'XỈU';
       const sideIcon = pred.side === 'T' ? '🔴' : '🔵';
-      const filled = Math.max(0, Math.min(10, Math.round((pred.conf || 50) / 10)));
-      const bar = '█'.repeat(filled) + '░'.repeat(10 - filled);
-      const modelLine = pred.model === 'learned' ? `🧠 Mẫu đã kiểm định: <b>${pred.samples}</b> • Balanced accuracy: <b>${pred.validationAccuracy.toFixed(1)}%</b> • Brier: <b>${Number(pred.validationBrier || 0).toFixed(3)}</b>` : '🧪 Chế độ an toàn • Chưa vượt ngưỡng kiểm định ngoài mẫu';
-      const sent = await send(chatId, `╭━━━━━━━━━━━━━━━━━━╮\n       🧩 <b>TOOL MD5/SHA256</b>\n╰━━━━━━━━━━━━━━━━━━╯\n\n🔐 <b>Loại mã:</b> ${type} • ${hashStr.length} ký tự\n🔑 <code>${esc(hashStr)}</code>\n\n🎯 <b>TÍN HIỆU THAM KHẢO</b>\n${sideIcon} <b>${sideTxt}</b>\n📊 Mức nghiêng thống kê: <b>${pred.conf}%</b>\n<code>${bar}</code>\n${modelLine}\n\n💡 ${esc(pred.reason)}\n\n👇 <i>Chỉ gửi phản hồi sau khi đã có kết quả thực tế để đối chiếu.</i>`,
-      kb([[btn('✅ ĐÚNG • THỰC TẾ TRÙNG', 'hash:ok', 'success'), btn('❌ SAI • NHẬP KẾT QUẢ THẬT', 'hash:bad', 'danger')], [btn('🏠 THOÁT', 'menu', 'danger')]]));
+      const stats = getHashFeedbackStats(type);
+      const modelLine = pred.model === 'learned'
+        ? `🧠 Mô hình đã qua kiểm định • <b>${pred.samples}</b> mẫu • Balanced accuracy <b>${pred.validationAccuracy.toFixed(1)}%</b> • Brier <b>${Number(pred.validationBrier || 0).toFixed(3)}</b>`
+        : `🧪 Chưa đủ bằng chứng để mô hình vượt kiểm định • <b>${stats.samples}</b> mẫu đã xác minh`;
+      const historyLine = stats.accuracy == null
+        ? '📚 Độ chính xác lịch sử: chưa đủ mẫu đối chiếu'
+        : `📚 Đúng lịch sử: <b>${stats.accuracy.toFixed(1)}%</b> trên ${stats.scored} mẫu có dự đoán`;
+      const sent = await send(chatId, `╭━━━━━━━━━━━━━━━━━━━━╮\n       🧩 <b>TOOL MD5 / SHA256</b>\n╰━━━━━━━━━━━━━━━━━━━━╯\n\n🔐 <b>Định dạng:</b> ${type} • ${hashStr.length} ký tự\n🔑 <code>${esc(hashStr)}</code>\n\n🎯 <b>TÍN HIỆU THAM KHẢO</b>\n${sideIcon} <b>${sideTxt}</b>  •  Mức nghiêng: <b>${pred.conf}%</b>\n${modelLine}\n${historyLine}\n\n🧾 <i>Xác nhận đúng hoặc chọn kết quả thực tế một lần. Sau khi lưu, bot sẵn sàng nhận mã tiếp theo.</i>\n⚠️ <i>Hash MD5/SHA256 không tự tiết lộ kết quả nếu chưa biết quy tắc ánh xạ của game.</i>`,
+      kb([[btn('✅ ĐÚNG', 'hash:ok', 'success'), btn('❌ SAI', 'hash:bad', 'danger')], [btn('🏠 VỀ MENU', 'menu', 'primary')]]));
       if (sent && sent.ok && sent.result && sent.result.message_id) {
         const predictionKey = `${chatId}:${sent.result.message_id}`;
         hashPredictions[predictionKey] = {
@@ -3183,7 +3442,7 @@ app.post('/api/data', requireIndexAuth, (req, res) => {
   });
 });
 
-app.get('/health', (_, res) => res.json({ ok: true, bot: 'TOOL TX BY FEE v16.8.6 CLEAN MEMO / FRESH CARDS / BANK HARDENING', games: games.length, indexPasswordConfigured: Boolean(INDEX_PASSWORD), bankGroupId: String(settings.bankGroupId || '') }));
+app.get('/health', (_, res) => res.json({ ok: true, bot: 'TOOL TX BY FEE v16.8.7 CLEAN MEMO / FRESH CARDS / BANK HARDENING', games: games.length, indexPasswordConfigured: Boolean(INDEX_PASSWORD), bankGroupId: String(settings.bankGroupId || '') }));
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log('🔥 TOOL TX BY FEE running on port', PORT, '| data:', DATA, '| index password:', Boolean(INDEX_PASSWORD));
