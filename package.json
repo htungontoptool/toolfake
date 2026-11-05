@@ -1,8 +1,8 @@
 {
-  "name": "tool-tx-by-fee",
-  "version": "16.8.0",
+  "name": "htungbot",
+  "version": "16.9.1",
   "private": true,
-  "description": "Telegram game analysis bot with independent adaptive all-game engines, short per-order VietQR memos and public read-only monitor",
+  "description": "HTUNGBOT v16.9.1: Empirical dice formulas applied to ALL games with strong weighting",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
