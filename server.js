@@ -1,5 +1,5 @@
 /**
- * TOOL TX BY FEE • v16.8 ALL-GAME ADAPTIVE ENGINE
+ * TOOL TX BY FEE • v16.8.6 ALL-GAME ADAPTIVE ENGINE
  * Dynamic VietQR memos • Sicbo dice ensemble • Calibrated hash feedback
  */
 'use strict';
@@ -119,9 +119,6 @@ async function tg(method, body) {
 async function send(chatId, text, extra = {}) {
   return tg('sendMessage', { chat_id: chatId, text, parse_mode: 'HTML', disable_web_page_preview: true, ...extra });
 }
-async function editText(chatId, messageId, text, extra = {}) {
-  return tg('editMessageText', { chat_id: chatId, message_id: messageId, text, parse_mode: 'HTML', disable_web_page_preview: true, ...extra });
-}
 async function delMsg(chatId, messageId) {
   if (!messageId) return;
   return tg('deleteMessage', { chat_id: chatId, message_id: messageId });
@@ -141,6 +138,8 @@ let codesDB = loadJSON('codes.json', {}); // code -> { hours, maxUses, used, act
 let orders = loadJSON('orders.json', {}); // orderId -> order
 let storeFiles = loadJSON('store_files.json', {}); // id -> uploaded file metadata
 let storeProduct = loadJSON('store_product.json', { activeFileId: '' });
+let storeProducts = loadJSON('store_products.json', {}); // productId -> {id,title,description,price,category,fileId,mediaType,active,createdAt}
+if (!storeProducts || typeof storeProducts !== 'object' || Array.isArray(storeProducts)) storeProducts = {};
 let settings = loadJSON('settings.json', {
   support: 'SunNetWin',
   packages: [
@@ -183,6 +182,16 @@ STORE_PRODUCT_NAME = String(settings.storeProductName || 'FULL SCR AUTOCUOCLC79'
 STORE_TRANSFER_PREFIX = String(settings.storeTransferPrefix || 'MUAFILE').toUpperCase();
 KEY_TRANSFER_PREFIX = String(settings.keyTransferPrefix || 'NAPASS').toUpperCase();
 BANK = { ...BANK, ...(settings.bank || {}) };
+// Migrate the former single-file store into a one-item catalog without losing pending orders.
+if (!Object.keys(storeProducts).length && storeProduct.activeFileId && storeFiles[String(storeProduct.activeFileId)]) {
+  const legacyFile = storeFiles[String(storeProduct.activeFileId)];
+  const legacyId = 'legacy' + String(legacyFile.id || '').slice(-8);
+  storeProducts[legacyId] = {
+    id: legacyId, title: STORE_PRODUCT_NAME, description: String(settings.storeDescription || 'Tệp kỹ thuật số. Sau khi thanh toán được xác nhận, bot sẽ gửi tệp vào Telegram.'),
+    price: STORE_PRICE, category: 'Tài liệu số', fileId: String(legacyFile.id), mediaType: legacyFile.mediaType || 'document', active: true, createdAt: legacyFile.uploadedAt || Date.now()
+  };
+  saveJSON('store_products.json', storeProducts);
+}
 let sessions = {};
 let predMsg = {};
 let autoWatch = {};
@@ -203,6 +212,32 @@ function storeFileExists(file) {
   if (file.telegramFileId) return true;
   return Boolean(file.storedName && fs.existsSync(path.join(STORE_UPLOADS, file.storedName)));
 }
+function saveStoreProducts() { saveJSON('store_products.json', storeProducts); }
+function activeStoreProducts() {
+  return Object.values(storeProducts).filter(p => p && p.active !== false && storeFileExists(storeFiles[String(p.fileId || '')]))
+    .sort((a, b) => Number(a.createdAt || 0) - Number(b.createdAt || 0));
+}
+function getStoreProduct(id) { return storeProducts[String(id || '')] || null; }
+function shortStoreLabel(product) {
+  const title = String(product && product.title || 'Tệp số').replace(/[\r\n]+/g, ' ').trim();
+  const shortTitle = title.length > 23 ? title.slice(0, 20) + '…' : title;
+  const category = String(product && product.category || 'File').slice(0, 12);
+  return shortTitle + ' · ' + category + ' • ' + fmt(product && product.price) + 'đ';
+}
+function normalizeStoreCategory(value) {
+  const v = String(value || 'Tài liệu số').trim().replace(/[<>\r\n]/g, '').slice(0, 30);
+  return v || 'Tài liệu số';
+}
+function makeStoreProductId() { return crypto.randomBytes(6).toString('hex').toUpperCase(); }
+function extractStoreUpload(msg) {
+  if (msg.document) return { mediaType: 'document', file: msg.document, name: msg.document.file_name || 'tai-lieu' };
+  if (msg.video) return { mediaType: 'video', file: msg.video, name: msg.video.file_name || 'video.mp4' };
+  if (msg.audio) return { mediaType: 'audio', file: msg.audio, name: msg.audio.file_name || 'audio' };
+  if (msg.animation) return { mediaType: 'animation', file: msg.animation, name: msg.animation.file_name || 'animation.gif' };
+  if (Array.isArray(msg.photo) && msg.photo.length) return { mediaType: 'photo', file: msg.photo[msg.photo.length - 1], name: 'image-' + Date.now() + '.jpg' };
+  return null;
+}
+function validStorePrice(value) { const n = Number(value); return Number.isSafeInteger(n) && n >= 1000 && n <= 100000000 ? n : null; }
 function saveHashPredictions() { saveJSON('hash_predictions.json', hashPredictions); }
 function saveHashFeedbacks() { saveJSON('hash_feedback.json', hashFeedbacks); }
 function recordHashOutcome(row) {
@@ -271,8 +306,13 @@ function grantVip(uid, hours) {
   return u.vipUntil;
 }
 function genKey() {
-  const part = () => crypto.randomBytes(3).toString('hex').toUpperCase();
-  return `TX-${part()}-${part()}-${part()}`;
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  for (let attempt = 0; attempt < 100; attempt++) {
+    let key = '';
+    for (let i = 0; i < 10; i++) key += alphabet[crypto.randomInt(0, alphabet.length)];
+    if (!Object.prototype.hasOwnProperty.call(keysDB, key)) return key;
+  }
+  throw new Error('Không tạo được KEY duy nhất sau nhiều lần thử.');
 }
 function createKeyForUser(uid, hours) {
   const key = genKey();
@@ -326,12 +366,12 @@ function memoToken(value, max = 12) {
 function createPaymentMemo(type, uid, username = '') {
   const configuredPrefix = type === 'file' ? STORE_TRANSFER_PREFIX : KEY_TRANSFER_PREFIX;
   const prefix = memoToken(configuredPrefix, 1) || (type === 'file' ? 'M' : 'N');
-  // New format: N-ABC123 for KEY, M-ABC123 for FILE (8 characters total).
-  // Old open orders keep their original memo and remain matchable.
+  // New compact format has no separator: NABC123 / MABC123. Existing orders
+  // keep their stored memo; normalizeTransferText still matches legacy N-ABC123.
   for (let attempt = 0; attempt < 96; attempt++) {
     const suffix = crypto.randomBytes(4).toString('hex').slice(0, 6).toUpperCase();
-    const memo = `${prefix}-${suffix}`;
-    const used = Object.values(orders || {}).some(order => order && String(order.addInfo || '').toUpperCase() === memo);
+    const memo = `${prefix}${suffix}`;
+    const used = Object.values(orders || {}).some(order => order && normalizeTransferText(order.addInfo) === normalizeTransferText(memo));
     if (!used) return memo;
   }
   throw new Error('Không tạo được mã chuyển khoản duy nhất; vui lòng thử lại.');
@@ -795,10 +835,11 @@ class Engine {
     if (losses.length < 12) return 1;
     const recent = losses.slice(-80);
     const mean = recent.reduce((a, b) => a + b, 0) / recent.length;
-    // 0.25 is the Brier score of a 50/50 forecast. Shrink skill toward neutral.
-    const observedSkill = Math.exp((0.25 - mean) * 1.5);
-    const support = recent.length / (recent.length + 35);
-    return Math.max(0.82, Math.min(1.18, 1 + (observedSkill - 1) * support));
+    // A 50/50 forecast has Brier 0.25. Better models gain weight; models
+    // that repeatedly lose to neutral are down-weighted, separately per game.
+    const support = recent.length / (recent.length + 24);
+    const skillDelta = Math.max(-0.20, Math.min(0.20, 0.25 - mean));
+    return Math.max(0.55, Math.min(1.45, 1 + skillDelta * 3.2 * support));
   }
 
   _contextProbability(context, priorP, priorStrength) {
@@ -929,6 +970,7 @@ class Engine {
 
     const signals = this._modelSignals();
     const shift = signals.regimeShift;
+    const currentRun = Math.min(6, Math.max(1, Number(signals.streak.run) || 1));
     const priors = {
       base: 0.22 - 0.03 * shift,
       short: 0.13 + 0.045 * shift,
@@ -938,8 +980,8 @@ class Engine {
       markov2: 0.08,
       transition: 0.09,
       pattern: 0.065,
-      streak: 0.05,
-      reversal: 0.065
+      streak: 0.045 + 0.008 * currentRun,
+      reversal: 0.05 + 0.015 * currentRun
     };
     let weighted = 0, totalWeight = 0;
     const modelProbabilities = {};
@@ -953,8 +995,17 @@ class Engine {
     }
 
     let blended = totalWeight ? weighted / totalWeight : 0.5;
-    // The model deliberately shrinks noisy game-history signals toward 50/50.
-    const evidenceFactor = 0.42 + 0.34 * (n / (n + 100));
+    // Disagreement between models is uncertainty, not a reason to pick a side.
+    let modelVariance = 0;
+    for (const name of Object.keys(priors)) {
+      const signal = signals[name];
+      const weight = priors[name] * (0.30 + 0.70 * signal.reliability) * this._skill(name);
+      const probability = Math.max(0.04, Math.min(0.96, signal.p));
+      if (totalWeight) modelVariance += weight * (probability - blended) ** 2 / totalWeight;
+    }
+    const agreementFactor = Math.max(0.52, Math.min(1, 1 - Math.sqrt(modelVariance) * 1.05));
+    // Confidence only grows from repeated real observations and agreement; no forced alternation.
+    const evidenceFactor = (0.40 + 0.38 * (n / (n + 90))) * agreementFactor;
     let pT = 0.5 + (blended - 0.5) * evidenceFactor;
     const isSicbo = String(this.id).startsWith('sicbo_');
     const sicboPrediction = isSicbo ? this.sicbo.predict() : null;
@@ -1001,7 +1052,7 @@ class Engine {
       side, conf: confidence, probability: pT, vi, streak, reason,
       modelProbabilities, qualityLabel, sampleSize: n,
       regimeShift: Number(shift.toFixed(3)),
-      modelVersion: 'adaptive-18'
+      modelVersion: 'adaptive-19-online-brier'
     };
     if (sicboPrediction) out.dicePrediction = sicboPrediction;
     this.pending = side;
@@ -1454,52 +1505,63 @@ function stopAuto(uid) {
   delete autoWatch[key];
 }
 
+function nextSessionLabel(lastSession) {
+  const raw = String(lastSession == null ? '' : lastSession).trim();
+  if (!raw) return 'Đang chờ';
+  if (/^\d+$/.test(raw) && Number.isSafeInteger(Number(raw))) return String(Number(raw) + 1);
+  return 'Chờ phiên mới';
+}
+
+function renderPredictionCardText(g, feed) {
+  const p = feed.lastPred || feed.engine.predict();
+  const side = p.side === 'T' ? 'TÀI' : 'XỈU';
+  const icon = p.side === 'T' ? '🔴' : '🔵';
+  const nextSession = feed.lastLive ? nextSessionLabel(feed.lastLive.session) : 'Đang chờ';
+  const previous = getPreviousRoundSummary(feed.lastLive);
+  const isSicbo = String(g.id).startsWith('sicbo_');
+  const sums = isSicbo && p.dicePrediction && Array.isArray(p.dicePrediction.topSums)
+    ? [...new Set(p.dicePrediction.topSums.map(Number).filter(n => Number.isInteger(n) && n >= 3 && n <= 18))].slice(0, 3)
+    : [];
+  const dicePredictionLine = isSicbo
+    ? `\n🎲 <b>BA TỔNG DỄ XUẤT HIỆN</b>  <b>${sums.length ? sums.join('  •  ') : 'Đang tính'}</b>`
+    : '';
+  const text = `╭━━━━━━━━━━━━━━━━━━━━╮
+   ✦ <b>${esc(g.brandLabel)}  /  ${esc(g.variant)}</b>
+╰━━━━━━━━━━━━━━━━━━━━╯
+
+🕘 <b>PHIÊN TRƯỚC</b>  <code>${esc(previous.session)}</code>
+🏁 <b>KẾT QUẢ</b>  <b>${esc(previous.result)}</b>
+🎲 <b>XÚC XẮC</b>  ${esc(previous.dice)}
+
+⏭ <b>PHIÊN TIẾP</b>  <code>${esc(nextSession)}</code>
+🎯 <b>DỰ ĐOÁN</b>  ${icon} <b>${side}</b>${dicePredictionLine}
+
+<i>Cập nhật khi có phiên mới</i>`;
+  return { text, previous, nextSession, side, isSicbo, sums };
+}
+
 async function pushPredCard(chatId, gameId, uid, force = false, replaceMessageId = null) {
   const g = games.find(x => x.id === gameId && x.enabled !== false);
   const feed = FEEDS[gameId];
   if (!g || !feed) return send(chatId, '⚠️ Không tìm thấy bàn game hoặc bàn đang tắt.', kb([[btn('◀️ DANH SÁCH GAME', 'pred:brands', 'primary')]]));
   if (!feed.lastPred) await pollGame(g);
-  const p = feed.lastPred || feed.engine.predict();
-  const side = p.side === 'T' ? 'TÀI' : 'XỈU';
-  const icon = p.side === 'T' ? '🔴' : '🔵';
-  const nextSession = feed.lastLive ? String(Number(feed.lastLive.session) + 1) : 'đang chờ';
-  const previous = getPreviousRoundSummary(feed.lastLive);
-  const isSicbo = String(gameId).startsWith('sicbo_');
-  const sums = isSicbo && p.dicePrediction && Array.isArray(p.dicePrediction.topSums)
-    ? [...new Set(p.dicePrediction.topSums.map(Number).filter(n => Number.isInteger(n) && n >= 3 && n <= 18))].slice(0, 3)
-    : [];
-  const dicePredictionLine = isSicbo
-    ? `\n🎲 <b>BA TỔNG DỄ XUẤT HIỆN:</b> <b>${sums.length ? sums.join(' • ') : 'Đang tính toán'}</b>`
-    : '';
-  const text = `╭━━━━━━━━━━━━━━━━━━╮
-   🎯 <b>${esc(g.brandLabel)} • ${esc(g.variant)}</b>
-╰━━━━━━━━━━━━━━━━━━╯
-
-📍 <b>PHIÊN TRƯỚC:</b> <code>${esc(previous.session)}</code>
-🏁 <b>KẾT QUẢ:</b> <b>${esc(previous.result)}</b>
-🎲 <b>XÚC XẮC:</b> ${esc(previous.dice)}
-
-🔮 <b>PHIÊN TIẾP THEO:</b> <code>${esc(nextSession)}</code>
-🎯 <b>DỰ ĐOÁN:</b> ${icon} <b>${side}</b>${dicePredictionLine}`;
+  const card = renderPredictionCardText(g, feed);
   const markup = kb([
-    [btn('📜 LỊCH SỬ ĐÚNG/SAI', 'predhist:' + gameId, 'success')],
-    [btn('⏹ DỪNG CẬP NHẬT', 'pred:stop:' + gameId, 'danger'), btn('◀️ CHỌN BÀN', 'predbrand:' + g.brand, 'primary')],
-    [btn('🏠 MENU CHÍNH', 'menu', 'primary')]
+    [btn('◀️ QUAY LẠI', 'pred:back:' + g.brand, 'primary'), btn('🔄 LÀM MỚI', 'pred:refresh:' + gameId, 'success')],
+    [btn('🏠 VỀ MENU', 'menu', 'danger')]
   ]);
-  if (replaceMessageId) {
-    const edited = await editText(chatId, replaceMessageId, text, { reply_markup: markup });
-    if (edited && edited.ok) return { result: { message_id: replaceMessageId }, edited: true };
-    // If Telegram no longer allows editing (e.g. message expired/deleted), send replacement then remove old card.
-    const sent = await send(chatId, text, { reply_markup: markup });
-    if (sent && sent.ok && sent.result && sent.result.message_id) await delMsg(chatId, replaceMessageId);
-    return sent;
+  // New session => send a fresh card, then delete the previous card. Never edit in place.
+  const sent = await send(chatId, card.text, { reply_markup: markup });
+  if (sent && sent.ok && sent.result && sent.result.message_id && replaceMessageId && Number(replaceMessageId) !== Number(sent.result.message_id)) {
+    const removed = await delMsg(chatId, replaceMessageId);
+    if (!removed || removed.ok !== true) await clearInlineKeyboard(chatId, replaceMessageId);
   }
-  return send(chatId, text, { reply_markup: markup });
+  return sent;
 }
 
 function startAuto(uid, chatId, gameId) {
   stopAuto(uid);
-  const key = String(uid), state = { chatId, gameId, lastSession: FEEDS[gameId] && FEEDS[gameId].lastSession, timer: null, busy: false };
+  const key = String(uid), state = { chatId, gameId, lastSession: FEEDS[gameId] && FEEDS[gameId].lastSession, timer: null, busy: false, messageId: null };
   state.timer = setInterval(async () => {
     if (state.busy) return;
     state.busy = true;
@@ -1510,12 +1572,13 @@ function startAuto(uid, chatId, gameId) {
       await pollGame(g);
       if (f.lastSession && f.lastSession !== state.lastSession) {
         state.lastSession = f.lastSession;
-        const updatedCard = await pushPredCard(chatId, gameId, key, true, state.messageId);
-        if (updatedCard && updatedCard.result && updatedCard.result.message_id) state.messageId = updatedCard.result.message_id;
+        const oldId = state.messageId;
+        const updatedCard = await pushPredCard(chatId, gameId, key, true, oldId);
+        if (updatedCard && updatedCard.ok && updatedCard.result && updatedCard.result.message_id) state.messageId = updatedCard.result.message_id;
       }
     } catch (e) { console.error('[AUTO PREDICTION]', e.message); }
     finally { state.busy = false; }
-  }, Math.max(15000, POLL_MS * 3));
+  }, Math.max(15000, (Number(settings.pollMs) || POLL_MS) * 3));
   state.timer.unref?.();
   autoWatch[key] = state;
 }
@@ -1609,22 +1672,34 @@ async function showUserMenu(chatId, from) {
 }
 
 async function showFileStore(chatId) {
-  const file = storeFiles[String(storeProduct.activeFileId || '')];
-  if (!storeFileExists(file)) {
-    return send(chatId, '📦 <b>KHO FILE</b>\n\nHiện chưa có tệp để bán. Vui lòng quay lại sau nhé! 💙', kb([
-      [btn('◀️ MENU CHÍNH', 'menu', 'primary')]
-    ]));
+  const products = activeStoreProducts();
+  if (!products.length) return send(chatId, '📦 <b>KHO FILE</b>\n\nHiện chưa có sản phẩm. Vui lòng quay lại sau nhé!', kb([[btn('◀️ MENU CHÍNH', 'menu', 'primary')]]));
+  const rows = [];
+  for (let i = 0; i < products.length; i += 2) {
+    const row = [btn('📁 ' + shortStoreLabel(products[i]), 'store:item:' + products[i].id, 'primary')];
+    if (products[i + 1]) row.push(btn('📁 ' + shortStoreLabel(products[i + 1]), 'store:item:' + products[i + 1].id, 'primary'));
+    rows.push(row);
   }
+  rows.push([btn('🏠 MENU CHÍNH', 'menu', 'success')]);
+  return send(chatId, `📦 <b>KHO FILE BY FEE</b>\n\nCó <b>${products.length}</b> sản phẩm đang mở bán.\nChọn loại file bạn cần xem mô tả và giá:`, kb(rows));
+}
+
+async function showStoreProduct(chatId, productId) {
+  const product = getStoreProduct(productId);
+  const file = product && storeFiles[String(product.fileId || '')];
+  if (!product || product.active === false || !storeFileExists(file)) return showFileStore(chatId);
   const sizeMb = (Number(file.size || 0) / (1024 * 1024)).toFixed(2);
-  return send(chatId, `📦 <b>KHO FILE</b>\n\n🧾 <b>${esc(STORE_PRODUCT_NAME)}</b>\n💰 Giá: <b>${fmt(STORE_PRICE)}đ</b>\n📁 ${esc(file.originalName || 'Tài liệu số')} • ${sizeMb} MB\n\n🏦 Thanh toán bằng QR TPBank.\n📩 Khi giao dịch khớp, bot tự gửi tệp vào chat này.`, kb([
-    [btn('💳 MUA NGAY • ' + fmt(STORE_PRICE) + 'đ', 'store:confirm', 'success')],
-    [btn('◀️ MENU CHÍNH', 'menu', 'primary')]
+  const desc = String(product.description || 'Tệp kỹ thuật số. Bot sẽ gửi file sau khi thanh toán được xác nhận.').slice(0, 900);
+  return send(chatId, `📦 <b>${esc(product.title || 'Sản phẩm số')}</b>\n\n🗂 Loại: <b>${esc(product.category || 'Tài liệu số')}</b>\n📁 Tệp: <b>${esc(file.originalName || 'Tài liệu số')}</b> • ${sizeMb} MB\n💰 Giá: <b>${fmt(product.price)}đ</b>\n\n📝 <b>MÔ TẢ</b>\n${esc(desc)}\n\n🏦 Thanh toán QR TPBank. Khi giao dịch khớp, bot tự gửi đúng tệp của sản phẩm này.`, kb([
+    [btn('💳 MUA NGAY • ' + fmt(product.price) + 'đ', 'store:buy:' + product.id, 'success')],
+    [btn('◀️ DANH SÁCH FILE', 'store:open', 'primary'), btn('🏠 MENU', 'menu', 'primary')]
   ]));
 }
 
-async function createFileOrder(chatId, uid) {
-  const file = storeFiles[String(storeProduct.activeFileId || '')];
-  if (!storeFileExists(file)) {
+async function createFileOrder(chatId, uid, productId) {
+  const product = productId ? getStoreProduct(productId) : (activeStoreProducts()[0] || null);
+  const file = product && storeFiles[String(product.fileId || '')];
+  if (!product || product.active === false || !storeFileExists(file)) {
     return send(chatId, '⚠️ Kho hiện chưa có tệp để giao. Vui lòng quay lại sau hoặc liên hệ bộ phận hỗ trợ.', kb([[btn('◀️ QUAY LẠI', 'store:open', 'primary')]]));
   }
   // One active order per user avoids duplicate orders from repeated taps.
@@ -1636,15 +1711,16 @@ async function createFileOrder(chatId, uid) {
     ]));
   }
   const orderId = 'F' + Date.now().toString(36).toUpperCase() + String(uid).slice(-4);
+  const amount = Number(product.price) || STORE_PRICE;
   const addInfo = createPaymentMemo('file', uid, ensureUser(uid).username);
-  const qr = vietqrUrl(STORE_PRICE, addInfo);
+  const qr = vietqrUrl(amount, addInfo);
   orders[orderId] = {
-    id: orderId, type: 'file', product: STORE_PRODUCT_NAME, uid: String(uid),
-    fileId: String(file.id), amount: STORE_PRICE, addInfo,
+    id: orderId, type: 'file', productId: String(product.id), product: String(product.title || STORE_PRODUCT_NAME), description: String(product.description || ''), category: String(product.category || 'Tài liệu số'), uid: String(uid),
+    fileId: String(file.id), amount, addInfo,
     status: 'pending', created: Date.now(), expire: Date.now() + 45 * 60 * 1000
   };
   saveOrders();
-  const caption = `🏦 <b>TPBANK • THANH TOÁN</b>\n📦 ${esc(STORE_PRODUCT_NAME)} • <b>${fmt(STORE_PRICE)}đ</b>\n💳 <code>${BANK.account}</code> • ${esc(BANK.name)}\n📝 Mã CK: <code>${esc(addInfo)}</code>\n🧾 Đơn: <code>${orderId}</code>\n\n📲 Quét QR, chuyển đúng số tiền và mã CK. Sau đó chọn <b>ĐÃ THANH TOÁN</b>. Bot tự đối soát.`
+  const caption = `🏦 <b>TPBANK • THANH TOÁN</b>\n📦 ${esc(product.title || STORE_PRODUCT_NAME)} • <b>${fmt(amount)}đ</b>\n💳 <code>${BANK.account}</code> • ${esc(BANK.name)}\n📝 Mã CK: <code>${esc(addInfo)}</code>\n🧾 Đơn: <code>${orderId}</code>\n\n📲 Quét QR, chuyển đúng số tiền và mã CK. Sau đó chọn <b>ĐÃ THANH TOÁN</b>. Bot tự đối soát.`
   const replyMarkup = { inline_keyboard: [
     [{ text: '✅ ĐÃ THANH TOÁN', callback_data: 'store:done:' + orderId }],
     [{ text: '🗑 HUỶ ĐƠN', callback_data: 'store:cancel:' + orderId }],
@@ -1659,7 +1735,7 @@ async function createFileOrder(chatId, uid) {
     throw new Error((sent && sent.description) || 'Telegram không nhận ảnh QR');
   } catch (err) {
     console.error('[STORE QR]', err.message);
-    return send(chatId, `⚠️ <b>QR TẠM THỜI KHÔNG TẢI ĐƯỢC</b>\n📦 ${esc(STORE_PRODUCT_NAME)} • <b>${fmt(STORE_PRICE)}đ</b>\n🏦 TPBank: <code>${BANK.account}</code> • ${esc(BANK.name)}\n📝 Mã CK: <code>${esc(addInfo)}</code>\n🧾 Đơn: <code>${orderId}</code>\n<a href="${esc(qr)}">📲 Mở QR thanh toán</a>\nSau khi chuyển khoản, chọn <b>ĐÃ THANH TOÁN</b>.`, { reply_markup: replyMarkup, disable_web_page_preview: false });
+    return send(chatId, `⚠️ <b>QR TẠM THỜI KHÔNG TẢI ĐƯỢC</b>\n📦 ${esc(product.title || STORE_PRODUCT_NAME)} • <b>${fmt(amount)}đ</b>\n🏦 TPBank: <code>${BANK.account}</code> • ${esc(BANK.name)}\n📝 Mã CK: <code>${esc(addInfo)}</code>\n🧾 Đơn: <code>${orderId}</code>\n<a href="${esc(qr)}">📲 Mở QR thanh toán</a>\nSau khi chuyển khoản, chọn <b>ĐÃ THANH TOÁN</b>.`, { reply_markup: replyMarkup, disable_web_page_preview: false });
   }
 }
 
@@ -1702,7 +1778,10 @@ async function approveFileOrder(orderId, adminId, authorizedAuto = false) {
   const caption = `🎉 <b>THANH TOÁN ĐÃ ĐƯỢC XÁC NHẬN</b>\n━━━━━━━━━━━━━━━━━━\n📦 ${esc(order.product || STORE_PRODUCT_NAME)}\n🧾 Đơn: <code>${esc(orderId)}</code>\n✅ Giao dịch đã đối soát thành công.\n💙 Cảm ơn bạn đã ủng hộ!`;
   let sent;
   if (file.telegramFileId) {
-    sent = await tg('sendDocument', { chat_id: order.uid, document: file.telegramFileId, caption, parse_mode: 'HTML' });
+    const mediaType = ['photo', 'video', 'audio', 'animation'].includes(file.mediaType) ? file.mediaType : 'document';
+    const field = mediaType === 'photo' ? 'photo' : mediaType === 'video' ? 'video' : mediaType === 'audio' ? 'audio' : mediaType === 'animation' ? 'animation' : 'document';
+    const method = mediaType === 'photo' ? 'sendPhoto' : mediaType === 'video' ? 'sendVideo' : mediaType === 'audio' ? 'sendAudio' : mediaType === 'animation' ? 'sendAnimation' : 'sendDocument';
+    sent = await tg(method, { chat_id: order.uid, [field]: file.telegramFileId, caption, parse_mode: 'HTML' });
   } else {
     const filePath = path.join(STORE_UPLOADS, file.storedName);
     if (!fs.existsSync(filePath)) {
@@ -1897,45 +1976,65 @@ async function markOrderDone(chatId, uid, orderId) {
   }, 10 * 60 * 1000);
 }
 
-function tryMatchPayment(text) {
-  const raw = String(text || '').replace(/\u00a0/g, ' ');
-  const mAmount = raw.match(/[+]\s*([\d.,]+)\s*VND/i) || raw.match(/[+]\s*([\d.,]+)/i);
-  if (!mAmount) return null;
-  const amount = Number(String(mAmount[1]).replace(/[.,]/g, ''));
-  if (!Number.isSafeInteger(amount) || amount <= 0) return null;
+function parseVndAmount(raw) {
+  const text = String(raw || '').replace(/\u00a0/g, ' ');
+  // Credit alerts must carry a leading plus; a debit notification must never match an order.
+  const match = text.match(/(?:^|[|\s])\+\s*([\d.,]+)\s*(?:VND|VNĐ|đ|DONG)?\b/i);
+  if (!match) return null;
+  const digits = match[1].replace(/[^0-9]/g, '');
+  if (!digits || digits.length > 12) return null;
+  const amount = Number(digits);
+  return Number.isSafeInteger(amount) && amount > 0 ? amount : null;
+}
 
-  // Read the full transfer description after ND:, including wrapped/new lines and Napas suffixes.
+function tryMatchPayment(text) {
+  const raw = String(text || '').replace(/\u00a0/g, ' ').replace(/\r/g, '').trim();
+  if (!raw) return null;
+  const amount = parseVndAmount(raw);
+  if (!amount) return null;
+
+  // The VietQR bot may wrap the ND field over multiple lines. Keep all text after ND.
   const ndLabel = /(?:\bND\b|Nội dung(?: chuyển khoản)?|Noi dung(?: chuyen khoan)?|Description|Transfer content|Add.?info|Memo|Content)\s*[:=\-]\s*/i;
   const ndMatch = ndLabel.exec(raw);
-  const nd = ndMatch ? raw.slice(ndMatch.index + ndMatch[0].length).trim() : raw;
-  const parts = raw.split('|').map(x => x.trim()).filter(Boolean);
-  const dateIndex = parts.findIndex(x => /\d{2}[/-]\d{2}[/-]\d{4}/.test(x));
+  const nd = ndMatch ? raw.slice(ndMatch.index + ndMatch[0].length).trim() : '';
+
+  // TPBank format: +amount | account | dd/mm/yyyy hh:mm:ss | transaction ref | ND: ...
   let ref = '';
-  if (dateIndex >= 0) {
-    const afterDate = parts.slice(dateIndex + 1);
-    ref = afterDate.find(x => /^[A-Z0-9_-]{7,}$/i.test(x) && !/^(?:ND|NAPAS)/i.test(x)) || '';
+  const dateRef = raw.match(/\b\d{1,2}[/-]\d{1,2}[/-]\d{4}\s+\d{1,2}:\d{2}:\d{2}\s*[|｜]\s*([A-Z0-9]{7,32})\b/i);
+  if (dateRef) ref = dateRef[1].toUpperCase();
+  if (!ref) {
+    const parts = raw.split(/[|｜]/).map(x => x.trim()).filter(Boolean);
+    const dateIndex = parts.findIndex(x => /\d{1,2}[/-]\d{1,2}[/-]\d{4}/.test(x));
+    if (dateIndex >= 0) {
+      for (const part of parts.slice(dateIndex + 1)) {
+        if (/^[A-Z0-9]{7,32}$/i.test(part) && !/^(?:ND|NAPAS)/i.test(part)) { ref = part.toUpperCase(); break; }
+      }
+    }
   }
   if (!ref) {
-    const beforeMemoText = ndMatch ? raw.slice(0, ndMatch.index) : raw;
-    const candidates = beforeMemoText.split('|').map(x => x.trim()).filter(x => /^[A-Z0-9_-]{8,}$/i.test(x));
-    ref = candidates[candidates.length - 1] || '';
+    const beforeMemo = ndMatch ? raw.slice(0, ndMatch.index) : raw;
+    const candidates = beforeMemo.match(/\b[A-Z0-9]{8,32}\b/gi) || [];
+    ref = candidates.reverse().find(x => !/^(?:TPBANK|VND|VNĐ)$/i.test(x)) || '';
   }
-  const uidMatch = String(nd + ' ' + raw).match(/Napas(\d{6,})(?!\d)/i);
+  const napasRef = (nd + ' ' + raw).match(/\bNapas([A-Z0-9]{6,24})\b/i);
   return {
-    amount, nd, uid: uidMatch ? uidMatch[1] : null,
-    ref: ref || crypto.createHash('sha256').update(raw).digest('hex').slice(0, 24),
-    raw
+    amount,
+    nd: nd.slice(0, 1500),
+    uid: napasRef ? napasRef[1] : null,
+    ref: ref || crypto.createHash('sha256').update(raw).digest('hex').slice(0, 24).toUpperCase(),
+    raw: raw.slice(0, 2000)
   };
 }
 
 function normalizeTransferText(value) {
-  return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 }
 
 function transferMemoIncluded(messageContent, requiredMemo) {
   const haystack = normalizeTransferText(messageContent);
   const needle = normalizeTransferText(requiredMemo);
-  return Boolean(needle) && haystack.includes(needle);
+  // Keep a minimum token length: payment memos generated by this bot are 7 chars.
+  return needle.length >= 7 && haystack.includes(needle);
 }
 
 async function notifyPaymentReview(parsed, matches, reason) {
@@ -1965,90 +2064,106 @@ function isTrustedBankSender(msg) {
 }
 
 async function onBankMessage(msg) {
-  if (!settings.bankGroupId || String(msg.chat && msg.chat.id) !== String(settings.bankGroupId)) return;
+  if (!msg || !msg.chat || !settings.bankGroupId || String(msg.chat.id) !== String(settings.bankGroupId)) return;
   const text = msg.text || msg.caption || '';
   const parsed = tryMatchPayment(text);
   if (!parsed) return;
   const sender = msg.from || {};
+  const senderChat = msg.sender_chat || {};
+  const sourceId = sender.id != null ? String(sender.id) : (senderChat.id != null ? String(senderChat.id) : '');
   bankMonitor = {
     receivedAt: Date.now(), lastMessageId: msg.message_id || null, chatId: String(msg.chat.id),
-    senderId: String(sender.id != null ? sender.id : (msg.sender_chat && msg.sender_chat.id != null ? msg.sender_chat.id : '')),
-    senderName: String([sender.first_name, sender.last_name].filter(Boolean).join(' ') || sender.username || (msg.sender_chat && msg.sender_chat.title) || 'không rõ').slice(0, 100),
-    isBot: Boolean(sender.is_bot), amount: parsed.amount, ref: parsed.ref, raw: parsed.raw.slice(0, 1200), trusted: false, matchedOrder: ''
+    senderId: sourceId,
+    senderName: String([sender.first_name, sender.last_name].filter(Boolean).join(' ') || sender.username || senderChat.title || 'không rõ').slice(0, 100),
+    isBot: Boolean(sender.is_bot), amount: parsed.amount, ref: parsed.ref, nd: parsed.nd, raw: parsed.raw.slice(0, 1200), trusted: false, matchedOrder: ''
   };
-  if (!isTrustedBankSender(msg)) { saveBankMonitor();
-    const sourceId = msg.from && msg.from.id != null ? String(msg.from.id) : (msg.sender_chat && msg.sender_chat.id != null ? String(msg.sender_chat.id) : 'không rõ');
+  if (!isTrustedBankSender(msg)) {
+    saveBankMonitor();
+    const displayId = sourceId || 'không rõ';
     for (const aid of ADMIN_IDS) {
-      await send(aid, `🛡️ <b>BẢN TIN GIAO DỊCH CHƯA ĐƯỢC TIN CẬY</b>\nNhóm: <code>${esc(settings.bankGroupId)}</code>\nNgười gửi: <code>${esc(sourceId)}</code>\n💰 Số tiền đọc được: <b>${fmt(parsed.amount)}đ</b>\n📝 Nội dung: <code>${esc(parsed.nd)}</code>\n\nChưa tự động cấp file để tránh giả mạo. Nếu đây là bot ngân hàng hợp lệ, thêm ID người gửi bằng <code>/setbanksenders ${esc(sourceId)}</code>.`);
+      await send(aid, `🛡️ <b>BẢN TIN GIAO DỊCH CHƯA ĐƯỢC TIN CẬY</b>\nNhóm: <code>${esc(settings.bankGroupId)}</code>\nNgười gửi: <code>${esc(displayId)}</code>\n💰 Số tiền: <b>${fmt(parsed.amount)}đ</b>\n🔖 Mã GD: <code>${esc(parsed.ref)}</code>\n📝 ND: <code>${esc(parsed.nd || 'Không có')}</code>\n\nBot chưa tự cấp KEY/FILE. Nếu đây đúng là nguồn VietQR, xác minh sender ID rồi mới whitelist bằng <code>/setbanksenders ${esc(displayId)}</code>.`);
     }
     return;
   }
   bankMonitor.trusted = true;
   saveBankMonitor();
+
   const now = Date.now();
-  const transactionKey = `${String(msg.chat.id)}:${parsed.ref}`;
-  if (bankTransactions[transactionKey]) return; // Telegram may deliver the same bank alert more than once.
-  bankTransactions[transactionKey] = { amount: parsed.amount, nd: parsed.nd, seenAt: now, messageId: msg.message_id || null };
-  const txEntries = Object.entries(bankTransactions);
-  if (txEntries.length > 3000) {
-    txEntries.sort((a, b) => Number(a[1].seenAt || 0) - Number(b[1].seenAt || 0));
-    for (const [key] of txEntries.slice(0, txEntries.length - 3000)) delete bankTransactions[key];
-  }
+  const transactionKey = `${String(msg.chat.id)}:${String(parsed.ref).toUpperCase()}`;
+  const priorTx = bankTransactions[transactionKey];
+  const rawHash = crypto.createHash('sha256').update(parsed.raw).digest('hex');
+  // A paid transaction is final. Duplicate notices are ignored, but an edited bank
+  // alert with the same reference and newly completed memo is re-parsed.
+  if (priorTx && priorTx.status === 'paid') return;
+  if (priorTx && priorTx.rawHash === rawHash && ['review', 'unmatched'].includes(priorTx.status)) return;
+  bankTransactions[transactionKey] = {
+    ...(priorTx || {}), amount: parsed.amount, nd: parsed.nd, raw: parsed.raw, rawHash,
+    seenAt: priorTx && priorTx.seenAt || now, updatedAt: now, messageId: msg.message_id || null,
+    senderId: sourceId, status: 'processing'
+  };
   saveBankTransactions();
 
-  const matches = Object.values(orders).filter(o =>
-    o && ['pending', 'checking', 'timeout'].includes(o.status) &&
+  const activeStatuses = ['pending', 'checking', 'timeout', 'processing'];
+  const candidates = Object.values(orders).filter(o => o && activeStatuses.includes(o.status) &&
     Number(o.amount) === Number(parsed.amount) &&
     transferMemoIncluded(parsed.nd + ' ' + parsed.raw, o.addInfo) &&
-    (!o.expire || now <= Number(o.expire) + 30 * 60 * 1000)
-  );
+    (!o.expire || now <= Number(o.expire) + 30 * 60 * 1000));
+  // A transaction already bound to one order may be retried safely after a crash.
+  const previouslyBound = Object.values(orders).filter(o => o && String(o.bankTransactionRef || '').toUpperCase() === String(parsed.ref).toUpperCase() && activeStatuses.includes(o.status));
+  const matches = candidates.length ? candidates : previouslyBound;
 
   if (matches.length === 1) {
     const order = matches[0];
+    if (order.status === 'paid') {
+      bankTransactions[transactionKey].status = 'paid'; saveBankTransactions(); return;
+    }
     order.bankTransactionRef = parsed.ref;
     order.bankMatchedAt = now;
     order.bankMessageId = msg.message_id || null;
-    bankMonitor.matchedOrder = order.id; saveBankMonitor();
     order.status = 'processing';
     saveOrders();
+    bankMonitor.matchedOrder = order.id; saveBankMonitor();
 
     if (order.type === 'file') {
       const result = await approveFileOrder(order.id, 'bank-auto', true);
       if (result.ok) {
-        await send(order.uid, `🎉 <b>TPBANK ĐÃ XÁC NHẬN THANH TOÁN!</b>\n\n💰 Số tiền: <b>${fmt(parsed.amount)} VND</b>\n🧾 Mã đơn: <code>${esc(order.id)}</code>\n✅ Nội dung chuyển khoản khớp duy nhất đơn của bạn.\n📦 File đã được gửi vào Telegram.`, kb([[btn('🏠 VỀ MENU', 'menu', 'success')]]));
+        bankTransactions[transactionKey].status = 'paid'; bankTransactions[transactionKey].orderId = order.id; bankTransactions[transactionKey].processedAt = Date.now(); saveBankTransactions();
+        await send(order.uid, `🎉 <b>TPBANK ĐÃ XÁC NHẬN THANH TOÁN</b>\n\n💰 Số tiền: <b>${fmt(parsed.amount)} VND</b>\n🧾 Mã đơn: <code>${esc(order.id)}</code>\n✅ Nội dung chuyển khoản khớp duy nhất đơn của bạn.\n📦 File đã được gửi vào Telegram.`, kb([[btn('🏠 VỀ MENU', 'menu', 'success')]]));
         for (const aid of ADMIN_IDS) await send(aid, `✅ <b>TỰ ĐỘNG ĐỐI SOÁT KHO FILE</b>\n🧾 Đơn: <code>${esc(order.id)}</code>\n👤 User: <code>${esc(order.uid)}</code>\n💰 ${fmt(parsed.amount)}đ\n🔖 GD: <code>${esc(parsed.ref)}</code>\n📦 Đã gửi file.`);
       } else {
         order.status = 'checking'; saveOrders();
+        bankTransactions[transactionKey].status = 'review'; bankTransactions[transactionKey].orderId = order.id; bankTransactions[transactionKey].error = result.message; saveBankTransactions();
         await notifyAdminsAboutFileOrder(order, 'Đã thấy giao dịch khớp nhưng gửi file thất bại: ' + result.message);
         await send(order.uid, '✅ Bot đã nhận giao dịch. File đang được admin hỗ trợ gửi do Telegram gặp lỗi tạm thời.');
       }
       return;
     }
 
-    // Key/rental order: the memo uniquely identifies the order, so username and Telegram ID
-    // are informational only and are not parsed from bank-specific text formats.
-    order.paidAt = now;
+    order.paidAt = order.paidAt || now;
     const delivery = await deliverKeyOrder(order, 'bank-auto');
-    for (const aid of ADMIN_IDS) await send(aid, `✅ <b>ĐƠN MUA KEY TỰ ĐỘNG</b>\n🧾 Đơn: <code>${esc(order.id)}</code>\n👤 User: <code>${esc(order.uid)}</code>\n💰 ${fmt(parsed.amount)}đ\n📝 Memo: <code>${esc(order.addInfo)}</code>\n🔑 KEY: <code>${esc(order.key || 'chưa tạo')}</code>\n📌 ${esc(delivery.message)}`);
-    if (!delivery.ok) await notifyPaymentReview(parsed, [order], delivery.message);
+    if (delivery.ok) {
+      bankTransactions[transactionKey].status = 'paid'; bankTransactions[transactionKey].orderId = order.id; bankTransactions[transactionKey].processedAt = Date.now(); saveBankTransactions();
+    } else {
+      bankTransactions[transactionKey].status = 'review'; bankTransactions[transactionKey].orderId = order.id; bankTransactions[transactionKey].error = delivery.message; saveBankTransactions();
+      await notifyPaymentReview(parsed, [order], delivery.message);
+    }
+    for (const aid of ADMIN_IDS) await send(aid, `✅ <b>ĐƠN MUA KEY ĐÃ ĐỐI SOÁT</b>\n🧾 Đơn: <code>${esc(order.id)}</code>\n👤 User: <code>${esc(order.uid)}</code>\n💰 ${fmt(parsed.amount)}đ\n📝 Memo: <code>${esc(order.addInfo)}</code>\n🔑 KEY: <code>${esc(order.key || 'chưa tạo')}</code>\n📌 ${esc(delivery.message)}`);
     return;
   }
 
-  if (matches.length > 1) {
-    await notifyPaymentReview(parsed, matches, 'Nhiều đơn cùng khớp số tiền và nội dung. Bot không tự chọn người nhận để tránh cấp nhầm KEY/file.');
-    return;
-  }
-
+  const sameAmountOrders = Object.values(orders).filter(o => o && activeStatuses.includes(o.status) && Number(o.amount) === Number(parsed.amount) && (!o.expire || now <= Number(o.expire) + 30 * 60 * 1000));
   const transferText = parsed.nd + ' ' + parsed.raw;
-  const sameAmountOrders = Object.values(orders).filter(o => o && ['pending', 'checking', 'timeout'].includes(o.status) && Number(o.amount) === Number(parsed.amount) && (!o.expire || now <= Number(o.expire) + 30 * 60 * 1000));
-  const hasCompactMemo = /(?:^|[^A-Z0-9])[NM]-?[A-F0-9]{6}(?:$|[^A-Z0-9])/i.test(transferText) || /(?:^|[^A-Z0-9])[NM][A-F0-9]{12}(?:$|[^A-Z0-9])/i.test(transferText);
-  const knownPrefix = hasCompactMemo ||
-    transferMemoIncluded(transferText, STORE_TRANSFER_PREFIX) ||
-    transferMemoIncluded(transferText, KEY_TRANSFER_PREFIX);
-  if (knownPrefix || sameAmountOrders.length) {
-    await notifyPaymentReview(parsed, sameAmountOrders, knownPrefix ? 'Đã nhận diện mã/tiền tố đơn hàng nhưng không tìm thấy đơn còn hiệu lực khớp chính xác. Admin cần đối soát tài khoản thật.' : 'Có đơn chờ cùng số tiền nhưng phần ND không chứa mã đơn riêng. Không tự cấp KEY/FILE; admin cần kiểm tra giao dịch.');
-  }
-
+  const hasCompactMemo = /(?:^|[^A-Z0-9])[NM]-?[A-F0-9]{6}(?:$|[^A-Z0-9])/i.test(transferText) || /(?:^|[^A-Z0-9])[NM][A-F0-9]{6}(?:$|[^A-Z0-9])/i.test(transferText);
+  const knownPrefix = hasCompactMemo || transferMemoIncluded(transferText, STORE_TRANSFER_PREFIX) || transferMemoIncluded(transferText, KEY_TRANSFER_PREFIX);
+  const reason = matches.length > 1
+    ? 'Nhiều đơn trùng số tiền và cùng mã chuyển khoản; bot không tự chọn người nhận.'
+    : knownPrefix
+      ? 'Có nhận diện mã đơn nhưng không có đơn còn hiệu lực khớp duy nhất.'
+      : sameAmountOrders.length
+        ? 'Có đơn chờ cùng số tiền nhưng thông báo không chứa mã đơn chính xác.'
+        : 'Đã nhận thông báo ngân hàng nhưng chưa tìm thấy đơn chờ khớp duy nhất.';
+  bankTransactions[transactionKey].status = 'review'; bankTransactions[transactionKey].reviewReason = reason; saveBankTransactions();
+  await notifyPaymentReview(parsed, matches.length > 1 ? matches : sameAmountOrders, reason);
 }
 
 async function showHashTool(chatId) {
@@ -2063,7 +2178,6 @@ async function showAdmin(chatId) {
   const activeVip = allIds.filter(id => Number(users[id].vipUntil || 0) > now);
   const pendingFiles = Object.values(orders).filter(o => o && o.type === 'file' && ['pending', 'checking', 'timeout'].includes(o.status));
   const pendingKeys = Object.values(orders).filter(o => o && o.type !== 'file' && ['pending', 'checking', 'timeout'].includes(o.status));
-  const activeFile = storeFiles[String(storeProduct.activeFileId || '')];
   const channels = settings.feedbackChannels || [];
   const lines = [
     '👑 <b>TRUNG TÂM ADMIN BOT</b>',
@@ -2072,18 +2186,22 @@ async function showAdmin(chatId) {
     `🔓 VIP đang hoạt động: <b>${activeVip.length}</b>`,
     `🧾 Đơn kho file chờ xử lý: <b>${pendingFiles.length}</b>`,
     `🔑 Đơn mua KEY chờ xử lý: <b>${pendingKeys.length}</b>`,
-    `📦 File đang bán: <b>${esc(activeFile ? activeFile.originalName : 'Chưa có file')}</b>`,
-    `💰 Giá kho file: <b>${fmt(STORE_PRICE)}đ</b>`,
-    `🔑 Mã CK KEY: <code>${esc(memoToken(KEY_TRANSFER_PREFIX, 1) || 'N')}-XXXXXX</code>`,
-    `📦 Mã CK FILE: <code>${esc(memoToken(STORE_TRANSFER_PREFIX, 1) || 'M')}-XXXXXX</code>`,
+    `📦 Sản phẩm kho file: <b>${Object.keys(storeProducts).length}</b>`,
+    `💰 Giá mặc định cho sản phẩm mới: <b>${fmt(STORE_PRICE)}đ</b>`,
+    `🔑 Mã CK KEY: <code>${esc(memoToken(KEY_TRANSFER_PREFIX, 1) || 'N')}XXXXXX</code>`,
+    `📦 Mã CK FILE: <code>${esc(memoToken(STORE_TRANSFER_PREFIX, 1) || 'M')}XXXXXX</code>`,
     `🏦 Nhóm TPBank: <code>${esc(settings.bankGroupId || 'Chưa cài')}</code>`,
     `⭐ Kênh feedback: <b>${channels.length}</b>`,
     '━━━━━━━━━━━━━━━━━━',
     '<b>⚙️ LỆNH CẤU HÌNH</b>',
-    '• Gửi tài liệu kèm caption <code>/setfile</code> để thay file đang bán',
-    '• <code>/setfileprice 10000</code> • đổi giá kho file',
-    '• <code>/setfilememo M</code> • đặt mã đầu đơn FILE (M-XXXXXX)',
-    '• <code>/setkeyprefix N</code> • đặt mã đầu đơn KEY (N-XXXXXX)',
+    '• <code>/fileadd Tên | Giá | Loại | Mô tả</code> rồi gửi file để thêm sản phẩm',
+    '• <code>/filereplace ID</code> rồi gửi file để thay file của sản phẩm',
+    '• <code>/filetitle ID Tên</code>, <code>/filedesc ID Mô tả</code>',
+    '• <code>/fileprice ID Giá</code>, <code>/filetype ID Loại</code>',
+    '• <code>/filetoggle ID on/off</code>, <code>/filedelete ID</code>, <code>/filelist</code>',
+    '• <code>/setfileprice 10000</code> • đổi giá mặc định cho sản phẩm mới',
+    '• <code>/setfilememo M</code> • đặt mã đầu đơn FILE (MXXXXXX)',
+    '• <code>/setkeyprefix N</code> • đặt mã đầu đơn KEY (NXXXXXX)',
     '• <code>/setbankgroup -100...</code> / <code>/setbankgroup_here</code> • nhóm biến động số dư',
     '• <code>/bankstatus</code> • xem bot có nhận được tin VietQR gần nhất không',
     '• <code>/setbanksenders ID1,ID2</code> • whitelist nguồn gửi thông báo ngân hàng',
@@ -2144,8 +2262,27 @@ async function showPendingKeyOrders(chatId) {
 
 async function showAdminFiles(chatId) {
   if (!isAdmin(chatId)) return send(chatId, '⛔ Không có quyền admin.');
-  const file = storeFiles[String(storeProduct.activeFileId || '')];
-  return send(chatId, `📦 <b>QUẢN LÝ KHO FILE</b>\n\n📁 File đang bán: <b>${esc(file ? file.originalName : 'Chưa có')}</b>\n💰 Giá: <b>${fmt(STORE_PRICE)}đ</b>\n📝 Mã CK: <code>${esc(memoToken(STORE_TRANSFER_PREFIX, 1) || 'M')}-XXXXXX</code>\n\n📤 Để thêm hoặc thay file, gửi tài liệu trực tiếp cho bot trong chat riêng và ghi caption <code>/setfile</code>. File mới sẽ tự động được chọn làm file đang bán.`, kb([[btn('🧾 ĐƠN CHỜ DUYỆT', 'adm:orders', 'success')], [btn('◀️ ADMIN', 'adm:home', 'primary')]]));
+  const products = Object.values(storeProducts).filter(Boolean).sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
+  const lines = [`📦 <b>QUẢN LÝ KHO FILE</b>`, `\nTổng sản phẩm: <b>${products.length}</b> • Đang mở: <b>${products.filter(p => p.active !== false).length}</b>`, '', '<b>LỆNH QUẢN LÝ</b>', '<code>/fileadd Tên | Giá | Loại | Mô tả</code> rồi gửi file', '<code>/filereplace ID</code> rồi gửi file mới', '<code>/filetitle ID Tên mới</code>', '<code>/filedesc ID Mô tả mới</code>', '<code>/fileprice ID Giá</code>', '<code>/filetype ID Loại</code>', '<code>/filetoggle ID on/off</code>', '<code>/filedelete ID</code> (ẩn bán, không xóa đơn cũ)', '<code>/filelist</code>'];
+  if (!products.length) lines.push('', 'Chưa có sản phẩm. Dùng /fileadd để thêm.');
+  const rows = [[btn('➕ THÊM SẢN PHẨM', 'adm:file:add', 'success')]];
+  for (const product of products.slice(0, 20)) {
+    rows.push([btn((product.active === false ? '⏸ ' : '🟢 ') + shortStoreLabel(product), 'adm:file:product:' + product.id, 'primary')]);
+  }
+  rows.push([btn('🧾 ĐƠN KHO FILE', 'adm:orders', 'primary'), btn('◀️ ADMIN', 'adm:home', 'primary')]);
+  return send(chatId, lines.join('\n'), kb(rows));
+}
+
+async function showAdminFileProduct(chatId, productId) {
+  if (!isAdmin(chatId)) return send(chatId, '⛔ Không có quyền admin.');
+  const product = getStoreProduct(productId);
+  if (!product) return showAdminFiles(chatId);
+  const file = storeFiles[String(product.fileId || '')];
+  return send(chatId, `🛠 <b>CHỈNH SẢN PHẨM KHO FILE</b>\n\n🆔 ID: <code>${esc(product.id)}</code>\n📦 Tên: <b>${esc(product.title)}</b>\n💰 Giá: <b>${fmt(product.price)}đ</b>\n🗂 Loại: <b>${esc(product.category || 'Tài liệu số')}</b>\n📝 Mô tả: ${esc(product.description || 'Chưa có')}\n📁 File: <b>${esc(file ? file.originalName : 'Thiếu file')}</b>\n📌 Trạng thái: <b>${product.active === false ? 'ĐANG ẨN' : 'ĐANG BÁN'}</b>\n\nCó thể sửa bằng lệnh trong danh sách kho file.`, kb([
+    [btn(product.active === false ? '🟢 HIỆN SẢN PHẨM' : '⏸ ẨN SẢN PHẨM', 'adm:file:toggle:' + product.id, 'success')],
+    [btn('🔁 THAY FILE', 'adm:file:replace:' + product.id, 'primary'), btn('✏️ SỬA MÔ TẢ', 'adm:file:desc:' + product.id, 'primary')],
+    [btn('📦 DANH SÁCH', 'adm:files', 'primary'), btn('◀️ ADMIN', 'adm:home', 'primary')]
+  ]));
 }
 
 async function showFeedbackChannels(chatId) {
@@ -2249,12 +2386,10 @@ async function reviewFeedback(feedbackId, adminId, approve) {
 }
 
 /* ═══════════════ CALLBACKS & MESSAGES ═══════════════ */
-async function onCallback(cq) {
+async function handleCallbackAction(cq) {
   const chatId = cq.message.chat.id, msgId = cq.message.message_id;
   const from = cq.from, uid = uidOf(from), data = String(cq.data || '');
   await answerCb(cq.id);
-  // Keep the clicked message visible; remove only its old buttons so Back never leaves a blank chat.
-  await clearInlineKeyboard(chatId, msgId);
   if (settings.maintenance && !isAdmin(uid)) return send(chatId, `🛠 <b>BOT ĐANG BẢO TRÌ</b>\n\n${esc(settings.maintenanceMessage || 'Bot đang bảo trì, vui lòng quay lại sau.')}`);
 
   if (data === 'menu') { stopAuto(uid); delete sessions[uid]; return showUserMenu(chatId, from); }
@@ -2291,17 +2426,17 @@ async function onCallback(cq) {
   if (data === 'adm:orders' && isAdmin(uid)) return showPendingFileOrders(chatId);
   if (data === 'adm:keyorders' && isAdmin(uid)) return showPendingKeyOrders(chatId);
   if (data === 'adm:files' && isAdmin(uid)) return showAdminFiles(chatId);
+  if (data === 'adm:file:add' && isAdmin(uid)) { sessions[uid] = { await: 'admin_file', productDraft: { title: '', price: STORE_PRICE, category: 'Tài liệu số', description: '' } }; return send(chatId, '📤 Gửi file mới để tạo sản phẩm. Sau đó dùng /filetitle, /filedesc, /fileprice, /filetype để hoàn thiện. Hoặc bắt đầu bằng /fileadd Tên | Giá | Loại | Mô tả.'); }
+  if (data.startsWith('adm:file:product:') && isAdmin(uid)) return showAdminFileProduct(chatId, data.slice('adm:file:product:'.length));
+  if (data.startsWith('adm:file:toggle:') && isAdmin(uid)) { const product = getStoreProduct(data.slice('adm:file:toggle:'.length)); if (!product) return showAdminFiles(chatId); product.active = product.active === false; saveStoreProducts(); return showAdminFileProduct(chatId, product.id); }
+  if (data.startsWith('adm:file:replace:') && isAdmin(uid)) { const id = data.slice('adm:file:replace:'.length); if (!getStoreProduct(id)) return showAdminFiles(chatId); sessions[uid] = { await: 'admin_file', replaceProductId: id }; return send(chatId, `🔁 Gửi file mới để thay file cho sản phẩm <code>${esc(id)}</code>. Tên, mô tả và giá hiện tại được giữ nguyên.`); }
+  if (data.startsWith('adm:file:desc:') && isAdmin(uid)) { const id = data.slice('adm:file:desc:'.length); if (!getStoreProduct(id)) return showAdminFiles(chatId); sessions[uid] = { await: 'admin_file_desc', productId: id }; return send(chatId, '✏️ Gửi mô tả mới cho sản phẩm.'); }
   if (data === 'adm:feedbackchannels' && isAdmin(uid)) return showFeedbackChannels(chatId);
   if (data === 'store:open') return showFileStore(chatId);
-  if (data === 'store:confirm') {
-    const active = storeFiles[String(storeProduct.activeFileId || '')];
-    if (!storeFileExists(active)) return showFileStore(chatId);
-    return send(chatId, `🛒 <b>XÁC NHẬN MUA KHO FILE</b>\n\n📦 ${esc(STORE_PRODUCT_NAME)}\n💰 Giá: <b>${fmt(STORE_PRICE)}đ</b>\n📝 Mã chuyển khoản: <code>M-XXXXXX</code>\n\nMã riêng cho đơn này. Thông tin người mua và thời gian được lưu trong hệ thống.`, kb([
-      [btn('✅ TẠO MÃ QR THANH TOÁN', 'store:buy', 'success')],
-      [btn('◀️ QUAY LẠI', 'store:open', 'danger')]
-    ]));
-  }
-  if (data === 'store:buy') return createFileOrder(chatId, uid);
+  if (data.startsWith('store:item:')) return showStoreProduct(chatId, data.slice('store:item:'.length));
+  if (data === 'store:confirm') { const first = activeStoreProducts()[0]; return first ? showStoreProduct(chatId, first.id) : showFileStore(chatId); }
+  if (data.startsWith('store:buy:')) return createFileOrder(chatId, uid, data.slice('store:buy:'.length));
+  if (data === 'store:buy') return createFileOrder(chatId, uid, null);
   if (data.startsWith('store:done:')) return markFileOrderDone(chatId, uid, data.slice(11));
   if (data.startsWith('store:cancel:')) {
     const oid = data.slice(13), order = orders[oid];
@@ -2329,6 +2464,17 @@ async function onCallback(cq) {
     return send(chatId, (result.ok ? '✅ ' : '❌ ') + esc(result.message));
   }
   if (data === 'pred:brands') { stopAuto(uid); return showBrandMenu(chatId); }
+  if (data.startsWith('pred:back:')) { stopAuto(uid); return showTables(chatId, data.slice('pred:back:'.length), uid); }
+  if (data.startsWith('pred:refresh:')) {
+    const gameId = data.slice('pred:refresh:'.length);
+    const g = games.find(x => x.id === gameId && x.enabled !== false);
+    if (!g) return showBrandMenu(chatId);
+    await pollGame(g);
+    startAuto(uid, chatId, gameId);
+    const card = await pushPredCard(chatId, gameId, uid, true);
+    if (autoWatch[String(uid)] && card && card.ok && card.result && card.result.message_id) autoWatch[String(uid)].messageId = card.result.message_id;
+    return card;
+  }
   if (data.startsWith('predbrand:')) { stopAuto(uid); return showTables(chatId, data.slice(10), uid); }
   if (data.startsWith('predhist:')) return exportHistory(chatId, data.slice(9));
 
@@ -2456,7 +2602,7 @@ async function onCallback(cq) {
 
   if (data.startsWith('pred:')) {
     const gameId = data.slice(5);
-    if (gameId === 'brands') return;
+    if (gameId === 'brands' || gameId.startsWith('refresh:') || gameId.startsWith('back:')) return;
     if (gameId.startsWith('stop:')) { stopAuto(uid); return send(chatId, '⏹ Đã dừng cập nhật.'); }
     if (!isVip(uid)) return send(chatId, '🔒 <b>MUA KEY ĐÊ RỒI XEM</b>', kb([[btn('💳 THUÊ TOOL', 'rent:menu', 'primary'), btn('🔑 NHẬP KEY', 'key:input', 'success')], [btn('◀️ QUAY LẠI', 'menu', 'primary')]]));
     const g = games.find(x => x.id === gameId);
@@ -2473,6 +2619,22 @@ async function onCallback(cq) {
   if (data.startsWith('lc79:')) {
     return send(chatId, '⏹ Tính năng Auto cược LC79 đã được tắt.');
   }
+}
+
+// Send the new screen first. Only after Telegram confirms delivery do we remove the
+// button's source message; if delivery fails, keep the old screen and disable stale buttons.
+async function onCallback(cq) {
+  const chatId = cq && cq.message && cq.message.chat && cq.message.chat.id;
+  const messageId = cq && cq.message && cq.message.message_id;
+  const result = await handleCallbackAction(cq);
+  const newMessageId = result && result.ok && result.result && result.result.message_id;
+  if (chatId != null && messageId && newMessageId && Number(newMessageId) !== Number(messageId)) {
+    const removed = await delMsg(chatId, messageId);
+    if (!removed || removed.ok !== true) await clearInlineKeyboard(chatId, messageId);
+  } else if (chatId != null && messageId && (!result || result.ok !== true)) {
+    await clearInlineKeyboard(chatId, messageId);
+  }
+  return result;
 }
 
 async function onMessage(msg) {
@@ -2502,18 +2664,42 @@ async function onMessage(msg) {
   }
 
   ensureUser(uid, from);
-  if (isAdmin(uid) && msg.document && ((sessions[uid] && sessions[uid].await === 'admin_file') || /^\/setfile(?:@\w+)?$/i.test(String(msg.caption || '').trim()))) {
-    const doc = msg.document;
-    const id = crypto.randomBytes(8).toString('hex');
-    storeFiles[id] = {
-      id, telegramFileId: doc.file_id, originalName: String(doc.file_name || 'kho-file').slice(0, 180),
-      size: Number(doc.file_size || 0), mimeType: doc.mime_type || 'application/octet-stream', uploadedAt: Date.now(), source: 'telegram'
-    };
-    storeProduct.activeFileId = id;
-    if (sessions[uid] && sessions[uid].await === 'admin_file') delete sessions[uid];
-    saveStoreFiles(); saveStoreProduct();
-    return send(chatId, `✅ <b>ĐÃ CẬP NHẬT KHO FILE</b>\n\n📁 Tệp: <b>${esc(storeFiles[id].originalName)}</b>\n📏 Dung lượng: ${(storeFiles[id].size / (1024*1024)).toFixed(2)} MB\n💰 Giá bán: <b>${fmt(STORE_PRICE)}đ</b>\n\nFile này hiện đã được chọn làm sản phẩm đang bán.`, kb([[btn('📦 KIỂM TRA KHO FILE', 'adm:files', 'primary')], [btn('👑 ADMIN', 'adm:home', 'success')]]));
+  const adminUpload = isAdmin(uid) ? extractStoreUpload(msg) : null;
+  if (adminUpload && sessions[uid] && sessions[uid].await === 'admin_file') {
+    const upload = adminUpload, draft = sessions[uid].productDraft || {};
+    const fileId = crypto.randomBytes(8).toString('hex');
+    const media = upload.file;
+    storeFiles[fileId] = { id: fileId, telegramFileId: media.file_id, mediaType: upload.mediaType, originalName: String(upload.name || 'kho-file').slice(0, 180), size: Number(media.file_size || 0), mimeType: media.mime_type || (upload.mediaType === 'photo' ? 'image/jpeg' : 'application/octet-stream'), uploadedAt: Date.now(), source: 'telegram' };
+    let product;
+    if (sessions[uid].replaceProductId && getStoreProduct(sessions[uid].replaceProductId)) {
+      product = getStoreProduct(sessions[uid].replaceProductId);
+      product.fileId = fileId; product.updatedAt = Date.now();
+    } else {
+      const id = makeStoreProductId();
+      product = storeProducts[id] = { id, title: String(draft.title || upload.name || 'Sản phẩm số').slice(0, 80), description: String(draft.description || 'Tệp kỹ thuật số. Bot sẽ gửi file sau khi thanh toán được xác nhận.').slice(0, 900), price: validStorePrice(draft.price) || STORE_PRICE, category: normalizeStoreCategory(draft.category), fileId, mediaType: upload.mediaType, active: true, createdAt: Date.now() };
+    }
+    product.mediaType = upload.mediaType;
+    storeProduct.activeFileId = fileId; // legacy compatibility only
+    delete sessions[uid];
+    saveStoreFiles(); saveStoreProduct(); saveStoreProducts();
+    return send(chatId, `✅ <b>ĐÃ LƯU SẢN PHẨM KHO FILE</b>\n\n🆔 ID: <code>${esc(product.id)}</code>\n📦 Tên: <b>${esc(product.title)}</b>\n📁 Tệp: <b>${esc(storeFiles[fileId].originalName)}</b>\n🗂 Loại: <b>${esc(product.category)}</b>\n💰 Giá: <b>${fmt(product.price)}đ</b>\n📝 Mô tả: ${esc(product.description)}`, kb([[btn('🛠 CHỈNH SẢN PHẨM', 'adm:file:product:' + product.id, 'primary')], [btn('📦 QUẢN LÝ KHO', 'adm:files', 'success')]]));
   }
+  if (isAdmin(uid) && msg.text && sessions[uid] && sessions[uid].await === 'admin_file_desc') {
+    const product = getStoreProduct(sessions[uid].productId); delete sessions[uid];
+    if (!product) return showAdminFiles(chatId);
+    product.description = text.slice(0, 900); saveStoreProducts();
+    return showAdminFileProduct(chatId, product.id);
+  }
+  if (isAdmin(uid) && adminUpload && /^\/setfile(?:@\w+)?$/i.test(String(msg.caption || '').trim())) {
+    sessions[uid] = { await: 'admin_file', productDraft: { title: adminUpload.name, price: STORE_PRICE, category: 'Tài liệu số', description: 'Tệp kỹ thuật số. Bot gửi file sau khi thanh toán được xác nhận.' } };
+    // Re-process this upload using the normal catalog flow.
+    const media = adminUpload.file, fileId = crypto.randomBytes(8).toString('hex'), id = makeStoreProductId();
+    storeFiles[fileId] = { id: fileId, telegramFileId: media.file_id, mediaType: adminUpload.mediaType, originalName: String(adminUpload.name || 'kho-file').slice(0,180), size: Number(media.file_size || 0), mimeType: media.mime_type || 'application/octet-stream', uploadedAt: Date.now(), source: 'telegram' };
+    storeProducts[id] = { id, title: String(adminUpload.name || 'Sản phẩm số').slice(0,80), description: 'Tệp kỹ thuật số. Bot gửi file sau khi thanh toán được xác nhận.', price: STORE_PRICE, category: 'Tài liệu số', fileId, mediaType: adminUpload.mediaType, active: true, createdAt: Date.now() };
+    storeProduct.activeFileId = fileId; delete sessions[uid]; saveStoreFiles(); saveStoreProduct(); saveStoreProducts();
+    return send(chatId, `✅ Đã thêm sản phẩm <b>${esc(storeProducts[id].title)}</b>, ID <code>${id}</code>.`, kb([[btn('🛠 CHỈNH SẢN PHẨM', 'adm:file:product:' + id, 'primary')],[btn('📦 KHO FILE ADMIN','adm:files','success')]]));
+  }
+
 
   if (text === '/start' || text === '/menu') {
     saveUsers(); delete sessions[uid];
@@ -2607,8 +2793,36 @@ async function onMessage(msg) {
   }
 
   if (text === '/setfile' && isAdmin(uid)) {
-    sessions[uid] = { await: 'admin_file' };
-    return send(chatId, '📤 <b>GỬI FILE SẢN PHẨM</b>\n\nHãy gửi một tài liệu (Document) ngay trong chat này. File mới sẽ thay file đang bán trong KHO FILE.');
+    sessions[uid] = { await: 'admin_file', productDraft: { title: '', price: STORE_PRICE, category: 'Tài liệu số', description: '' } };
+    return send(chatId, '📤 <b>THÊM SẢN PHẨM KHO FILE</b>\nGửi tài liệu, ZIP, PDF, ảnh, video hoặc audio dưới dạng file/media. Sản phẩm mới sẽ được thêm vào danh sách, không ghi đè sản phẩm cũ.');
+  }
+  if (text.startsWith('/fileadd ') && isAdmin(uid)) {
+    const parts = text.slice(9).split('|').map(x => x.trim());
+    if (parts.length < 2 || !parts[0]) return send(chatId, 'Dùng: <code>/fileadd Tên | Giá | Loại | Mô tả</code>');
+    const price = validStorePrice(parts[1]);
+    if (!price) return send(chatId, 'Giá phải từ 1.000đ đến 100.000.000đ.');
+    sessions[uid] = { await: 'admin_file', productDraft: { title: parts[0].slice(0,80), price, category: normalizeStoreCategory(parts[2] || 'Tài liệu số'), description: String(parts.slice(3).join(' | ') || 'Tệp kỹ thuật số. Bot gửi file sau khi thanh toán được xác nhận.').slice(0,900) } };
+    return send(chatId, `📤 Gửi file cho sản phẩm <b>${esc(parts[0])}</b>\nGiá: <b>${fmt(price)}đ</b> • Loại: <b>${esc(normalizeStoreCategory(parts[2]))}</b>\nMô tả: ${esc(parts.slice(3).join(' | ') || 'Chưa nhập')}`);
+  }
+  if (text === '/filelist' && isAdmin(uid)) return showAdminFiles(chatId);
+  if (text.startsWith('/filereplace ') && isAdmin(uid)) {
+    const id = text.split(/\s+/)[1], product = getStoreProduct(id);
+    if (!product) return send(chatId, 'Không tìm thấy sản phẩm. Dùng /filelist.');
+    sessions[uid] = { await: 'admin_file', replaceProductId: id };
+    return send(chatId, `🔁 Gửi file mới để thay file cho <b>${esc(product.title)}</b>. Mô tả và giá được giữ nguyên.`);
+  }
+  if (/^\/file(title|desc|price|type|toggle|delete)\s+/i.test(text) && isAdmin(uid)) {
+    const [rawCommand, id, ...rest] = text.split(/\s+/); const command = rawCommand.toLowerCase(); const product = getStoreProduct(id);
+    if (!product) return send(chatId, 'Không tìm thấy sản phẩm. Dùng /filelist.');
+    const value = rest.join(' ').trim();
+    if (command === '/filetitle') { if (!value) return send(chatId, 'Dùng /filetitle ID Tên mới'); product.title = value.slice(0,80); }
+    else if (command === '/filedesc') { if (!value) return send(chatId, 'Dùng /filedesc ID Mô tả mới'); product.description = value.slice(0,900); }
+    else if (command === '/fileprice') { const price = validStorePrice(value); if (!price) return send(chatId, 'Giá từ 1.000đ đến 100.000.000đ.'); product.price = price; }
+    else if (command === '/filetype') { if (!value) return send(chatId, 'Dùng /filetype ID Loại'); product.category = normalizeStoreCategory(value); }
+    else if (command === '/filetoggle') { if (!['on','off'].includes(value.toLowerCase())) return send(chatId, 'Dùng /filetoggle ID on/off'); product.active = value.toLowerCase() === 'on'; }
+    else if (command === '/filedelete') { product.active = false; product.deletedAt = Date.now(); }
+    product.updatedAt = Date.now(); saveStoreProducts();
+    return showAdminFileProduct(chatId, id);
   }
   if (text.startsWith('/setfileprice ') && isAdmin(uid)) {
     const price = Number(text.split(/\s+/)[1]);
@@ -2620,13 +2834,13 @@ async function onMessage(msg) {
     const prefix = memoToken(text.slice('/setfilememo '.length), 12);
     if (!prefix) return send(chatId, '⚠️ Vui lòng nhập tiền tố. Ví dụ <code>/setfilememo M</code>');
     STORE_TRANSFER_PREFIX = prefix; settings.storeTransferPrefix = prefix; saveSettings();
-    return send(chatId, `✅ Mã đầu đơn FILE: <code>${esc(prefix)}</code>. Mỗi đơn dùng dạng <code>${esc(memoToken(prefix, 1) || 'M')}-XXXXXX</code>; thời gian được lưu trong đơn.`);
+    return send(chatId, `✅ Mã đầu đơn FILE: <code>${esc(prefix)}</code>. Mỗi đơn dùng dạng <code>${esc(memoToken(prefix, 1) || 'M')}XXXXXX</code>; thời gian được lưu trong đơn.`);
   }
   if (text.startsWith('/setkeyprefix ') && isAdmin(uid)) {
     const prefix = memoToken(text.slice('/setkeyprefix '.length), 12);
     if (!prefix) return send(chatId, '⚠️ Vui lòng nhập tiền tố. Ví dụ <code>/setkeyprefix N</code>');
     KEY_TRANSFER_PREFIX = prefix; settings.keyTransferPrefix = prefix; saveSettings();
-    return send(chatId, `✅ Mã đầu đơn KEY: <code>${esc(prefix)}</code>. Mỗi đơn dùng dạng <code>${esc(memoToken(prefix, 1) || 'N')}-XXXXXX</code>; username/ID được lưu riêng trong đơn.`);
+    return send(chatId, `✅ Mã đầu đơn KEY: <code>${esc(prefix)}</code>. Mỗi đơn dùng dạng <code>${esc(memoToken(prefix, 1) || 'N')}XXXXXX</code>; username/ID được lưu riêng trong đơn.`);
   }
   if (text.startsWith('/setproduct ') && isAdmin(uid)) {
     const name = text.slice('/setproduct '.length).trim().slice(0, 80);
@@ -2942,7 +3156,7 @@ app.post('/api/data', requireIndexAuth, (req, res) => {
   // Phiên đang chờ (có dự đoán, chưa có KQ)
   if (eng.pending && feed.lastLive) {
     const predTxt = eng.pending === 'T' ? 'Tài' : 'Xỉu';
-    rows.push({ isNext: true, game: g.brandLabel, phien: String(Number(feed.lastLive.session) + 1), time: nowVN(), prediction: predTxt, result: 'Chờ...', verify: '...' });
+    rows.push({ isNext: true, game: g.brandLabel, phien: nextSessionLabel(feed.lastLive.session), time: nowVN(), prediction: predTxt, result: 'Chờ...', verify: '...' });
   }
   // Chỉ lấy phiên đã có dự đoán + đã có kết quả ĐÚNG/SAI
   const logs = eng.log
@@ -2961,13 +3175,15 @@ app.post('/api/data', requireIndexAuth, (req, res) => {
     current: {
       prediction: p.side === 'T' ? 'TÀI' : p.side === 'X' ? 'XỈU' : 'ĐANG LẤY DỮ LIỆU',
       previousRound: getPreviousRoundSummary(feed.lastLive),
-      session: feed.lastLive ? String(Number(feed.lastLive.session) + 1) : 'Chưa có',
+      session: feed.lastLive ? nextSessionLabel(feed.lastLive.session) : 'Chưa có',
+      isSicbo: String(apiId).startsWith('sicbo_'),
+      sicboSums: p.dicePrediction && Array.isArray(p.dicePrediction.topSums) ? p.dicePrediction.topSums.slice(0, 3) : [],
       updatedAt: nowVN()
     }
   });
 });
 
-app.get('/health', (_, res) => res.json({ ok: true, bot: 'TOOL TX BY FEE v16.8.4 COMPACT SICBO CARD UPDATES', games: games.length, indexPasswordConfigured: Boolean(INDEX_PASSWORD), bankGroupId: String(settings.bankGroupId || '') }));
+app.get('/health', (_, res) => res.json({ ok: true, bot: 'TOOL TX BY FEE v16.8.6 CLEAN MEMO / FRESH CARDS / BANK HARDENING', games: games.length, indexPasswordConfigured: Boolean(INDEX_PASSWORD), bankGroupId: String(settings.bankGroupId || '') }));
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log('🔥 TOOL TX BY FEE running on port', PORT, '| data:', DATA, '| index password:', Boolean(INDEX_PASSWORD));
@@ -2978,7 +3194,7 @@ let offset = 0;
 async function loop() {
   if (!BOT_TOKEN) return;
   try {
-    const j = await tg('getUpdates', { offset, timeout: 25, allowed_updates: ['message', 'callback_query'] });
+    const j = await tg('getUpdates', { offset, timeout: 25, allowed_updates: ['message', 'edited_message', 'channel_post', 'edited_channel_post', 'callback_query'] });
     if (j && j.ok === false) {
       console.error('[TELEGRAM POLLING]', j.description || 'getUpdates failed');
       if (/webhook|409/i.test(String(j.description || ''))) {
@@ -2991,7 +3207,7 @@ async function loop() {
         offset = u.update_id + 1;
         try {
           if (u.callback_query) await onCallback(u.callback_query);
-          else if (u.message) await onMessage(u.message);
+          else if (u.message || u.edited_message || u.channel_post || u.edited_channel_post) await onMessage(u.message || u.edited_message || u.channel_post || u.edited_channel_post);
         } catch (e) { console.error('[TELEGRAM UPDATE]', e); }
       }
     }
