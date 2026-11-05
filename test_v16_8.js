@@ -75,13 +75,16 @@ const normalTriple = context.getPreviousRoundSummary({ session: 'n1', side: 'X',
 if (normalTriple.result !== 'XỈU') throw new Error('Non-Sicbo triple must use the game result side');
 const missingPrevious = context.getPreviousRoundSummary(null);
 if (missingPrevious.result !== 'Chưa có' || missingPrevious.diceValues.length !== 0) throw new Error('Missing previous round summary failed');
-const priorEngine = { log: [{ session: '12345', ok: true }, { session: '12346', ok: false }] };
-if (!context.getPreviousPredictionReview(priorEngine, previousTai, false).includes('ĐÚNG CỬA')) throw new Error('Previous correct-side label missing');
-if (!context.getPreviousPredictionReview(priorEngine, { session: '12346', result: 'XỈU' }, false).includes('SAI CỬA')) throw new Error('Previous wrong-side label missing');
-if (!context.getPreviousPredictionReview(priorEngine, previousTriple, true).includes('KHÔNG TÍNH')) throw new Error('Sicbo triple review must be void');
-const cardMockFeed = { lastPred: { side: 'T', dicePrediction: { topSums: [11, 13, 16] } }, engine: priorEngine, lastLive: { session: '12345', side: 'T', sum: 12, dice: [3, 4, 5] } };
+const priorEngine = { log: [{ session: '12345', ok: true, pred: 'T' }, { session: '12346', ok: false, pred: 'T' }], history: ['T', 'X', 'T', 'X'] };
+const revOk = context.getPreviousPredictionReview(priorEngine, previousTai, false);
+if (!revOk || !String(revOk.text || '').includes('ĐÚNG')) throw new Error('Previous correct-side label missing');
+const revWrong = context.getPreviousPredictionReview(priorEngine, { session: '12346', result: 'XỈU' }, false);
+if (!revWrong || !String(revWrong.text || '').includes('SAI')) throw new Error('Previous wrong-side label missing');
+const revTriple = context.getPreviousPredictionReview(priorEngine, previousTriple, true);
+if (!revTriple || !String(revTriple.text || '').includes('KHÔNG TÍNH')) throw new Error('Sicbo triple review must be void');
+const cardMockFeed = { lastPred: { side: 'T', conf: 57, dicePrediction: { topSums: [11, 13, 16] } }, engine: priorEngine, lastLive: { session: '12345', side: 'T', sum: 12, dice: [3, 4, 5] } };
 const cardText = context.renderPredictionCardText({ id: 'sicbo_sunwin', brandLabel: 'SUNWIN', variant: 'Sicbo' }, cardMockFeed).text;
-if (!cardText.includes('🎲 3') || !cardText.includes('ĐÚNG CỬA') || !cardText.includes('BA TỔNG DỄ XUẤT HIỆN') || /⚀|⚁|⚂|⚃|⚄|⚅/.test(cardText)) throw new Error('Professional dice card content / status review failed');
+if (!cardText.includes('Live update') || !cardText.includes('Độ tin') || !cardText.includes('Cầu') || !cardText.includes('Phiên trước') || !cardText.includes('Ba tổng dễ xuất hiện') || /⚀|⚁|⚂|⚃|⚄|⚅/.test(cardText)) throw new Error('Professional dice card content / status review failed');
 
 // Every configured game receives its own adaptive engine and rolling model score.
 const allGameIds = context.DEFAULT_GAMES.map(g => g.id);
@@ -169,10 +172,10 @@ if (!callbackSource.includes('pred:refresh:') || !callbackSource.includes('pred:
 const wrapperSource = extract('async function onCallback(cq) {', '\nasync function onMessage(msg) {');
 if (!wrapperSource.includes('await handleCallbackAction(cq)') || wrapperSource.indexOf('await handleCallbackAction(cq)') > wrapperSource.indexOf('await delMsg(chatId, messageId)')) throw new Error('Telegram must send the replacement screen before deleting the old one');
 if (!source.includes('send(chatId, card.text') || !source.includes('await delMsg(chatId, replaceMessageId)') || source.includes("tg('editMessageText'")) throw new Error('Auto card must send a new message then delete old card without editing');
-if (!source.includes('Object.values(autoWatch).map(w => w && w.gameId)') || source.includes('state.timer = setInterval')) throw new Error('Auto polling must be limited to active game watchers');
-if (!source.includes('if (!f || !g.enabled || !g.url || f.polling) return;') || !source.includes('finally { f.polling = false; }')) throw new Error('Game API polling lock missing');
+if (!source.includes('poll ALL enabled games') || source.includes('state.timer = setInterval')) throw new Error('Background 24/7 polling for all enabled games missing');
+if (!source.includes('f.polling = true') || !source.includes('f.polling = false') || !source.includes('pollingSince')) throw new Error('Game API polling lock missing');
 if (!source.includes("stopAuto(uid);\n    saveUsers(); delete sessions[uid];")) throw new Error('Text /menu and /start must stop game auto updates');
-if (!source.includes("[btn('🔄 LÀM MỚI', 'pred:refresh:' + gameId, 'success'), btn('◀️ QUAY LẠI', 'pred:back:' + g.brand, 'primary'), btn('🏠 VỀ MENU', 'menu', 'danger')]") || !source.includes('🎲 ${n}')) throw new Error('Prediction card buttons or native dice icon format missing');
+if (!source.includes("btn('🔄 LÀM MỚI', 'pred:refresh:' + gameId, 'success')") || !source.includes("btn('⏹ DỪNG', 'pred:stop:' + gameId, 'danger')") || !source.includes('🎲 ${n}')) throw new Error('Prediction card buttons or native dice icon format missing');
 if (!source.includes("app.post('/api/login'") || !source.includes("app.post('/api/logout'") || !source.includes('requireIndexAuth')) throw new Error('Dashboard password gate is missing');
 if (!source.includes("tg('setMessageReaction'")) throw new Error('Random reactions are not wired');
 for (const feature of ['showAdminOperations','showAdminGames','showAdminSettings','showAdminPackages','showAdminUsers','showAdminBank','scheduleGamePolling']) {
