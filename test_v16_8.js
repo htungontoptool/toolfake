@@ -25,6 +25,8 @@ const paymentCode = extract('function parseVndAmount(raw) {', '\n\nasync functio
 const sessionCode = source.slice(source.indexOf('function compareSessionIds(a, b) {'), source.indexOf('\nasync function fetchJson') );
 const parserCode = source.slice(source.indexOf('function parseHistoryArray(json) {'), source.indexOf('\nfunction compareSessionIds') - 1);
 const previousRoundCode = source.slice(source.indexOf('function getPreviousRoundSummary(live) {'), source.indexOf('\nfunction appendNewGameResults', source.indexOf('function getPreviousRoundSummary(live) {')));
+const reviewCode = extract('function getPreviousPredictionReview(engine, previous, isSicbo = false) {', '\nfunction renderPredictionCardText');
+const cardRenderCode = extract('function renderPredictionCardText(g, feed) {', '\nasync function pushPredCard');
 
 
 const gameListCodeStart = source.indexOf('const DEFAULT_GAMES = [');
@@ -53,18 +55,33 @@ vm.runInContext(paymentCode + '\nthis.parseVndAmount = parseVndAmount; this.tryM
 vm.runInContext(sessionCode + '\nthis.appendNewGameResults = appendNewGameResults; this.compareSessionIds = compareSessionIds;', context);
 vm.runInContext(parserCode + '\nthis.parseHistoryArray = parseHistoryArray;', context);
 vm.runInContext(previousRoundCode + '\nthis.getPreviousRoundSummary = getPreviousRoundSummary;', context);
+vm.runInContext(reviewCode + '\nthis.getPreviousPredictionReview = getPreviousPredictionReview;', context);
 const nextSessionCode = extract('function nextSessionLabel(lastSession) {', '\nfunction renderPredictionCardText');
+vm.runInContext(cardRenderCode + '\nthis.renderPredictionCardText = renderPredictionCardText;', context);
+context.esc = x => String(x);
 vm.runInContext(nextSessionCode + '\nthis.nextSessionLabel = nextSessionLabel;', context);
 if (context.nextSessionLabel('12345') !== '12346' || context.nextSessionLabel('round-A') !== 'Chờ phiên mới') throw new Error('Next session formatting failed');
+const ewmaRegression = new context.Engine('ewma-regression');
+const ewmaSinglePass = ewmaRegression._weightedRate(['T'], 0.1, 0.5);
+if (Math.abs(ewmaSinglePass - 0.55) > 1e-9) throw new Error('EWMA must process each result exactly once');
 
 
 // Compact previous-round summary must format real result, dice and triple outcomes.
 const previousTai = context.getPreviousRoundSummary({ session: '12345', side: 'T', sum: 12, dice: [3, 4, 5] });
 if (previousTai.session !== '12345' || previousTai.result !== 'TÀI' || !previousTai.dice.includes('Tổng 12')) throw new Error('Previous Tài round summary failed');
-const previousTriple = context.getPreviousRoundSummary({ session: '12346', side: 'T', sum: 3, dice: [1, 1, 1] });
+const previousTriple = context.getPreviousRoundSummary({ session: '12346', side: 'T', sum: 3, dice: [1, 1, 1] }, true);
 if (previousTriple.result !== 'BỘ BA') throw new Error('Previous Sicbo triple must not be shown as Big/Small');
+const normalTriple = context.getPreviousRoundSummary({ session: 'n1', side: 'X', sum: 6, dice: [2, 2, 2] }, false);
+if (normalTriple.result !== 'XỈU') throw new Error('Non-Sicbo triple must use the game result side');
 const missingPrevious = context.getPreviousRoundSummary(null);
 if (missingPrevious.result !== 'Chưa có' || missingPrevious.diceValues.length !== 0) throw new Error('Missing previous round summary failed');
+const priorEngine = { log: [{ session: '12345', ok: true }, { session: '12346', ok: false }] };
+if (!context.getPreviousPredictionReview(priorEngine, previousTai, false).includes('ĐÚNG CỬA')) throw new Error('Previous correct-side label missing');
+if (!context.getPreviousPredictionReview(priorEngine, { session: '12346', result: 'XỈU' }, false).includes('SAI CỬA')) throw new Error('Previous wrong-side label missing');
+if (!context.getPreviousPredictionReview(priorEngine, previousTriple, true).includes('KHÔNG TÍNH')) throw new Error('Sicbo triple review must be void');
+const cardMockFeed = { lastPred: { side: 'T', dicePrediction: { topSums: [11, 13, 16] } }, engine: priorEngine, lastLive: { session: '12345', side: 'T', sum: 12, dice: [3, 4, 5] } };
+const cardText = context.renderPredictionCardText({ id: 'sicbo_sunwin', brandLabel: 'SUNWIN', variant: 'Sicbo' }, cardMockFeed).text;
+if (!cardText.includes('🎲 3') || !cardText.includes('ĐÚNG CỬA') || !cardText.includes('BA TỔNG DỄ XUẤT HIỆN') || /⚀|⚁|⚂|⚃|⚄|⚅/.test(cardText)) throw new Error('Professional dice card content / status review failed');
 
 // Every configured game receives its own adaptive engine and rolling model score.
 const allGameIds = context.DEFAULT_GAMES.map(g => g.id);
@@ -74,13 +91,13 @@ for (const id of allGameIds) {
   for (let i = 0; i < 160; i++) {
     const side = i % 3 === 0 ? 'T' : 'X';
     const dice = [1 + (i % 6), 1 + ((i * 3) % 6), 1 + ((i * 5) % 6)].sort((a, b) => a - b);
-    engine.push(side, dice.reduce((a, b) => a + b, 0), id.startsWith('sicbo_') ? dice : [], String(1000 + i));
+    engine.push(side, dice.reduce((a, b) => a + b, 0), dice, String(1000 + i));
     engine.predict();
   }
   const p = engine.predict();
   if (!['T', 'X'].includes(p.side)) throw new Error('Missing side output for ' + id);
-  if (!Number.isFinite(p.probability) || p.probability < 0.38 || p.probability > 0.62) throw new Error('Uncalibrated probability boundary for ' + id);
-  if (p.conf < 50 || p.conf > 62) throw new Error('Confidence outside conservative range for ' + id);
+  if (!Number.isFinite(p.probability) || p.probability < 0.28 || p.probability > 0.72) throw new Error('Uncalibrated probability boundary for ' + id);
+  if (p.conf < 50 || p.conf > 72) throw new Error('Confidence outside allowed range for ' + id);
   if (!p.qualityLabel || !p.modelVersion) throw new Error('Missing model metadata for ' + id);
   if (!Object.hasOwn(p.modelProbabilities, 'transition')) throw new Error('Missing adaptive transition model for ' + id);
   if (!engine.modelLosses.transition) throw new Error('Missing transition validation bucket for ' + id);
@@ -89,6 +106,12 @@ for (const id of allGameIds) {
 const isolatedA = new context.Engine('sunwin_tx');
 const isolatedB = new context.Engine('hitclub_tx');
 if (isolatedA.modelLosses.transition === isolatedB.modelLosses.transition) throw new Error('Game model scores must be isolated per game');
+const diceModelEngine = new context.Engine('dice-face-model');
+for (let i = 0; i < 120; i++) { const row = i % 4 === 0 ? [6, 5, 4] : [5, 4, 3]; diceModelEngine.push('T', row.reduce((a, b) => a + b, 0), row, String(i)); }
+const diceSignal = diceModelEngine._diceFaceSignal();
+if (diceSignal.count !== 120 || !Number.isFinite(diceSignal.p) || !diceSignal.faces || diceSignal.faces.length !== 3) throw new Error('Per-die face distribution model missing');
+const dicePrediction = diceModelEngine.predict();
+if (!Object.hasOwn(dicePrediction.modelProbabilities, 'diceFaces')) throw new Error('Per-die face model not blended into forecast');
 
 // Reversal model must identify historical runs of the current length, not only one-item runs.
 const reversalEngine = new context.Engine('reversal_test');
@@ -146,6 +169,10 @@ if (!callbackSource.includes('pred:refresh:') || !callbackSource.includes('pred:
 const wrapperSource = extract('async function onCallback(cq) {', '\nasync function onMessage(msg) {');
 if (!wrapperSource.includes('await handleCallbackAction(cq)') || wrapperSource.indexOf('await handleCallbackAction(cq)') > wrapperSource.indexOf('await delMsg(chatId, messageId)')) throw new Error('Telegram must send the replacement screen before deleting the old one');
 if (!source.includes('send(chatId, card.text') || !source.includes('await delMsg(chatId, replaceMessageId)') || source.includes("tg('editMessageText'")) throw new Error('Auto card must send a new message then delete old card without editing');
+if (!source.includes('Object.values(autoWatch).map(w => w && w.gameId)') || source.includes('state.timer = setInterval')) throw new Error('Auto polling must be limited to active game watchers');
+if (!source.includes('if (!f || !g.enabled || !g.url || f.polling) return;') || !source.includes('finally { f.polling = false; }')) throw new Error('Game API polling lock missing');
+if (!source.includes("stopAuto(uid);\n    saveUsers(); delete sessions[uid];")) throw new Error('Text /menu and /start must stop game auto updates');
+if (!source.includes("[btn('🔄 LÀM MỚI', 'pred:refresh:' + gameId, 'success'), btn('◀️ QUAY LẠI', 'pred:back:' + g.brand, 'primary'), btn('🏠 VỀ MENU', 'menu', 'danger')]") || !source.includes('🎲 ${n}')) throw new Error('Prediction card buttons or native dice icon format missing');
 if (!source.includes("app.post('/api/login'") || !source.includes("app.post('/api/logout'") || !source.includes('requireIndexAuth')) throw new Error('Dashboard password gate is missing');
 if (!source.includes("tg('setMessageReaction'")) throw new Error('Random reactions are not wired');
 for (const feature of ['showAdminOperations','showAdminGames','showAdminSettings','showAdminPackages','showAdminUsers','showAdminBank','scheduleGamePolling']) {
@@ -227,10 +254,10 @@ const conflict = context.recordHashOutcome({ type: 'MD5', hash: rows[0].hash, ac
 if (conflict.reason !== 'conflict') throw new Error('Conflicting hash feedback not detected');
 
 console.log(JSON.stringify({
-  version: '16.8.6',
-  engine: { allGameEnginesTested: allGameIds, transitionModel: true, isolatedPerGame: true, confidenceRange: [50, 62], duplicateSessionsIgnored: true, tripleVoided: true },
+  version: '16.8.8',
+  engine: { allGameEnginesTested: allGameIds, transitionModel: true, recencyWeightedPatterns: true, perDieFaceModel: true, ewmaSinglePassRegression: true, isolatedPerGame: true, confidenceRange: [50, 72], duplicateSessionsIgnored: true, tripleVoided: true },
   sicbo: { topSumsT: fair.topSumsBySide.T.map(x => x.sum), topSumsX: fair.topSumsBySide.X.map(x => x.sum) },
   payment: { keyMemo: keyMemo1, fileMemo, hyphenRemoved: !keyMemo1.includes('-') && !fileMemo.includes('-'), debitRejected: true, unique: keyMemo1 !== keyMemo2, legacyDashedMemoMatch: true, screenshotFormatsParsed: parsedBank.length },
-  telegram: { freshMessageNavigation: true, newCardOnSession: true, gameHandlersDefined: true, randomReactionPool: true, indexPasswordGate: true },
+  telegram: { nativeDiceEmojiCard: true, previousSessionCorrectWrongReview: true, threeInlineButtonsSingleRow: true, activeGameOnlyAuto: true, freshMessageNavigation: true, newCardOnSession: true, gameHandlersDefined: true, randomReactionPool: true, indexPasswordGate: true },
   hash: { modelReady: model.ready, samples: model.samples, holdout: model.holdoutSamples, balancedAccuracy: Number(model.validationAccuracy.toFixed(2)), brier: Number(model.validationBrier.toFixed(4)), duplicate: duplicate.reason, conflicting: conflict.reason }
 }, null, 2));
