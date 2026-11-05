@@ -1,6 +1,6 @@
 /**
- * TOOL TX BY FEE • v16.9.1 PROFESSIONAL DICE CARDS + ACTIVE GAME AUTO
- * Empirical dice formulas applied to ALL games (strong weight) + Sunwin API
+ * TOOL TX BY FEE • v16.9.4 PROFESSIONAL DICE CARDS + ACTIVE GAME AUTO
+ * Sicbo live card + top-3 sums • 24/7 background poll all games • Sunwin API
  * Dynamic VietQR memos • Sicbo dice ensemble • Calibrated hash feedback
  */
 'use strict';
@@ -1288,7 +1288,7 @@ class Engine {
 
 /* ═══════════════ FEEDS & POLLING ═══════════════ */
 const FEEDS = {};
-for (const g of games) FEEDS[g.id] = { id: g.id, engine: new Engine(g.id), lastSession: null, seenSessions: new Set(), lastLive: null, lastError: null, lastPred: null, polling: false };
+for (const g of games) FEEDS[g.id] = { id: g.id, engine: new Engine(g.id), lastSession: null, seenSessions: new Set(), lastLive: null, lastError: null, lastPred: null, polling: false, pollingSince: 0 };
 
 function parseHistoryArray(json) {
   if (!json) return [];
@@ -1386,50 +1386,91 @@ function appendNewGameResults(feed, historyArr) {
   return added;
 }
 
-async function fetchJson(url) {
-  const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
-  if (!res.ok) throw new Error('HTTP ' + res.status);
-  return await res.json();
+async function fetchJson(url, timeoutMs = 12000) {
+  // Cache-bust single-result APIs (Sunwin etc.) so we never sit on a stale Phien
+  const sep = url.includes('?') ? '&' : '?';
+  const bust = url + sep + '_t=' + Date.now();
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(bust, {
+      headers: { 'User-Agent': 'Mozilla/5.0', 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' },
+      signal: ctrl.signal
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    return await res.json();
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function pollGame(g) {
   const f = FEEDS[g.id];
-  if (!f || !g.enabled || !g.url || f.polling) return;
+  if (!f || !g.enabled || !g.url) return false;
+  // Safety: if a previous poll hung, release the lock after 20s
+  if (f.polling) {
+    if (f.pollingSince && Date.now() - f.pollingSince > 20000) {
+      f.polling = false;
+      f.pollingSince = 0;
+    } else {
+      return false;
+    }
+  }
   f.polling = true;
+  f.pollingSince = Date.now();
+  let added = 0;
   try {
     const raw = await fetchJson(g.url);
     const historyArr = parseHistoryArray(raw);
     if (!historyArr.length) throw new Error('empty');
 
-    const added = appendNewGameResults(f, historyArr);
+    added = appendNewGameResults(f, historyArr);
+    // Always (re)predict when we got a new session OR we still have no forecast
     if (added > 0 || !f.lastPred) {
       f.lastPred = f.engine.predict();
     }
     f.lastError = null;
-  } catch (e) { f.lastError = e.message; }
-  finally { f.polling = false; }
+    return added > 0;
+  } catch (e) {
+    f.lastError = e.message || String(e);
+    return false;
+  } finally {
+    f.polling = false;
+    f.pollingSince = 0;
+  }
 }
 
 let gamePollTimer = null;
 let activeGamePollBusy = false;
 async function pollActiveGameWatchers() {
   if (activeGamePollBusy) return;
-  const activeIds = [...new Set(Object.values(autoWatch).map(w => w && w.gameId).filter(Boolean))];
-  if (!activeIds.length) return;
   activeGamePollBusy = true;
   try {
-    for (const gameId of activeIds) {
-      const g = games.find(x => x.id === gameId && x.enabled !== false);
+    // 24/7 background: poll ALL enabled games (not only those with active watchers)
+    const allEnabled = games.filter(g => g && g.enabled !== false && g.url);
+    for (const g of allEnabled) {
+      const gameId = g.id;
       const feed = FEEDS[gameId];
-      if (!g || !feed) continue;
-      await pollGame(g);
+      if (!feed) continue;
+
+      const beforeSession = feed.lastSession;
+      const gotNew = await pollGame(g);
       const after = feed.lastSession;
       if (!after) continue;
-      const watchers = Object.entries(autoWatch).filter(([, w]) => w && w.gameId === gameId && String(w.lastSession || '') !== String(after) && !w.busy);
+
+      // Push fresh cards only to users currently watching this game
+      const sessionChanged = String(beforeSession || '') !== String(after || '');
+      const watchers = Object.entries(autoWatch).filter(([, w]) => {
+        if (!w || w.gameId !== gameId || w.busy) return false;
+        if (String(w.lastSession || '') !== String(after)) return true;
+        if (gotNew && sessionChanged) return true;
+        return false;
+      });
+
       for (const [uid, state] of watchers) {
         state.busy = true;
         try {
-          const fresh = await pushPredCard(state.chatId, gameId, uid, true, state.messageId);
+          const fresh = await pushPredCard(state.chatId, gameId, uid, true, state.messageId, { skipPoll: true });
           if (fresh && fresh.ok && fresh.result && fresh.result.message_id) {
             state.messageId = fresh.result.message_id;
             state.lastSession = after;
@@ -1447,9 +1488,12 @@ async function pollActiveGameWatchers() {
 }
 function scheduleGamePolling() {
   if (gamePollTimer) clearInterval(gamePollTimer);
-  const interval = Math.max(5000, Math.min(120000, Number(settings.pollMs) || POLL_MS));
+  // 24/7 background polling for all enabled games
+  const interval = Math.max(3000, Math.min(120000, Number(settings.pollMs) || POLL_MS || 5000));
   gamePollTimer = setInterval(() => { pollActiveGameWatchers().catch(e => console.error('[ACTIVE GAME POLL]', e.message)); }, interval);
   gamePollTimer.unref?.();
+  // Kick once immediately so data is warm without waiting first interval
+  setTimeout(() => { pollActiveGameWatchers().catch(e => console.error('[BOOT POLL]', e.message)); }, 1500);
   return interval;
 }
 scheduleGamePolling();
@@ -1763,13 +1807,27 @@ function nextSessionLabel(lastSession) {
 }
 
 function getPreviousPredictionReview(engine, previous, isSicbo = false) {
-  if (!previous || !previous.session || previous.result === 'Chưa có') return '⏳ Chưa có phiên để đối chiếu';
-  if (isSicbo && previous.result === 'BỘ BA') return '⚪ BỘ BA • KHÔNG TÍNH CỬA';
+  if (!previous || !previous.session || previous.result === 'Chưa có') {
+    return { text: '⏳ Chưa có phiên để đối chiếu', predSide: null, ok: null };
+  }
+  if (isSicbo && previous.result === 'BỘ BA') {
+    return { text: '⚪ BỘ BA • KHÔNG TÍNH CỬA', predSide: null, ok: null };
+  }
   const row = engine && Array.isArray(engine.log)
     ? [...engine.log].reverse().find(item => String(item.session) === String(previous.session))
     : null;
-  if (!row) return '⏳ Chưa có dự đoán phiên trước';
-  return row.ok ? '✅ ĐÚNG CỬA' : '❌ SAI CỬA';
+  if (!row) return { text: '⏳ Chưa có dự đoán phiên trước', predSide: null, ok: null };
+  const predSide = row.pred === 'T' ? 'TÀI' : row.pred === 'X' ? 'XỈU' : null;
+  const text = row.ok ? '✅ ĐÚNG' : '❌ SAI';
+  return { text, predSide, ok: row.ok };
+}
+
+function buildCauVisual(engine, max = 16) {
+  const h = (engine && engine.history) || [];
+  const recent = h.slice(-max);
+  if (!recent.length) return '○'.repeat(8);
+  // ● = Tài, ○ = Xỉu
+  return recent.map(s => (s === 'T' ? '●' : '○')).join('');
 }
 
 function renderPredictionCardText(g, feed) {
@@ -1780,38 +1838,66 @@ function renderPredictionCardText(g, feed) {
   const isSicbo = String(g.id).startsWith('sicbo_');
   const previous = getPreviousRoundSummary(feed.lastLive, isSicbo);
   const review = getPreviousPredictionReview(feed.engine, previous, isSicbo);
+  const conf = Number(p.conf) || 50;
+  const cau = buildCauVisual(feed.engine, 16);
+  const botTitle = esc((typeof settings !== 'undefined' && settings.botTitle) || 'TOOL TX BY FEE');
+
+  // Dice line for previous: "4-5-2 · Tổng 11"
+  let diceLine = 'Chưa có dữ liệu';
+  if (previous.diceValues && previous.diceValues.length === 3) {
+    const faces = previous.diceValues.join('-');
+    const tong = previous.sum != null ? previous.sum : previous.diceValues.reduce((a, b) => a + b, 0);
+    diceLine = `${faces} · Tổng ${tong}`;
+  }
+
+  // Previous prediction line
+  let prevPredLine = '';
+  if (review.predSide) {
+    prevPredLine = `├ Dự: <b>${review.predSide}</b>\n`;
+  }
+  const kqLine = review.predSide
+    ? `├ KQ: <b>${esc(previous.result)}</b> ${review.text}\n`
+    : `├ KQ: <b>${esc(previous.result)}</b>\n`;
+
   const sums = isSicbo && p.dicePrediction && Array.isArray(p.dicePrediction.topSums)
     ? [...new Set(p.dicePrediction.topSums.map(Number).filter(n => Number.isInteger(n) && n >= 3 && n <= 18))].slice(0, 3)
-    : [];
+    : (Array.isArray(p.vi) ? p.vi.slice(0, 3) : []);
+  // Sicbo: always show top-3 sums line (fallback to vi / pickVi)
   const dicePredictionLine = isSicbo
-    ? `\n🎲 <b>BA TỔNG DỄ XUẤT HIỆN</b>  <b>${sums.length ? sums.join('  •  ') : 'Đang tính'}</b>`
+    ? `\n🎲 <b>Ba tổng dễ xuất hiện:</b> <b>${sums.length ? sums.join('  •  ') : 'Đang tính'}</b>`
     : '';
-  const text = `┏━━━━━━━━━━━━━━━━━━━━┓
-🎮 <b>${esc(g.brandLabel)}  •  ${esc(g.variant)}</b>
-┗━━━━━━━━━━━━━━━━━━━━┛
 
-🕘 <b>PHIÊN TRƯỚC</b>  <code>${esc(previous.session)}</code>
-🏁 <b>KẾT QUẢ</b>  <b>${esc(previous.result)}</b>
-🎲 <b>XÚC XẮC</b>
-${previous.dice}
-📋 <b>ĐỐI CHIẾU</b>  <b>${review}</b>
+  const text =
+`⚡ <b>Live update</b>
+═ ${botTitle} ═
+🎮 <b>${esc(g.brandLabel)} · ${esc(g.variant)}</b>
+────────────────
+📋 <b>Phiên trước:</b> #${esc(previous.session)}
+${prevPredLine}${kqLine}└ 🎲 Xúc xắc: ${esc(diceLine)}
+────────────────
+📦 <b>Phiên mới:</b> #${esc(nextSession)}
+🎯 <b>Dự đoán:</b> ${icon} <b>${side}</b>${dicePredictionLine}
+📊 <b>Độ tin:</b> ${conf}%
+📊 <b>Cầu:</b>
+${cau}`;
 
-━━━━━━━━━━━━━━━━━━━━
-⏭ <b>PHIÊN TIẾP THEO</b>  <code>${esc(nextSession)}</code>
-🎯 <b>DỰ ĐOÁN</b>  ${icon} <b>${side}</b>${dicePredictionLine}
-
-<i>Tự cập nhật khi có kết quả phiên mới</i>`;
-  return { text, previous, nextSession, side, isSicbo, sums, review };
+  return { text, previous, nextSession, side, isSicbo, sums, review: review.text, conf, cau };
 }
 
-async function pushPredCard(chatId, gameId, uid, force = false, replaceMessageId = null) {
+async function pushPredCard(chatId, gameId, uid, force = false, replaceMessageId = null, opts = {}) {
   const g = games.find(x => x.id === gameId && x.enabled !== false);
   const feed = FEEDS[gameId];
   if (!g || !feed) return send(chatId, '⚠️ Không tìm thấy bàn game hoặc bàn đang tắt.', kb([[btn('◀️ DANH SÁCH GAME', 'pred:brands', 'primary')]]));
-  if (!feed.lastPred) await pollGame(g);
+  // Always hit the API on force refresh so we never sit on a stale Phien
+  if (!opts.skipPoll && (force || !feed.lastPred)) {
+    await pollGame(g);
+  }
+  // Guarantee a prediction exists after poll
+  if (!feed.lastPred) feed.lastPred = feed.engine.predict();
   const card = renderPredictionCardText(g, feed);
   const markup = kb([
-    [btn('🔄 LÀM MỚI', 'pred:refresh:' + gameId, 'success'), btn('◀️ QUAY LẠI', 'pred:back:' + g.brand, 'primary'), btn('🏠 VỀ MENU', 'menu', 'danger')]
+    [btn('🔄 LÀM MỚI', 'pred:refresh:' + gameId, 'success'), btn('⏹ DỪNG', 'pred:stop:' + gameId, 'danger')],
+    [btn('🎲 ĐỔI GAME', 'pred:brands', 'primary'), btn('🏠 MENU', 'menu', 'primary')]
   ]);
   // New session => send a fresh card, then delete the previous card. Never edit in place.
   const sent = await send(chatId, card.text, { reply_markup: markup });
@@ -1825,8 +1911,8 @@ async function pushPredCard(chatId, gameId, uid, force = false, replaceMessageId
 function startAuto(uid, chatId, gameId) {
   stopAuto(uid);
   const key = String(uid);
-  // A watcher exists only while this user is inside this game. The shared
-  // scheduler polls only game IDs with at least one active watcher.
+  // User card watcher: scheduler polls ALL enabled games 24/7 in background;
+  // watchers only control who receives live Telegram cards.
   autoWatch[key] = {
     chatId, gameId,
     lastSession: FEEDS[gameId] && FEEDS[gameId].lastSession,
